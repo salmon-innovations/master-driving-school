@@ -1,0 +1,270 @@
+function About() {
+  const values = [
+    {
+      letter: 'M',
+      title: 'Mastery',
+      desc: 'The key to mastery is time and repetition. We must possess the knowledge needed to set plans in motion and have an understanding about the ins and outs of the business.',
+      icon: (
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+        </svg>
+      )
+    },
+    {
+      letter: 'A',
+      title: 'Accountability',
+      desc: 'Have an assistance that an individual will be evaluated on their performance or behavior related to something for which they are responsible.',
+      icon: (
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+        </svg>
+      )
+    },
+    {
+      letter: 'S',
+      title: 'Service',
+      desc: 'To deliver work in completing tasks for the benefit of our customers. It involves all things that our business does to ensure your satisfaction.',
+      icon: (
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
+        </svg>
+      )
+    },
+    {
+      letter: 'T',
+      title: 'Teamwork',
+      desc: 'Teamwork builds morale. Our team maintains a sense of camaraderie as we work toward our goal.',
+      icon: (
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+      )
+    },
+    {
+      letter: 'E',
+      title: 'Excellence',
+      desc: 'Our business operates to become the best it can possibly be. Our goal is to be the number one Driving School in the Philippines.',
+      icon: (
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+        </svg>
+      )
+    },
+    {
+      letter: 'R',
+      title: 'Responsibility',
+      desc: 'The authority and responsibility go side by side. It is our duty to perform tasks, functions and activities assigned to us positively.',
+      icon: (
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      )
+    }
+  ]
+
+  const reasons = [
+    'LTO accredited',
+    'Professional, knowledgeable and accommodating driving instructors and staff.',
+    'Safe and comfortable learning environment',
+    'Comprehensive teaching materials',
+    'Reasonable price'
+  ]
+
+  return (
+    <div className="bg-white min-h-screen">
+      {/* Hero Section - About Us */}
+      <section className="relative py-20 lg:py-32 overflow-hidden bg-[#2157da]">
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute top-0 left-0 w-96 h-96 bg-white rounded-full blur-3xl transform -translate-x-1/2 -translate-y-1/2"></div>
+          <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-white rounded-full blur-3xl transform translate-x-1/3 translate-y-1/3"></div>
+        </div>
+
+        <div className="container mx-auto px-4 relative z-10">
+          <div className="flex flex-col lg:flex-row items-center gap-12 lg:gap-20">
+            <div className="lg:w-1/2 text-white" data-aos="fade-right">
+              <h1 className="text-5xl lg:text-7xl font-extrabold mb-8 leading-tight">
+                ABOUT US
+              </h1>
+              <p className="text-xl lg:text-2xl opacity-90 leading-relaxed mb-8">
+                Being in the vehicle business industry for over ten years and counting, the founders of <span className="font-bold underline">Master Driving School</span> have always wanted a safer and less-stressful road/driving experience for everyone.
+              </p>
+              <div className="p-6 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20">
+                <p className="text-lg opacity-100 italic">
+                  "At Master Driving School, we make sure that all our students experience the best possible 'vehicle/driving education' from our well-trained, knowledgeable, and professional driving instructors."
+                </p>
+              </div>
+            </div>
+            <div className="lg:w-1/2" data-aos="fade-left">
+              <div className="relative">
+                <div className="w-full aspect-square rounded-3xl overflow-hidden shadow-2xl border-4 border-white/30 transform rotate-3">
+                  <img 
+                    src="/images/logo.png" 
+                    alt="Master Driving School" 
+                    className="w-full h-full object-contain bg-white p-12"
+                  />
+                </div>
+                {/* Decorative circles from brochure */}
+                <div className="absolute -top-10 -right-10 w-24 h-24 border-4 border-yellow-400 rounded-full animate-pulse"></div>
+                <div className="absolute -bottom-5 -left-5 w-16 h-16 bg-yellow-400 rounded-full"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Mission & Vision Section */}
+      <section className="py-20 bg-gray-50">
+        <div className="container mx-auto px-4">
+          <div className="grid md:grid-cols-2 gap-8">
+            <div className="bg-white p-10 rounded-3xl shadow-xl border-t-8 border-[#2157da]" data-aos="fade-up">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="p-3 bg-blue-100 rounded-2xl text-[#2157da]">
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <h2 className="text-3xl font-bold text-gray-900 uppercase">Our Mission</h2>
+              </div>
+              <p className="text-lg text-gray-700 leading-relaxed">
+                Our mission is to help lessen vehicle accidents by providing our students with the best training possible to become responsible and safe drivers.
+              </p>
+            </div>
+
+            <div className="bg-white p-10 rounded-3xl shadow-xl border-t-8 border-yellow-400" data-aos="fade-up" data-aos-delay="200">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="p-3 bg-yellow-50 rounded-2xl text-yellow-600">
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                </div>
+                <h2 className="text-3xl font-bold text-gray-900 uppercase">Our Vision</h2>
+              </div>
+              <p className="text-lg text-gray-700 leading-relaxed">
+                It is our vision to be the number one Driving School in the Philippines in terms of number of branches and enrollees.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Our Values - MASTER */}
+      <section className="py-24 bg-white overflow-hidden">
+        <div className="container mx-auto px-4">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl lg:text-5xl font-extrabold text-[#2157da] mb-4 uppercase tracking-widest" data-aos="fade-down">
+              OUR VALUES
+            </h2>
+            <div className="h-2 w-32 bg-yellow-400 mx-auto rounded-full"></div>
+            <p className="mt-6 text-gray-600 max-w-2xl mx-auto">
+              Being aware of these values is important because they guide our beliefs, attitudes, and behavior in Master Driving School.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 relative">
+            {values.map((v, idx) => (
+              <div 
+                key={v.letter} 
+                className="group p-8 bg-white border border-gray-100 rounded-3xl shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-2 relative overflow-hidden"
+                data-aos="fade-up"
+                data-aos-delay={idx * 100}
+              >
+                <div className="absolute -top-4 -right-4 text-9xl font-black text-gray-50 opacity-50 group-hover:text-blue-50 group-hover:scale-110 transition-all duration-500 pointer-events-none">
+                  {v.letter}
+                </div>
+                <div className="relative z-10">
+                  <div className="w-16 h-16 bg-[#2157da] text-white rounded-2xl flex items-center justify-center mb-6 shadow-blue-200 shadow-xl group-hover:scale-110 transition-transform">
+                    {v.icon}
+                  </div>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-4">
+                    <span className="text-[#2157da] text-3xl">{v.letter}</span>{v.title.slice(1)}
+                  </h3>
+                  <p className="text-gray-600 leading-relaxed italic">
+                    {v.desc}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-16 text-center" data-aos="fade-up">
+            <p className="inline-block px-8 py-4 bg-gray-900 text-white rounded-2xl text-lg font-medium shadow-xl">
+              These sets of guiding principles and fundamental beliefs help us to function together as a team and work towards our common goal.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Why Choose Us Section */}
+      <section className="py-24 bg-[#2157da] text-white relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-1/3 h-full bg-white/5 skew-x-12 translate-x-1/2"></div>
+        <div className="container mx-auto px-4 relative z-10">
+          <div className="flex flex-col lg:flex-row items-center gap-12">
+            <div className="lg:w-1/2" data-aos="fade-right">
+              <h2 className="text-4xl lg:text-5xl font-bold mb-8 leading-tight">
+                Why choose <br />Master Driving School?
+              </h2>
+              <div className="space-y-6">
+                {reasons.map((reason, idx) => (
+                  <div key={idx} className="flex items-center gap-4" data-aos="fade-up" data-aos-delay={idx * 100}>
+                    <div className="w-8 h-8 bg-yellow-400 rounded-full flex-shrink-0 flex items-center justify-center text-gray-900">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                    </div>
+                    <p className="text-xl opacity-90">{reason}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="lg:w-1/2 grid grid-cols-2 gap-4" data-aos="zoom-in">
+              {/* Image Grid placeholders for a dynamic look */}
+              <div className="aspect-video bg-white/10 rounded-2xl mt-8"></div>
+              <div className="aspect-video bg-white/20 rounded-2xl"></div>
+              <div className="aspect-video bg-white/20 rounded-2xl"></div>
+              <div className="aspect-video bg-white/10 rounded-2xl -mt-8"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer Info / Contact Call to Action */}
+      <section className="py-20 bg-white">
+        <div className="container mx-auto px-4 max-w-4xl text-center">
+          <div className="bg-gray-50 p-12 rounded-[3rem] shadow-2xl" data-aos="zoom-in">
+            <h2 className="text-3xl font-bold text-[#2157da] mb-8">Ready to Master the Road?</h2>
+            <div className="grid md:grid-cols-2 gap-8 text-left mb-10">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-md text-[#2157da]">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 uppercase font-bold tracking-wider">Call Us</p>
+                  <p className="text-lg font-bold text-gray-900">0915-644-9441</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-md text-[#2157da]">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 uppercase font-bold tracking-wider">Email Us</p>
+                  <p className="text-lg font-bold text-gray-900 text-sm overflow-hidden">masterdrivingmain@gmail.com</p>
+                </div>
+              </div>
+            </div>
+            <button className="px-12 py-5 bg-[#2157da] text-white rounded-2xl font-black text-xl hover:bg-[#1a3a8a] transition-all transform hover:-translate-y-1 shadow-xl hover:shadow-[#2157da]/30">
+              ENROLL NOW
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+export default About
