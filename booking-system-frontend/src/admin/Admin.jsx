@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './css/Dashboard.css';
+import Sidebar from './components/Sidebar';
 import Schedule from './Schedule';
 import Booking from './Booking';
 import SalePayment from './SalePayment';
 import UserManagement from './User';
+import WalkInEnrollment from './WalkInEnrollment';
 import { useTheme } from '../context/ThemeContext';
 import { useNotification } from '../context/NotificationContext';
+import { authAPI, adminAPI } from '../services/api';
 import {
     AreaChart,
     Area,
@@ -33,23 +36,54 @@ const funnelData = [
     { value: 200, name: 'Graduates', fill: '#bfdbfe' },
 ];
 
-const data = [
-    { name: 'Jan', students: 40, revenue: 2400 },
-    { name: 'Feb', students: 30, revenue: 1398 },
-    { name: 'Mar', students: 20, revenue: 9800 },
-    { name: 'Apr', students: 27, revenue: 3908 },
-    { name: 'May', students: 18, revenue: 4800 },
-    { name: 'Jun', students: 23, revenue: 3800 },
-    { name: 'Jul', students: 34, revenue: 4300 },
-];
-
-
-
 const Admin = ({ onNavigate, setIsLoggedIn }) => {
     const { theme, toggleTheme } = useTheme();
     const { showNotification } = useNotification();
     const [activeTab, setActiveTab] = useState(localStorage.getItem('adminActiveTab') || 'dashboard');
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
+    const [loading, setLoading] = useState(true);
+
+    // Dashboard stats state
+    const [stats, setStats] = useState({
+        totalStudents: 0,
+        monthlyRevenue: 0,
+        pendingBookings: 0,
+        todayEnrollments: 0,
+    });
+
+    // Chart data state
+    const [revenueData, setRevenueData] = useState([]);
+    const [enrollmentData, setEnrollmentData] = useState([]);
+    const [bestSellingCourses, setBestSellingCourses] = useState([]);
+
+    useEffect(() => {
+        // Set initial state based on window size
+        setIsSidebarOpen(window.innerWidth > 1024);
+
+        const handleResize = () => {
+            if (window.innerWidth <= 1024) {
+                setIsSidebarOpen(false);
+            } else {
+                setIsSidebarOpen(true);
+            }
+        };
+
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    // Prevent body scroll when mobile sidebar is open
+    useEffect(() => {
+        if (window.innerWidth <= 1024 && isSidebarOpen) {
+            document.body.style.overflow = 'hidden';
+        } else {
+            document.body.style.overflow = 'unset';
+        }
+
+        return () => {
+            document.body.style.overflow = 'unset';
+        };
+    }, [isSidebarOpen]);
 
     useEffect(() => {
         localStorage.setItem('adminActiveTab', activeTab);
@@ -60,13 +94,99 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
     // Admin Profile State
     const [adminProfile, setAdminProfile] = useState({
-        name: 'Admin Master',
+        name: 'Admin User',
         email: 'admin@masterschool.edu',
         phone: '+63 912 345 6789',
         branch: 'Main Office',
-        role: 'Super Admin',
+        role: 'Admin',
         avatar: null
     });
+
+    // Fetch admin profile on mount
+    useEffect(() => {
+        const fetchAdminProfile = async () => {
+            try {
+                const response = await authAPI.getProfile();
+                if (response.success) {
+                    const user = response.user;
+                    setAdminProfile({
+                        name: `${user.firstName} ${user.middleName || ''} ${user.lastName}`.trim(),
+                        email: user.email,
+                        phone: user.contactNumbers || '+63 912 345 6789',
+                        branch: 'Main Office', // Update this based on your branch logic
+                        role: user.role === 'admin' ? 'Super Admin' : user.role === 'staff' ? 'Staff' : 'User',
+                        avatar: null
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching profile:', error);
+            }
+        };
+
+        fetchAdminProfile();
+    }, []);
+
+    // Fetch dashboard data
+    useEffect(() => {
+        const fetchDashboardData = async () => {
+            if (activeTab === 'dashboard') {
+                try {
+                    setLoading(true);
+                    
+                    // Fetch stats
+                    const statsResponse = await adminAPI.getStats();
+                    if (statsResponse.success) {
+                        setStats(statsResponse.stats);
+                    }
+
+                    // Fetch revenue data
+                    const revenueResponse = await adminAPI.getRevenueData();
+                    if (revenueResponse.success) {
+                        setRevenueData(revenueResponse.data);
+                    }
+
+                    // Fetch enrollment data
+                    const enrollmentResponse = await adminAPI.getEnrollmentData();
+                    if (enrollmentResponse.success) {
+                        setEnrollmentData(enrollmentResponse.data);
+                    }
+
+                    // Fetch best selling courses
+                    const coursesResponse = await adminAPI.getBestSellingCourses();
+                    if (coursesResponse.success) {
+                        setBestSellingCourses(coursesResponse.courses);
+                    }
+
+                    // Fetch recent bookings
+                    const bookingsResponse = await adminAPI.getAllBookings(null, 10);
+                    if (bookingsResponse.success) {
+                        const formattedEnrollees = bookingsResponse.bookings.map(booking => ({
+                            name: booking.student_name,
+                            course: booking.course_name,
+                            branch: booking.branch_name,
+                            date: new Date(booking.booking_date).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric'
+                            }),
+                            status: booking.status === 'confirmed' ? 'Full Payment' : 
+                                    booking.status === 'pending' ? 'Pending' : 'Downpayment',
+                            method: 'GCash'
+                        }));
+                        setEnrollees(formattedEnrollees);
+                    }
+
+                } catch (error) {
+                    console.error('Error fetching dashboard data:', error);
+                    showNotification('Error loading dashboard data', 'error');
+                } finally {
+                    setLoading(false);
+                }
+            }
+        };
+
+        fetchDashboardData();
+    }, [activeTab]);
 
     const fileInputRef = useRef(null);
 
@@ -271,89 +391,14 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
     return (
         <div className={`dashboard-container ${isSidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
-            {/* Sidebar */}
-            <aside className={`sidebar ${isSidebarOpen ? 'open' : 'closed'}`}>
-                <div 
-                    className="sidebar-logo cursor-pointer hover:opacity-80 transition-opacity"
-                    onClick={() => onNavigate('home')}
-                >
-                    <div className="logo-box">
-                        <img src={logo} alt="Master School" />
-                    </div>
-                    {isSidebarOpen && <h2>Master School</h2>}
-                </div>
-
-                <nav className="sidebar-menu">
-                    <div className="menu-group">
-                        <button
-                            onClick={() => setActiveTab('dashboard')}
-                            className={`menu-item ${activeTab === 'dashboard' ? 'active' : ''}`}
-                            title={!isSidebarOpen ? "Dashboard" : ""}
-                        >
-                            <svg className="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
-                            <span className="menu-text">Overview</span>
-                        </button>
-
-                        <button
-                            onClick={() => setActiveTab('schedules')}
-                            className={`menu-item ${activeTab === 'schedules' ? 'active' : ''}`}
-                            title={!isSidebarOpen ? "Schedules" : ""}
-                        >
-                            <svg className="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                            <span className="menu-text">Schedules</span>
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('bookings')}
-                            className={`menu-item ${activeTab === 'bookings' ? 'active' : ''}`}
-                            title={!isSidebarOpen ? "Bookings" : ""}
-                        >
-                            <svg className="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                            <span className="menu-text">Bookings</span>
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('sales')}
-                            className={`menu-item ${activeTab === 'sales' ? 'active' : ''}`}
-                            title={!isSidebarOpen ? "Sales & Payments" : ""}
-                        >
-                            <svg className="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
-                            <span className="menu-text">Sales & Payments</span>
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('analytics')}
-                            className={`menu-item ${activeTab === 'analytics' ? 'active' : ''}`}
-                            title={!isSidebarOpen ? "Analytics" : ""}
-                        >
-                            <svg className="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-                            <span className="menu-text">Analytics</span>
-                        </button>
-
-                        <button
-                            onClick={() => setActiveTab('users')}
-                            className={`menu-item ${activeTab === 'users' ? 'active' : ''}`}
-                            title={!isSidebarOpen ? "User Management" : ""}
-                        >
-                            <svg className="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                            <span className="menu-text">Account Management</span>
-                        </button>
-
-                        <button
-                            onClick={() => setActiveTab('news')}
-                            className={`menu-item ${activeTab === 'news' ? 'active' : ''}`}
-                            title={!isSidebarOpen ? "News & Events" : ""}
-                        >
-                            <svg className="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 11a9 9 0 0 1 9 9"></path><path d="M4 4a16 16 0 0 1 16 16"></path><circle cx="5" cy="19" r="1"></circle></svg>
-                            <span className="menu-text">News & Events</span>
-                        </button>
-                    </div>
-
-                    <div className="sidebar-bottom">
-                        <button className="menu-item logout-item" onClick={handleLogout} title={!isSidebarOpen ? "Logout" : ""}>
-                            <svg className="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-                            <span className="menu-text">Logout</span>
-                        </button>
-                    </div>
-                </nav>
-            </aside>
+            <Sidebar 
+                isSidebarOpen={isSidebarOpen} 
+                setIsSidebarOpen={setIsSidebarOpen}
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                onNavigate={onNavigate}
+                handleLogout={handleLogout}
+            />
 
             {/* Main Content */}
             <main className="main-content">
@@ -378,7 +423,9 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                             activeTab === 'sales' ? 'Financials' :
                                                 activeTab === 'profile' ? 'Profile' :
                                                     activeTab === 'settings' ? 'Settings' :
-                                                        'Accounts'}
+                                                        activeTab === 'walk-in' ? 'Walk-in Enrollment' :
+                                                            activeTab === 'news' ? 'News & Events' :
+                                                                'Accounts'}
                             </h1>
                             <p>Welcome back, Admin</p>
                         </div>
@@ -457,7 +504,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                             <div className="stat-card">
                                 <div className="stat-info">
                                     <span>Total Enrolled Students</span>
-                                    <h2>1,245</h2>
+                                    <h2>{loading ? '...' : stats.totalStudents.toLocaleString()}</h2>
                                 </div>
                                 <div className="stat-icon blue">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
@@ -466,8 +513,8 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
                             <div className="stat-card">
                                 <div className="stat-info">
-                                    <span>Total Sales (October)</span>
-                                    <h2>₱ 324k</h2>
+                                    <span>Total Sales (This Month)</span>
+                                    <h2>{loading ? '...' : `₱ ${(stats.monthlyRevenue / 1000).toFixed(1)}k`}</h2>
                                 </div>
                                 <div className="stat-icon green">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
@@ -477,7 +524,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                             <div className="stat-card">
                                 <div className="stat-info">
                                     <span>Pending Bookings</span>
-                                    <h2>18</h2>
+                                    <h2>{loading ? '...' : stats.pendingBookings}</h2>
                                 </div>
                                 <div className="stat-icon orange">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
@@ -493,49 +540,55 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                     <span>Financial Trends</span>
                                 </div>
                                 <div style={{ width: '100%', height: 300 }}>
-                                    <ResponsiveContainer>
-                                        <AreaChart
-                                            data={data}
-                                            margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                                        >
-                                            <defs>
-                                                <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor="#1a4fba" stopOpacity={0.1} />
-                                                    <stop offset="95%" stopColor="#1a4fba" stopOpacity={0} />
-                                                </linearGradient>
-                                            </defs>
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#1b254b' : '#f1f5f9'} />
-                                            <XAxis
-                                                dataKey="name"
-                                                axisLine={false}
-                                                tickLine={false}
-                                                tick={{ fill: theme === 'dark' ? '#a3b1cc' : '#94a3b8', fontSize: 12 }}
-                                                dy={10}
-                                            />
-                                            <YAxis
-                                                axisLine={false}
-                                                tickLine={false}
-                                                tick={{ fill: theme === 'dark' ? '#a3b1cc' : '#94a3b8', fontSize: 12 }}
-                                            />
-                                            <Tooltip
-                                                contentStyle={{
-                                                    borderRadius: '12px',
-                                                    border: 'none',
-                                                    backgroundColor: theme === 'dark' ? '#111c44' : '#ffffff',
-                                                    color: theme === 'dark' ? '#ffffff' : '#1e293b',
-                                                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                                                }}
-                                            />
-                                            <Area
-                                                type="monotone"
-                                                dataKey="revenue"
-                                                stroke="#1a4fba"
-                                                fillOpacity={1}
-                                                fill="url(#colorRevenue)"
-                                                strokeWidth={3}
-                                            />
-                                        </AreaChart>
-                                    </ResponsiveContainer>
+                                    {loading ? (
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#64748b' }}>
+                                            Loading chart data...
+                                        </div>
+                                    ) : (
+                                        <ResponsiveContainer>
+                                            <AreaChart
+                                                data={revenueData}
+                                                margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                                            >
+                                                <defs>
+                                                    <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                                                        <stop offset="5%" stopColor="#1a4fba" stopOpacity={0.1} />
+                                                        <stop offset="95%" stopColor="#1a4fba" stopOpacity={0} />
+                                                    </linearGradient>
+                                                </defs>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#1b254b' : '#f1f5f9'} />
+                                                <XAxis
+                                                    dataKey="name"
+                                                    axisLine={false}
+                                                    tickLine={false}
+                                                    tick={{ fill: theme === 'dark' ? '#a3b1cc' : '#94a3b8', fontSize: 12 }}
+                                                    dy={10}
+                                                />
+                                                <YAxis
+                                                    axisLine={false}
+                                                    tickLine={false}
+                                                    tick={{ fill: theme === 'dark' ? '#a3b1cc' : '#94a3b8', fontSize: 12 }}
+                                                />
+                                                <Tooltip
+                                                    contentStyle={{
+                                                        borderRadius: '12px',
+                                                        border: 'none',
+                                                        backgroundColor: theme === 'dark' ? '#111c44' : '#ffffff',
+                                                        color: theme === 'dark' ? '#ffffff' : '#1e293b',
+                                                        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                                                    }}
+                                                />
+                                                <Area
+                                                    type="monotone"
+                                                    dataKey="revenue"
+                                                    stroke="#1a4fba"
+                                                    fillOpacity={1}
+                                                    fill="url(#colorRevenue)"
+                                                    strokeWidth={3}
+                                                />
+                                            </AreaChart>
+                                        </ResponsiveContainer>
+                                    )}
                                 </div>
                             </div>
 
@@ -545,39 +598,131 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                     <span>Student Acquisition</span>
                                 </div>
                                 <div style={{ width: '100%', height: 300 }}>
-                                    <ResponsiveContainer>
-                                        <BarChart
-                                            data={data}
-                                            margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                                        >
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#1b254b' : '#f1f5f9'} />
-                                            <XAxis
-                                                dataKey="name"
-                                                axisLine={false}
-                                                tickLine={false}
-                                                tick={{ fill: theme === 'dark' ? '#a3b1cc' : '#94a3b8', fontSize: 12 }}
-                                                dy={10}
-                                            />
-                                            <YAxis
-                                                axisLine={false}
-                                                tickLine={false}
-                                                tick={{ fill: theme === 'dark' ? '#a3b1cc' : '#94a3b8', fontSize: 12 }}
-                                            />
-                                            <Tooltip
-                                                contentStyle={{
-                                                    borderRadius: '12px',
-                                                    border: 'none',
-                                                    backgroundColor: theme === 'dark' ? '#111c44' : '#ffffff',
-                                                    color: theme === 'dark' ? '#ffffff' : '#1e293b',
-                                                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                                                }}
-                                            />
-                                            <Legend verticalAlign="top" height={36} />
-                                            <Bar dataKey="students" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
-                                        </BarChart>
-                                    </ResponsiveContainer>
+                                    {loading ? (
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#64748b' }}>
+                                            Loading chart data...
+                                        </div>
+                                    ) : (
+                                        <ResponsiveContainer>
+                                            <BarChart
+                                                data={enrollmentData}
+                                                margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                                            >
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#1b254b' : '#f1f5f9'} />
+                                                <XAxis
+                                                    dataKey="name"
+                                                    axisLine={false}
+                                                    tickLine={false}
+                                                    tick={{ fill: theme === 'dark' ? '#a3b1cc' : '#94a3b8', fontSize: 12 }}
+                                                    dy={10}
+                                                />
+                                                <YAxis
+                                                    axisLine={false}
+                                                    tickLine={false}
+                                                    tick={{ fill: theme === 'dark' ? '#a3b1cc' : '#94a3b8', fontSize: 12 }}
+                                                />
+                                                <Tooltip
+                                                    contentStyle={{
+                                                        borderRadius: '12px',
+                                                        border: 'none',
+                                                        backgroundColor: theme === 'dark' ? '#111c44' : '#ffffff',
+                                                        color: theme === 'dark' ? '#ffffff' : '#1e293b',
+                                                        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                                                    }}
+                                                />
+                                                <Legend verticalAlign="top" height={36} />
+                                                <Bar dataKey="students" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    )}
                                 </div>
                             </div>
+                        </section>
+
+                        {/* Best Selling Courses Section */}
+                        <section className="data-section">
+                            <div className="section-header">
+                                <h2>Best Selling Courses</h2>
+                                <p style={{ color: 'var(--secondary-text)', fontSize: '0.9rem', marginTop: '5px' }}>
+                                    Top performing courses by enrollment count
+                                </p>
+                            </div>
+
+                            {loading ? (
+                                <div style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'center', 
+                                    height: '200px', 
+                                    color: 'var(--secondary-text)',
+                                    background: 'var(--card-bg)',
+                                    borderRadius: '16px',
+                                    border: '1px solid var(--border-color)'
+                                }}>
+                                    Loading courses data...
+                                </div>
+                            ) : (
+                                <div className="courses-grid">
+                                    {bestSellingCourses.slice(0, 6).map((course, index) => (
+                                        <div 
+                                            key={course.id}
+                                            className="course-card"
+                                            onMouseEnter={(e) => {
+                                                e.currentTarget.style.transform = 'translateY(-4px)';
+                                                e.currentTarget.style.boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.1)';
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                e.currentTarget.style.transform = 'translateY(0)';
+                                                e.currentTarget.style.boxShadow = 'none';
+                                            }}
+                                        >
+                                            {/* Ranking Badge */}
+                                            {index < 3 && (
+                                                <div className={`ranking-badge rank-${index + 1}`}>
+                                                    {index + 1}
+                                                </div>
+                                            )}
+
+                                            <div className="course-card-body">
+                                                <h3 className="course-title">
+                                                    {course.course_name}
+                                                </h3>
+                                                <p className="course-description">
+                                                    {course.description || 'Professional driving course with comprehensive training'}
+                                                </p>
+                                            </div>
+
+                                            <div className="course-stats-grid">
+                                                <div className="course-stat-item">
+                                                    <div className="course-stat-label">Enrollments</div>
+                                                    <div className="course-stat-value primary">
+                                                        {course.total_bookings}
+                                                    </div>
+                                                </div>
+
+                                                <div className="course-stat-item">
+                                                    <div className="course-stat-label">Revenue</div>
+                                                    <div className="course-stat-value success">
+                                                        ₱{(parseFloat(course.total_revenue) / 1000).toFixed(1)}k
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="course-card-footer">
+                                                <div className="course-price">
+                                                    <span className="label">Price:</span> ₱{parseFloat(course.price).toLocaleString()}
+                                                </div>
+                                                <div className="course-completion">
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                                                        <polyline points="20 6 9 17 4 12"></polyline>
+                                                    </svg>
+                                                    {course.completed_bookings} Completed
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </section>
 
                         {/* Recent Enrollees Table */}
@@ -768,6 +913,13 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                             </div>
                         </div>
                     </div>
+                ) : activeTab === 'walk-in' ? (
+                    <WalkInEnrollment 
+                        adminProfile={adminProfile}
+                        onEnroll={(newEnrollee) => {
+                            setEnrollees(prev => [newEnrollee, ...prev]);
+                        }} 
+                    />
                 ) : activeTab === 'profile' ? (
                     <div className="profile-view-container">
                         <div className="profile-header-card">

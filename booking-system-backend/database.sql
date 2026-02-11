@@ -95,11 +95,11 @@ INSERT INTO branches (name, address, contact_number) VALUES
 ('Master Driving School Marikina Branch', '374 JP Rizal St., Marikina City', '0966 291 4687 / 0996 084 5626'),
 ('Master Driving School Pasig Branch', '9001 Felix Ave. Cor. Jasmin St. Pasig City', '0945 834 4002 / 0969 632 5887'),
 ('Master Prime Driving School Meycauayan Branch', 'UNIT A1-B2, JRJ BUILDING, Barangay, CAMALIG, Meycauayan, 3020 Bulacan', '0945 461 5171 / 0962 058 4898'),
-('Master Driving School Malabon Branch', '2nd Floor RLN Centre, Gov Pascual, Malabon City', '0961 807 3526 / 0926 693 7265'),
+('Master Driving School Malabon Branch', '2nd Floor RLN Centre, Governor Pascual Avenue, Malabon, Metro Manila, Philippines', '0961 807 3526 / 0926 693 7265'),
 ('Masters Prime Holdings Corp. Binan Branch', 'San Antonio Nat''l Hi-way, Binan, Laguna', '0912 595 2830'),
-('Master Prime Holdings Corp. Las Piñas Branch', 'KM21 Alabang Zapote Road, Almanza Uno, Las Piñas City (beside SM South Mall infront of Almanza Uno Brgy Hall)', '0908 388 9144'),
+('Master Prime Holdings Corp. Las Piñas Branch', 'Unit 5, Triple B Bldg, Alabang-Zapote Rd, Talon Uno, Las Piñas, 1740 Metro Manila', '0908 388 9144'),
 ('Master Prime Driving School Bacoor Branch', '2nd Floor SICI Cavite Business Center Lot 4A Aguinaldo Highway, Habay 1, Bacoor, Cavite', '0954 184 2771 / 0968 365 9492'),
-('Master Driving School San Mateo Branch', '101 General Luna St. Ampid I, San Mateo, Rizal', '0966 288 6010'),
+('Master Driving School San Mateo Branch', '101 General Luna Street, Ampid 1, San Mateo, Rizal, Philippines', '0966 288 6010'),
 ('Master Driving School Valenzuela Branch', '304 McArthur Hi-way, Malinta, Valenzuela City', '0953 284 8563'),
 ('Master Driving School Bocaue Bulacan Branch', '1594 McArthur Hi-way, Lolomboy, Bocaue, Bulacan', '0945 461 5171')
 ON CONFLICT DO NOTHING;

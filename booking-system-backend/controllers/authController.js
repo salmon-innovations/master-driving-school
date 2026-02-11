@@ -4,8 +4,8 @@ const pool = require('../config/db');
 const { generateVerificationCode, sendVerificationEmail } = require('../utils/emailService');
 
 // Generate JWT token
-const generateToken = (userId) => {
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
+const generateToken = (userId, role = 'student') => {
+  return jwt.sign({ id: userId, role: role }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRE,
   });
 };
@@ -133,8 +133,14 @@ const register = async (req, res) => {
 
     const user = result.rows[0];
 
-    // Send verification email
-    await sendVerificationEmail(email, verificationCode, firstName);
+    // Send verification email (non-blocking)
+    try {
+      await sendVerificationEmail(email, verificationCode, firstName);
+      console.log('✅ Verification email sent successfully');
+    } catch (emailError) {
+      console.error('⚠️ Failed to send verification email:', emailError.message);
+      // Continue with registration even if email fails
+    }
 
     res.status(201).json({
       success: true,
@@ -187,8 +193,13 @@ const login = async (req, res) => {
         [verificationCode, codeExpires, user.id]
       );
 
-      // Send verification email
-      await sendVerificationEmail(user.email, verificationCode, user.first_name);
+      // Send verification email (non-blocking)
+      try {
+        await sendVerificationEmail(user.email, verificationCode, user.first_name);
+        console.log('✅ Verification email sent successfully');
+      } catch (emailError) {
+        console.error('⚠️ Failed to send verification email:', emailError.message);
+      }
 
       return res.status(403).json({ 
         error: 'Email not verified. A new verification code has been sent to your email.',
@@ -198,8 +209,8 @@ const login = async (req, res) => {
       });
     }
 
-    // Generate token
-    const token = generateToken(user.id);
+    // Generate token with role
+    const token = generateToken(user.id, user.role || 'student');
 
     res.json({
       success: true,
@@ -297,8 +308,8 @@ const verifyEmail = async (req, res) => {
       [user.id]
     );
 
-    // Generate token
-    const token = generateToken(user.id);
+    // Generate token with role
+    const token = generateToken(user.id, user.role || 'student');
 
     res.json({
       success: true,
@@ -309,6 +320,7 @@ const verifyEmail = async (req, res) => {
         firstName: user.first_name,
         lastName: user.last_name,
         email: user.email,
+        role: user.role,
       },
     });
   } catch (error) {
@@ -350,8 +362,13 @@ const resendVerificationCode = async (req, res) => {
       [verificationCode, codeExpires, user.id]
     );
 
-    // Send email
-    await sendVerificationEmail(user.email, verificationCode, user.first_name);
+    // Send email (non-blocking)
+    try {
+      await sendVerificationEmail(user.email, verificationCode, user.first_name);
+      console.log('✅ Verification email sent successfully');
+    } catch (emailError) {
+      console.error('⚠️ Failed to send verification email:', emailError.message);
+    }
 
     res.json({
       success: true,
@@ -395,8 +412,13 @@ const forgotPassword = async (req, res) => {
       [resetCode, codeExpires, user.id]
     );
 
-    // Send OTP email
-    await sendVerificationEmail(user.email, resetCode, user.first_name, 'Password Reset');
+    // Send OTP email (non-blocking)
+    try {
+      await sendVerificationEmail(user.email, resetCode, user.first_name, 'Password Reset');
+      console.log('✅ Password reset email sent successfully');
+    } catch (emailError) {
+      console.error('⚠️ Failed to send password reset email:', emailError.message);
+    }
 
     res.json({
       success: true,

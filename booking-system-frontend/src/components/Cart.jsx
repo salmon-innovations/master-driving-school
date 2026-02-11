@@ -1,6 +1,6 @@
 import { useNotification } from "../context/NotificationContext"
 
-function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn }) {
+function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, preSelectedBranch, setSelectedCourseForSchedule }) {
   const { showNotification } = useNotification()
 
   const removeFromCart = (id) => {
@@ -32,10 +32,28 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn }) 
       onNavigate('signin')
       return
     }
-    if (cart.length > 0) {
+    if (!preSelectedBranch) {
+      showNotification("Please select a branch first from the Branches page", "error")
       setShowCart(false)
-      onNavigate('payment')
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      onNavigate('branches')
+      return
+    }
+    if (cart.length > 0) {
+      // Check if cart contains TDC course (id: 1)
+      const tdcCourse = cart.find(item => item.id === 1)
+      
+      if (tdcCourse) {
+        // If TDC course is in cart, go to schedule page with the selected type
+        setSelectedCourseForSchedule({ ...tdcCourse, selectedType: tdcCourse.type || 'online' })
+        setShowCart(false)
+        onNavigate('schedule')
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      } else {
+        // For other courses, proceed to payment
+        setShowCart(false)
+        onNavigate('payment')
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      }
     }
   }
 
@@ -67,11 +85,18 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn }) 
                     {cart.map((item, index) => (
                       <div key={`${item.id}-${item.type}-${index}`} className="bg-gray-50 p-4 rounded-lg">
                         <div className="flex justify-between items-start mb-2">
-                          <div>
+                          <div className="flex-1">
                             <h3 className="font-semibold text-gray-800 text-sm">{item.name}</h3>
                             <p className="text-xs text-gray-500 mt-1">{item.duration}</p>
                             {item.type && (
                               <p className="text-xs text-[#2157da] font-medium mt-1 uppercase">{item.type}</p>
+                            )}
+                            {item.id === 1 && (
+                              <div className="flex items-center gap-1 mt-2">
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">
+                                  📅 Schedule Required
+                                </span>
+                              </div>
                             )}
                           </div>
                           <button
@@ -103,6 +128,23 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn }) 
                     ))}
                   </div>
 
+                  {/* Branch Indicator */}
+                  {preSelectedBranch ? (
+                    <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-xs font-semibold text-blue-600 mb-1 flex items-center gap-1">
+                        <span>📍</span> Selected Branch
+                      </p>
+                      <p className="text-sm font-bold text-gray-900">{preSelectedBranch.name}</p>
+                    </div>
+                  ) : (
+                    <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-lg">
+                      <p className="text-xs font-bold text-amber-800 mb-1 flex items-center gap-1">
+                        <span>⚠️</span> Branch Required
+                      </p>
+                      <p className="text-xs text-amber-700">Please select a branch before checkout</p>
+                    </div>
+                  )}
+
                   <div className="border-t pt-4 mb-4">
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-gray-600">Subtotal:</span>
@@ -116,9 +158,19 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn }) 
 
                   <button
                     onClick={handleCheckout}
-                    className="w-full bg-[#F3B74C] text-[#2157da] py-3 rounded-full font-bold hover:bg-[#e1a63b] transition-all"
+                    disabled={!preSelectedBranch}
+                    className={`w-full py-3 rounded-full font-bold transition-all ${
+                      preSelectedBranch
+                        ? 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b] cursor-pointer'
+                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    }`}
                   >
-                    Proceed to Booking
+                    {!preSelectedBranch 
+                      ? 'Select Branch First' 
+                      : cart.some(item => item.id === 1)
+                      ? '📅 Select Schedule'
+                      : 'Proceed to Booking'
+                    }
                   </button>
                 </>
               )}

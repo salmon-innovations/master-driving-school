@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNotification } from '../context/NotificationContext'
 
-function Courses({ onNavigate, cart, setCart, isLoggedIn }) {
+function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, setSelectedCourseForSchedule }) {
   const { showNotification } = useNotification()
   const [sortBy, setSortBy] = useState('best-selling')
   const [priceFilter, setPriceFilter] = useState('all')
@@ -14,7 +14,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn }) {
       id: 1,
       name: 'THEORETICAL DRIVING COURSE (TDC)',
       shortName: 'TDC',
-      brand: 'SMART DRIVING PH',
+      brand: 'MASTER DRIVING SCHOOL PH',
       duration: '15 Hours',
       price: 1176,
       image: '/images/tdc-course.jpg',
@@ -39,7 +39,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn }) {
       id: 2,
       name: 'PRACTICAL DRIVING COURSE (PDC-MOTORCYCLE)',
       shortName: 'PDC Motor',
-      brand: 'SMART DRIVING PH',
+      brand: 'MASTER DRIVING SCHOOL PH',
       duration: '8 Hours',
       price: 3510,
       image: '/images/pdc-motor.jpg',
@@ -64,7 +64,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn }) {
       id: 3,
       name: 'Practical Driving Course(PDC) - 4 Wheels',
       shortName: 'PDC Car',
-      brand: 'SMART DRIVING PH',
+      brand: 'MASTER DRIVING SCHOOL PH',
       duration: '8 Hours',
       price: 0,
       image: '/images/pdc-car.jpg',
@@ -90,7 +90,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn }) {
       id: 4,
       name: 'BPMH - Backing Parking Maneuvering Hanging',
       shortName: 'BPMH',
-      brand: 'SMART DRIVING PH',
+      brand: 'MASTER DRIVING SCHOOL PH',
       duration: '2 Hours',
       price: 3150,
       image: '/images/bpmh.jpg',
@@ -143,10 +143,24 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn }) {
       return
     }
 
+    if (!preSelectedBranch) {
+      showNotification("Please select a branch first from the Branches page", "error")
+      onNavigate('branches')
+      return
+    }
+
     if (selectedCourse) {
-      addToCart(selectedCourse, quantity, courseType)
-      onNavigate('payment')
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      // Check if course is TDC (id: 1) - requires schedule selection
+      if (selectedCourse.id === 1) {
+        setSelectedCourseForSchedule({ ...selectedCourse, selectedType: courseType })
+        onNavigate('schedule')
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      } else {
+        // For other courses, proceed directly to payment
+        addToCart(selectedCourse, quantity, courseType)
+        onNavigate('payment')
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      }
     }
   }
 
@@ -199,8 +213,29 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn }) {
   // If a course is selected, show detail view
   if (selectedCourse) {
     return (
-      <div className="py-12 sm:py-16 lg:py-20 bg-gray-50 min-h-[calc(100vh-4rem)] w-full">
+      <div className="py-12 sm:py-16 lg:py-20 bg-gray-50 min-h-[calc(100vh-4rem)] w-full font-primary">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 max-w-6xl">
+          {/* Selected Branch Indicator */}
+          {preSelectedBranch && (
+            <div className="bg-gradient-to-r from-blue-50 to-blue-100/50 border-2 border-blue-300 rounded-2xl p-5 sm:p-6 mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-sm" data-aos="fade-down">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-[#2157da] rounded-xl flex items-center justify-center flex-shrink-0 shadow-md">
+                  <span className="text-2xl">📍</span>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-[#2157da] uppercase tracking-wide mb-1">Enrolling at this branch</p>
+                  <p className="text-base sm:text-lg font-bold text-gray-900 leading-tight">{preSelectedBranch.name}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => onNavigate('branches')}
+                className="text-sm font-bold text-[#2157da] bg-white hover:bg-blue-50 px-5 py-2.5 rounded-xl border-2 border-[#2157da] transition-all hover:shadow-md active:scale-95 self-start sm:self-center"
+              >
+                Change Branch
+              </button>
+            </div>
+          )}
+
           {/* Back to Listing */}
           <button
             onClick={handleBackToListing}
@@ -366,6 +401,27 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn }) {
           >
             Choose your courses and add them to cart
           </p>
+          
+          {/* Selected Branch Indicator */}
+          {preSelectedBranch && (
+            <div className="max-w-md mx-auto bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mt-6 flex items-center justify-between gap-3 shadow-sm" data-aos="fade-up" data-aos-delay="200">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 bg-[#2157da] rounded-lg flex items-center justify-center flex-shrink-0">
+                  <span className="text-lg">📍</span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold text-[#2157da] uppercase tracking-wide">Branch</p>
+                  <p className="text-xs font-bold text-gray-900 truncate">{preSelectedBranch.name}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => onNavigate('branches')}
+                className="text-xs font-bold text-[#2157da] hover:underline flex-shrink-0"
+              >
+                Change
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Filter and Sort Section */}

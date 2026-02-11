@@ -19,6 +19,7 @@ import VerifyEmail from './pages/VerifyEmail'
 import ForgotPassword from './pages/ForgotPassword'
 import Profile from './pages/Profile'
 import Payment from './pages/Payment'
+import Schedule from './pages/Schedule'
 import Admin from './admin/Admin'
 import { ThemeProvider } from './context/ThemeContext'
 import { NotificationProvider } from './context/NotificationContext'
@@ -33,6 +34,9 @@ function App() {
   const [showCart, setShowCart] = useState(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState(sessionStorage.getItem('pendingEmail') || '')
+  const [preSelectedBranch, setPreSelectedBranch] = useState(null)
+  const [selectedCourseForSchedule, setSelectedCourseForSchedule] = useState(null)
+  const [scheduleSelection, setScheduleSelection] = useState(null)
 
   useEffect(() => {
     AOS.init({
@@ -82,10 +86,11 @@ function App() {
   const renderPage = () => {
     switch(currentPage) {
       case 'home': return <Home onNavigate={setCurrentPage} isLoggedIn={isLoggedIn} />
-      case 'courses': return <Courses onNavigate={setCurrentPage} cart={cart} setCart={setCart} isLoggedIn={isLoggedIn} />
+      case 'courses': return <Courses onNavigate={setCurrentPage} cart={cart} setCart={setCart} isLoggedIn={isLoggedIn} preSelectedBranch={preSelectedBranch} setSelectedCourseForSchedule={setSelectedCourseForSchedule} />
       case 'about': return <About />
       case 'contact': return <Contact />
-      case 'branches': return <Branches setCurrentPage={setCurrentPage} />
+      case 'branches': return <Branches setCurrentPage={setCurrentPage} isLoggedIn={isLoggedIn} setPreSelectedBranch={setPreSelectedBranch} />
+      case 'schedule': return <Schedule onNavigate={setCurrentPage} selectedCourse={selectedCourseForSchedule} preSelectedBranch={preSelectedBranch} setScheduleSelection={setScheduleSelection} cart={cart} setCart={setCart} />
       case 'news': return <NewsAndEvents />
       case 'terms': return <TermsOfUse />
       case 'privacy': return <PrivacyPolicy />
@@ -95,7 +100,7 @@ function App() {
       case 'verify-email': return <VerifyEmail onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} userEmail={pendingVerificationEmail} />
       case 'forgot-password': return <ForgotPassword onNavigate={setCurrentPage} />
       case 'profile': return <Profile onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
-      case 'payment': return <Payment cart={cart} setCart={setCart} onNavigate={setCurrentPage} isLoggedIn={isLoggedIn} />
+      case 'payment': return <Payment cart={cart} setCart={setCart} onNavigate={setCurrentPage} isLoggedIn={isLoggedIn} preSelectedBranch={preSelectedBranch} scheduleSelection={scheduleSelection} />
       case 'admin': return <Admin onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
       default: return <Home onNavigate={setCurrentPage} />
     }
@@ -128,6 +133,8 @@ function App() {
           setShowCart={setShowCart}
           onNavigate={setCurrentPage}
           isLoggedIn={isLoggedIn}
+          preSelectedBranch={preSelectedBranch}
+          setSelectedCourseForSchedule={setSelectedCourseForSchedule}
         />
         </div>
       </NotificationProvider>

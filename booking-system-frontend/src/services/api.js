@@ -177,6 +177,83 @@ export const bookingsAPI = {
   },
 };
 
+// Admin API
+export const adminAPI = {
+  // Get dashboard statistics
+  getStats: async () => {
+    return await apiRequest('/admin/stats');
+  },
+
+  // Get all bookings (admin view)
+  getAllBookings: async (status = null, limit = 50) => {
+    const params = new URLSearchParams();
+    if (status) params.append('status', status);
+    params.append('limit', limit);
+    return await apiRequest(`/admin/bookings?${params.toString()}`);
+  },
+
+  // Get all users
+  getAllUsers: async (role = null, limit = 100) => {
+    const params = new URLSearchParams();
+    if (role) params.append('role', role);
+    params.append('limit', limit);
+    return await apiRequest(`/admin/users?${params.toString()}`);
+  },
+
+  // Update booking status (admin)
+  updateBookingStatus: async (id, status) => {
+    return await apiRequest(`/admin/bookings/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  },
+
+  // Delete booking (admin)
+  deleteBooking: async (id) => {
+    return await apiRequest(`/admin/bookings/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Get revenue data for charts
+  getRevenueData: async () => {
+    return await apiRequest('/admin/revenue');
+  },
+
+  // Get enrollment data for charts
+  getEnrollmentData: async () => {
+    return await apiRequest('/admin/enrollments');
+  },
+
+  // Get best selling courses
+  getBestSellingCourses: async () => {
+    return await apiRequest('/admin/best-selling-courses');
+  },
+
+  // Create new user (Admin/Staff only)
+  createUser: async (userData) => {
+    return await apiRequest('/admin/users', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
+  },
+
+  // Update user
+  updateUser: async (id, userData) => {
+    return await apiRequest(`/admin/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(userData),
+    });
+  },
+
+  // Toggle user status (activate/deactivate)
+  toggleUserStatus: async (id) => {
+    return await apiRequest(`/admin/users/${id}/status`, {
+      method: 'PATCH',
+    });
+  },
+};
+
 // Export helper functions
 export const setAuthToken = (token) => {
   localStorage.setItem('userToken', token);
