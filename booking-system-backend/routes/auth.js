@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { 
   register, 
-  login, 
+  login,
+  logout,
   getProfile, 
   verifyEmail, 
   resendVerificationCode,
@@ -22,6 +23,7 @@ router.post('/verify-reset-otp', verifyResetOTP);
 router.post('/reset-password', resetPassword);
 
 // Protected routes
+router.post('/logout', authenticateToken, logout);
 router.get('/profile', authenticateToken, getProfile);
 
 module.exports = router;

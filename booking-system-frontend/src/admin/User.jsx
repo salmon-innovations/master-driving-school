@@ -1,16 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import './css/user.css';
-import { adminAPI } from '../services/api';
+import { adminAPI, branchesAPI } from '../services/api';
 
 const UserManagement = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState('All');
     const [users, setUsers] = useState([]);
+    const [branches, setBranches] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [showViewModal, setShowViewModal] = useState(false);
     const [selectedUser, setSelectedUser] = useState(null);
     const [editingUser, setEditingUser] = useState(null);
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+    const [errors, setErrors] = useState({});
+    const [submitError, setSubmitError] = useState('');
     const [userData, setUserData] = useState({
         firstName: '',
         middleInitial: '',
@@ -24,14 +29,24 @@ const UserManagement = () => {
         password: '',
         confirmPassword: '',
         role: 'staff',
-        branch: 'Main Branch',
+        branch: '',
         status: 'active'
     });
 
-    // Fetch users from database
+    // Fetch users and branches from database
     useEffect(() => {
         fetchUsers();
+        fetchBranches();
     }, []);
+
+    const fetchBranches = async () => {
+        try {
+            const response = await branchesAPI.getAll();
+            setBranches(response.branches || []);
+        } catch (error) {
+            console.error('Error fetching branches:', error);
+        }
+    };
 
     const fetchUsers = async () => {
         try {
@@ -44,7 +59,8 @@ const UserManagement = () => {
                 name: `${user.first_name} ${user.middle_name ? user.middle_name + ' ' : ''}${user.last_name}`.trim(),
                 email: user.email,
                 role: user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'Student',
-                branch: user.branch || 'N/A',
+                branch: user.branch_name || 'Not enrolled',
+                branchId: user.branch_id,
                 status: user.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'Active',
                 lastLogin: user.last_login ? formatLastLogin(user.last_login) : 'Never',
                 avatar: `https://i.pravatar.cc/150?u=${user.email}`,
@@ -55,7 +71,13 @@ const UserManagement = () => {
                 age: user.age || '',
                 birthday: user.birthday || '',
                 address: user.address || '',
-                contactNumber: user.contact_numbers || ''
+                contactNumber: user.contact_numbers || '',
+                birthPlace: user.birth_place || '',
+                nationality: user.nationality || '',
+                maritalStatus: user.marital_status || '',
+                zipCode: user.zip_code || '',
+                emergencyContactPerson: user.emergency_contact_person || '',
+                emergencyContactNumber: user.emergency_contact_number || ''
             }));
 
             setUsers(transformedUsers);
@@ -89,20 +111,90 @@ const UserManagement = () => {
     const handleInputChange = (e) => {
         const { name, value } = e.target;
         setUserData({ ...userData, [name]: value });
+        
+        // Clear error for this field when user starts typing
+        if (errors[name]) {
+            setErrors({ ...errors, [name]: '' });
+        }
+        if (submitError) {
+            setSubmitError('');
+        }
+    };
+
+    const validateForm = () => {
+        const newErrors = {};
+
+        // Name validation
+        if (!userData.firstName.trim()) {
+            newErrors.firstName = 'First name is required';
+        }
+        if (!userData.lastName.trim()) {
+            newErrors.lastName = 'Last name is required';
+        }
+
+        // Email validation
+        if (!userData.email.trim()) {
+            newErrors.email = 'Email is required';
+        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userData.email)) {
+            newErrors.email = 'Please enter a valid email address';
+        }
+
+        // Contact number validation
+        if (!userData.contactNumber.trim()) {
+            newErrors.contactNumber = 'Contact number is required';
+        } else if (!/^[0-9]{10,11}$/.test(userData.contactNumber.replace(/[\s-]/g, ''))) {
+            newErrors.contactNumber = 'Please enter a valid 10-11 digit phone number';
+        }
+
+        // Age validation
+        if (!userData.age) {
+            newErrors.age = 'Age is required';
+        } else if (userData.age < 18 || userData.age > 100) {
+            newErrors.age = 'Age must be between 18 and 100';
+        }
+
+        // Gender validation
+        if (!userData.gender) {
+            newErrors.gender = 'Gender is required';
+        }
+
+        // Branch validation
+        if (!userData.branch) {
+            newErrors.branch = 'Branch selection is required';
+        }
+
+        // Password validation (only for new users or if password is being changed)
+        if (!editingUser || userData.password) {
+            if (!userData.password) {
+                newErrors.password = 'Password is required';
+            } else if (userData.password.length < 8) {
+                newErrors.password = 'Password must be at least 8 characters';
+            }
+
+            if (!userData.confirmPassword) {
+                newErrors.confirmPassword = 'Please confirm your password';
+            } else if (userData.password !== userData.confirmPassword) {
+                newErrors.confirmPassword = 'Passwords do not match';
+            }
+        }
+
+        setErrors(newErrors);
+        return Object.keys(newErrors).length === 0;
     };
 
     const handleAddUser = async (e) => {
         e.preventDefault();
+        setSubmitError('');
 
-        // Validate passwords match
-        if (userData.password !== userData.confirmPassword) {
-            alert('Passwords do not match!');
+        // Validate form
+        if (!validateForm()) {
+            setSubmitError('Please fix the errors above before submitting.');
             return;
         }
 
         // Only allow Admin or Staff creation
         if (userData.role.toLowerCase() !== 'admin' && userData.role.toLowerCase() !== 'staff') {
-            alert('Only Admin or Staff members can be added.');
+            setSubmitError('Only Admin or Staff members can be added.');
             return;
         }
 
@@ -162,12 +254,22 @@ const UserManagement = () => {
                 password: '',
                 confirmPassword: '',
                 role: 'staff',
-                branch: 'Main Branch',
+                branch: '',
                 status: 'active'
             });
         } catch (error) {
             console.error('Error saving user:', error);
-            alert(error.message || 'Failed to save user. Please try again.');
+            
+            // Handle specific error types
+            if (error.message.includes('email')) {
+                setErrors({ ...errors, email: error.message });
+                setSubmitError('Email validation failed. Please check the email address.');
+            } else if (error.message.includes('already exists')) {
+                setErrors({ ...errors, email: 'This email is already registered' });
+                setSubmitError('A user with this email already exists.');
+            } else {
+                setSubmitError(error.message || 'Failed to save user. Please try again.');
+            }
         }
     };
 
@@ -201,6 +303,10 @@ const UserManagement = () => {
     const handleCloseModal = () => {
         setShowModal(false);
         setEditingUser(null);
+        setShowPassword(false);
+        setShowConfirmPassword(false);
+        setErrors({});
+        setSubmitError('');
         setUserData({
             firstName: '',
             middleInitial: '',
@@ -214,7 +320,7 @@ const UserManagement = () => {
             password: '',
             confirmPassword: '',
             role: 'staff',
-            branch: 'Main Branch',
+            branch: '',
             status: 'active'
         });
     };
@@ -345,9 +451,6 @@ const UserManagement = () => {
                                             <button className="action-btn view" title="View Details" onClick={() => handleViewUser(user)}>
                                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                                             </button>
-                                            <button className="action-btn edit" title="Edit User" onClick={() => handleEditClick(user)}>
-                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4L18.5 2.5z"></path></svg>
-                                            </button>
                                             <button
                                                 className={`action-btn toggle ${user.status === 'Active' ? 'deactivate' : 'activate'}`}
                                                 title={user.status === 'Active' ? 'Deactivate' : 'Activate'}
@@ -404,6 +507,29 @@ const UserManagement = () => {
                                     padding: '30px',
                                     background: 'var(--bg-color)'
                                 }}>
+                                    {/* Error Banner */}
+                                    {submitError && (
+                                        <div style={{
+                                            padding: '12px 16px',
+                                            marginBottom: '20px',
+                                            background: '#fee2e2',
+                                            border: '1px solid #fecaca',
+                                            borderRadius: '10px',
+                                            color: '#991b1b',
+                                            fontSize: '0.875rem',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '8px'
+                                        }}>
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                <circle cx="12" cy="12" r="10"></circle>
+                                                <line x1="12" y1="8" x2="12" y2="12"></line>
+                                                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                                            </svg>
+                                            <span>{submitError}</span>
+                                        </div>
+                                    )}
+                                    
                                     {/* Personal Information Section */}
                                     <div style={{ marginBottom: '28px' }}>
                                         <div style={{ 
@@ -467,13 +593,18 @@ const UserManagement = () => {
                                                         width: '100%',
                                                         padding: '11px 14px',
                                                         borderRadius: '10px',
-                                                        border: '1.5px solid var(--border-color)',
+                                                        border: errors.firstName ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
                                                         background: 'var(--card-bg)',
                                                         fontSize: '0.9rem',
                                                         color: 'var(--text-color)',
                                                         transition: 'all 0.2s'
                                                     }}
                                                 />
+                                                {errors.firstName && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
+                                                        {errors.firstName}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="form-group" style={{ flex: 0.6 }}>
                                                 <label style={{ 
@@ -524,12 +655,17 @@ const UserManagement = () => {
                                                         width: '100%',
                                                         padding: '11px 14px',
                                                         borderRadius: '10px',
-                                                        border: '1.5px solid var(--border-color)',
+                                                        border: errors.lastName ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
                                                         background: 'var(--card-bg)',
                                                         fontSize: '0.9rem',
                                                         color: 'var(--text-color)'
                                                     }}
                                                 />
+                                                {errors.lastName && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
+                                                        {errors.lastName}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
 
@@ -553,7 +689,7 @@ const UserManagement = () => {
                                                         width: '100%',
                                                         padding: '11px 14px',
                                                         borderRadius: '10px',
-                                                        border: '1.5px solid var(--border-color)',
+                                                        border: errors.gender ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
                                                         background: 'var(--card-bg)',
                                                         fontSize: '0.9rem',
                                                         color: 'var(--text-color)',
@@ -564,6 +700,11 @@ const UserManagement = () => {
                                                     <option value="Male">Male</option>
                                                     <option value="Female">Female</option>
                                                 </select>
+                                                {errors.gender && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
+                                                        {errors.gender}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="form-group" style={{ flex: 1 }}>
                                                 <label style={{ 
@@ -588,12 +729,17 @@ const UserManagement = () => {
                                                         width: '100%',
                                                         padding: '11px 14px',
                                                         borderRadius: '10px',
-                                                        border: '1.5px solid var(--border-color)',
+                                                        border: errors.age ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
                                                         background: 'var(--card-bg)',
                                                         fontSize: '0.9rem',
                                                         color: 'var(--text-color)'
                                                     }}
                                                 />
+                                                {errors.age && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
+                                                        {errors.age}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="form-group" style={{ flex: 1 }}>
                                                 <label style={{ 
@@ -719,12 +865,17 @@ const UserManagement = () => {
                                                         width: '100%',
                                                         padding: '11px 14px',
                                                         borderRadius: '10px',
-                                                        border: '1.5px solid var(--border-color)',
+                                                        border: errors.contactNumber ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
                                                         background: 'var(--card-bg)',
                                                         fontSize: '0.9rem',
                                                         color: 'var(--text-color)'
                                                     }}
                                                 />
+                                                {errors.contactNumber && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
+                                                        {errors.contactNumber}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="form-group" style={{ flex: 1 }}>
                                                 <label style={{ 
@@ -747,12 +898,17 @@ const UserManagement = () => {
                                                         width: '100%',
                                                         padding: '11px 14px',
                                                         borderRadius: '10px',
-                                                        border: '1.5px solid var(--border-color)',
+                                                        border: errors.email ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
                                                         background: 'var(--card-bg)',
                                                         fontSize: '0.9rem',
                                                         color: 'var(--text-color)'
                                                     }}
                                                 />
+                                                {errors.email && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
+                                                        {errors.email}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -808,24 +964,60 @@ const UserManagement = () => {
                                                 }}>
                                                     Password <span style={{ color: '#ef4444' }}>*</span>
                                                 </label>
-                                                <input
-                                                    type="password"
-                                                    name="password"
-                                                    placeholder="Min. 8 characters"
-                                                    minLength="8"
-                                                    value={userData.password}
-                                                    onChange={handleInputChange}
-                                                    required={!editingUser}
-                                                    style={{
-                                                        width: '100%',
-                                                        padding: '11px 14px',
-                                                        borderRadius: '10px',
-                                                        border: '1.5px solid var(--border-color)',
-                                                        background: 'var(--card-bg)',
-                                                        fontSize: '0.9rem',
-                                                        color: 'var(--text-color)'
-                                                    }}
-                                                />
+                                                <div style={{ position: 'relative' }}>
+                                                    <input
+                                                        type={showPassword ? "text" : "password"}
+                                                        name="password"
+                                                        placeholder="Min. 8 characters"
+                                                        minLength="8"
+                                                        value={userData.password}
+                                                        onChange={handleInputChange}
+                                                        required={!editingUser}
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '11px 40px 11px 14px',
+                                                            borderRadius: '10px',
+                                                            border: errors.password ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
+                                                            background: 'var(--card-bg)',
+                                                            fontSize: '0.9rem',
+                                                            color: 'var(--text-color)'
+                                                        }}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowPassword(!showPassword)}
+                                                        style={{
+                                                            position: 'absolute',
+                                                            right: '12px',
+                                                            top: '50%',
+                                                            transform: 'translateY(-50%)',
+                                                            background: 'none',
+                                                            border: 'none',
+                                                            cursor: 'pointer',
+                                                            padding: '4px',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            color: 'var(--secondary-text)'
+                                                        }}
+                                                    >
+                                                        {showPassword ? (
+                                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                                                                <line x1="1" y1="1" x2="23" y2="23"></line>
+                                                            </svg>
+                                                        ) : (
+                                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                                                <circle cx="12" cy="12" r="3"></circle>
+                                                            </svg>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                                {errors.password && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
+                                                        {errors.password}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="form-group" style={{ flex: 1 }}>
                                                 <label style={{ 
@@ -837,24 +1029,60 @@ const UserManagement = () => {
                                                 }}>
                                                     Confirm Password <span style={{ color: '#ef4444' }}>*</span>
                                                 </label>
-                                                <input
-                                                    type="password"
-                                                    name="confirmPassword"
-                                                    placeholder="Re-enter password"
-                                                    minLength="8"
-                                                    value={userData.confirmPassword}
-                                                    onChange={handleInputChange}
-                                                    required={!editingUser}
-                                                    style={{
-                                                        width: '100%',
-                                                        padding: '11px 14px',
-                                                        borderRadius: '10px',
-                                                        border: '1.5px solid var(--border-color)',
-                                                        background: 'var(--card-bg)',
-                                                        fontSize: '0.9rem',
-                                                        color: 'var(--text-color)'
-                                                    }}
-                                                />
+                                                <div style={{ position: 'relative' }}>
+                                                    <input
+                                                        type={showConfirmPassword ? "text" : "password"}
+                                                        name="confirmPassword"
+                                                        placeholder="Re-enter password"
+                                                        minLength="8"
+                                                        value={userData.confirmPassword}
+                                                        onChange={handleInputChange}
+                                                        required={!editingUser}
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '11px 40px 11px 14px',
+                                                            borderRadius: '10px',
+                                                            border: errors.confirmPassword ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
+                                                            background: 'var(--card-bg)',
+                                                            fontSize: '0.9rem',
+                                                            color: 'var(--text-color)'
+                                                        }}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                                                        style={{
+                                                            position: 'absolute',
+                                                            right: '12px',
+                                                            top: '50%',
+                                                            transform: 'translateY(-50%)',
+                                                            background: 'none',
+                                                            border: 'none',
+                                                            cursor: 'pointer',
+                                                            padding: '4px',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            color: 'var(--secondary-text)'
+                                                        }}
+                                                    >
+                                                        {showConfirmPassword ? (
+                                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                                                                <line x1="1" y1="1" x2="23" y2="23"></line>
+                                                            </svg>
+                                                        ) : (
+                                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                                                <circle cx="12" cy="12" r="3"></circle>
+                                                            </svg>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                                {errors.confirmPassword && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
+                                                        {errors.confirmPassword}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -952,19 +1180,25 @@ const UserManagement = () => {
                                                         width: '100%',
                                                         padding: '11px 14px',
                                                         borderRadius: '10px',
-                                                        border: '1.5px solid var(--border-color)',
+                                                        border: errors.branch ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
                                                         background: 'var(--card-bg)',
                                                         fontSize: '0.9rem',
                                                         color: 'var(--text-color)',
                                                         cursor: 'pointer'
                                                     }}
                                                 >
-                                                    <option value="Main Branch">Main Branch</option>
-                                                    <option value="Lipa Branch">Lipa Branch</option>
-                                                    <option value="Tanauan Branch">Tanauan Branch</option>
-                                                    <option value="Batangas Branch">Batangas Branch</option>
-                                                    <option value="V. Luna Branch">V. Luna Branch</option>
+                                                    <option value="">Select a branch</option>
+                                                    {branches.map((branch) => (
+                                                        <option key={branch.id} value={branch.name}>
+                                                            {branch.name}
+                                                        </option>
+                                                    ))}
                                                 </select>
+                                                {errors.branch && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
+                                                        {errors.branch}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -1020,45 +1254,648 @@ const UserManagement = () => {
                 {/* View User Modal */}
                 {showViewModal && selectedUser && (
                     <div className="modal-overlay">
-                        <div className="modal-container profile-modal" style={{ maxWidth: '450px' }}>
-                            <div className="modal-header">
-                                <h2>User Profile</h2>
-                                <button className="close-modal" onClick={() => setShowViewModal(false)}>&times;</button>
-                            </div>
-                            <div className="modal-body profile-body" style={{ textAlign: 'center', padding: '30px' }}>
-                                <div className="profile-photo-container" style={{ position: 'relative', display: 'inline-block', marginBottom: '20px' }}>
-                                    <img
-                                        src={selectedUser.avatar}
-                                        alt={selectedUser.name}
-                                        style={{ width: '120px', height: '120px', borderRadius: '50%', objectFit: 'cover', border: '4px solid #f8fafc', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                                    />
-                                    <span className={`status-badge-overlay ${selectedUser.status.toLowerCase()}`} style={{ position: 'absolute', bottom: '5px', right: '5px' }}></span>
+                        <div className="modal-container profile-modal" style={{ 
+                            maxWidth: '700px',
+                            width: '95%',
+                            background: 'var(--card-bg)'
+                        }}>
+                            <div className="modal-header" style={{
+                                background: 'var(--card-bg)',
+                                borderBottom: '1px solid var(--border-color)',
+                                padding: '24px 30px'
+                            }}>
+                                <div>
+                                    <h2 style={{ 
+                                        color: 'var(--text-color)', 
+                                        marginBottom: '4px', 
+                                        fontWeight: '700',
+                                        fontSize: '1.35rem'
+                                    }}>User Profile</h2>
+                                    <p style={{ 
+                                        fontSize: '0.85rem', 
+                                        color: 'var(--secondary-text)', 
+                                        margin: 0 
+                                    }}>Complete account information and details</p>
                                 </div>
-                                <h1 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b', marginBottom: '5px' }}>{selectedUser.name}</h1>
-                                <p style={{ color: '#64748b', marginBottom: '20px' }}>{selectedUser.email}</p>
+                                <button 
+                                    className="close-modal" 
+                                    onClick={() => setShowViewModal(false)}
+                                    style={{
+                                        background: 'var(--card-bg)',
+                                        border: '1.5px solid var(--border-color)',
+                                        color: 'var(--text-color)'
+                                    }}
+                                >&times;</button>
+                            </div>
+                            
+                            <div className="modal-body profile-body" style={{ 
+                                padding: '0',
+                                maxHeight: '600px',
+                                overflowY: 'auto',
+                                background: 'var(--bg-color)'
+                            }}>
+                                {/* Profile Header Section */}
+                                <div style={{
+                                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                    padding: '40px 30px 80px',
+                                    position: 'relative',
+                                    textAlign: 'center'
+                                }}>
+                                    <div style={{
+                                        width: '120px',
+                                        height: '120px',
+                                        borderRadius: '50%',
+                                        margin: '0 auto',
+                                        border: '5px solid rgba(255,255,255,0.3)',
+                                        overflow: 'hidden',
+                                        boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+                                        position: 'relative'
+                                    }}>
+                                        <img
+                                            src={selectedUser.avatar}
+                                            alt={selectedUser.name}
+                                            style={{ 
+                                                width: '100%', 
+                                                height: '100%', 
+                                                objectFit: 'cover'
+                                            }}
+                                        />
+                                        <span 
+                                            className={`status-badge-overlay ${selectedUser.status.toLowerCase()}`}
+                                            style={{
+                                                position: 'absolute',
+                                                bottom: '5px',
+                                                right: '5px',
+                                                width: '20px',
+                                                height: '20px',
+                                                borderRadius: '50%',
+                                                border: '3px solid white',
+                                                background: selectedUser.status === 'Active' ? '#10b981' : '#ef4444'
+                                            }}
+                                        ></span>
+                                    </div>
+                                </div>
 
-                                <div className="profile-details-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', textAlign: 'left', marginTop: '20px' }}>
-                                    <div className="detail-item">
-                                        <label style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Access Level</label>
-                                        <div style={{ fontWeight: '600', color: '#334155' }}>{selectedUser.role}</div>
+                                {/* Info Card Overlay */}
+                                <div style={{
+                                    margin: '-50px 30px 0',
+                                    background: 'var(--card-bg)',
+                                    borderRadius: '16px',
+                                    padding: '25px',
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                                    border: '1px solid var(--border-color)',
+                                    textAlign: 'center',
+                                    marginBottom: '25px'
+                                }}>
+                                    <h1 style={{ 
+                                        fontSize: '1.5rem', 
+                                        fontWeight: '700', 
+                                        color: 'var(--text-color)', 
+                                        marginBottom: '5px',
+                                        margin: 0
+                                    }}>{selectedUser.name}</h1>
+                                    <p style={{ 
+                                        color: 'var(--secondary-text)', 
+                                        margin: '5px 0 15px',
+                                        fontSize: '0.95rem'
+                                    }}>{selectedUser.email}</p>
+                                    
+                                    <div style={{
+                                        display: 'flex',
+                                        gap: '10px',
+                                        justifyContent: 'center',
+                                        flexWrap: 'wrap'
+                                    }}>
+                                        <span style={{
+                                            padding: '6px 14px',
+                                            borderRadius: '20px',
+                                            fontSize: '0.8rem',
+                                            fontWeight: '600',
+                                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                            color: 'white',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '5px'
+                                        }}>
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                                <circle cx="12" cy="7" r="4"></circle>
+                                            </svg>
+                                            {selectedUser.role}
+                                        </span>
+                                        <span style={{
+                                            padding: '6px 14px',
+                                            borderRadius: '20px',
+                                            fontSize: '0.8rem',
+                                            fontWeight: '600',
+                                            background: selectedUser.status === 'Active' ? '#d1fae5' : '#fee2e2',
+                                            color: selectedUser.status === 'Active' ? '#065f46' : '#991b1b'
+                                        }}>
+                                            {selectedUser.status}
+                                        </span>
                                     </div>
-                                    <div className="detail-item">
-                                        <label style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Branch Office</label>
-                                        <div style={{ fontWeight: '600', color: '#334155' }}>{selectedUser.branch}</div>
+                                </div>
+
+                                {/* Details Sections */}
+                                <div style={{ padding: '0 30px 30px' }}>
+                                    {/* Personal Information */}
+                                    <div style={{ marginBottom: '25px' }}>
+                                        <h3 style={{
+                                            fontSize: '0.85rem',
+                                            fontWeight: '700',
+                                            color: 'var(--text-color)',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.05em',
+                                            marginBottom: '15px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '8px'
+                                        }}>
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                                <circle cx="12" cy="7" r="4"></circle>
+                                            </svg>
+                                            Personal Information
+                                        </h3>
+                                        <div style={{
+                                            display: 'grid',
+                                            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                                            gap: '15px'
+                                        }}>
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>First Name</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: 'var(--text-color)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.firstName}</div>
+                                            </div>
+                                            
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Middle Name</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: selectedUser.middleInitial ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.middleInitial || 'Not provided'}</div>
+                                            </div>
+                                            
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Last Name</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: 'var(--text-color)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.lastName}</div>
+                                            </div>
+                                            
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Age</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: selectedUser.age ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.age ? `${selectedUser.age} years old` : 'Not provided'}</div>
+                                            </div>
+                                            
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Gender</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: selectedUser.gender ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.gender || 'Not provided'}</div>
+                                            </div>
+                                            
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Birthday</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: selectedUser.birthday ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.birthday ? new Date(selectedUser.birthday).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not provided'}</div>
+                                            </div>
+                                            
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Birth Place</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: selectedUser.birthPlace ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.birthPlace || 'Not provided'}</div>
+                                            </div>
+                                            
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Nationality</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: selectedUser.nationality ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.nationality || 'Not provided'}</div>
+                                            </div>
+                                            
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Marital Status</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: selectedUser.maritalStatus ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.maritalStatus || 'Not provided'}</div>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="detail-item">
-                                        <label style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Account Status</label>
-                                        <div style={{ fontWeight: '600', color: selectedUser.status === 'Active' ? '#16a34a' : '#dc2626' }}>{selectedUser.status}</div>
+
+                                    {/* Contact Information */}
+                                    <div style={{ marginBottom: '25px' }}>
+                                        <h3 style={{
+                                            fontSize: '0.85rem',
+                                            fontWeight: '700',
+                                            color: 'var(--text-color)',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.05em',
+                                            marginBottom: '15px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '8px'
+                                        }}>
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                                            </svg>
+                                            Address & Contact
+                                        </h3>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Full Address</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: selectedUser.address ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                    fontSize: '0.95rem',
+                                                    lineHeight: '1.5'
+                                                }}>{selectedUser.address || 'Not provided'}</div>
+                                            </div>
+                                            
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                                                <div style={{
+                                                    background: 'var(--card-bg)',
+                                                    padding: '14px',
+                                                    borderRadius: '12px',
+                                                    border: '1px solid var(--border-color)'
+                                                }}>
+                                                    <label style={{ 
+                                                        fontSize: '0.7rem', 
+                                                        color: 'var(--secondary-text)', 
+                                                        textTransform: 'uppercase', 
+                                                        letterSpacing: '0.05em',
+                                                        display: 'block',
+                                                        marginBottom: '5px'
+                                                    }}>Zip Code</label>
+                                                    <div style={{ 
+                                                        fontWeight: '600', 
+                                                        color: selectedUser.zipCode ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                        fontSize: '0.95rem'
+                                                    }}>{selectedUser.zipCode || 'Not provided'}</div>
+                                                </div>
+                                                
+                                                <div style={{
+                                                    background: 'var(--card-bg)',
+                                                    padding: '14px',
+                                                    borderRadius: '12px',
+                                                    border: '1px solid var(--border-color)'
+                                                }}>
+                                                    <label style={{ 
+                                                        fontSize: '0.7rem', 
+                                                        color: 'var(--secondary-text)', 
+                                                        textTransform: 'uppercase', 
+                                                        letterSpacing: '0.05em',
+                                                        display: 'block',
+                                                        marginBottom: '5px'
+                                                    }}>Contact Number</label>
+                                                    <div style={{ 
+                                                        fontWeight: '600', 
+                                                        color: selectedUser.contactNumber ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                        fontSize: '0.95rem'
+                                                    }}>{selectedUser.contactNumber || 'Not provided'}</div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Email Address</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: 'var(--text-color)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.email}</div>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="detail-item">
-                                        <label style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Activity</label>
-                                        <div style={{ fontWeight: '600', color: '#334155' }}>{selectedUser.lastLogin}</div>
+                                    
+                                    {/* Emergency Contact */}
+                                    <div style={{ marginBottom: '25px' }}>
+                                        <h3 style={{
+                                            fontSize: '0.85rem',
+                                            fontWeight: '700',
+                                            color: 'var(--text-color)',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.05em',
+                                            marginBottom: '15px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '8px'
+                                        }}>
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                                                <line x1="12" y1="9" x2="12" y2="13"></line>
+                                                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                            </svg>
+                                            Emergency Contact
+                                        </h3>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Contact Person</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: selectedUser.emergencyContactPerson ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.emergencyContactPerson || 'Not provided'}</div>
+                                            </div>
+                                            
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Emergency Number</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: selectedUser.emergencyContactNumber ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.emergencyContactNumber || 'Not provided'}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Work Information */}
+                                    <div>
+                                        <h3 style={{
+                                            fontSize: '0.85rem',
+                                            fontWeight: '700',
+                                            color: 'var(--text-color)',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.05em',
+                                            marginBottom: '15px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '8px'
+                                        }}>
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                                                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                                            </svg>
+                                            Work Details
+                                        </h3>
+                                        <div style={{
+                                            display: 'grid',
+                                            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                                            gap: '15px'
+                                        }}>
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Branch Office</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: 'var(--text-color)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.branch}</div>
+                                            </div>
+                                            <div style={{
+                                                background: 'var(--card-bg)',
+                                                padding: '14px',
+                                                borderRadius: '12px',
+                                                border: '1px solid var(--border-color)'
+                                            }}>
+                                                <label style={{ 
+                                                    fontSize: '0.7rem', 
+                                                    color: 'var(--secondary-text)', 
+                                                    textTransform: 'uppercase', 
+                                                    letterSpacing: '0.05em',
+                                                    display: 'block',
+                                                    marginBottom: '5px'
+                                                }}>Last Activity</label>
+                                                <div style={{ 
+                                                    fontWeight: '600', 
+                                                    color: 'var(--text-color)',
+                                                    fontSize: '0.95rem'
+                                                }}>{selectedUser.lastLogin}</div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                            <div className="modal-footer" style={{ borderTop: '1px solid #f1f5f9', padding: '20px', display: 'flex', gap: '10px' }}>
-                                <button className="prev-btn" style={{ flex: 1 }} onClick={() => setShowViewModal(false)}>Close View</button>
-                                <button className="confirm-btn" style={{ flex: 1 }}>Edit Account</button>
+                            
+                            <div className="modal-footer" style={{ 
+                                borderTop: '1px solid var(--border-color)', 
+                                padding: '20px 30px', 
+                                display: 'flex', 
+                                gap: '12px',
+                                background: 'var(--card-bg)',
+                                flexWrap: 'wrap'
+                            }}>
+                                <button 
+                                    className="prev-btn" 
+                                    style={{ 
+                                        flex: '1 1 150px',
+                                        padding: '12px 24px',
+                                        borderRadius: '10px',
+                                        border: '1.5px solid var(--border-color)',
+                                        background: 'var(--card-bg)',
+                                        color: 'var(--text-color)',
+                                        fontSize: '0.9rem',
+                                        fontWeight: '600',
+                                        cursor: 'pointer'
+                                    }} 
+                                    onClick={() => setShowViewModal(false)}
+                                >Close View</button>
+                                <button 
+                                    className="confirm-btn" 
+                                    style={{ 
+                                        flex: '1 1 150px',
+                                        padding: '12px 24px',
+                                        borderRadius: '10px',
+                                        border: 'none',
+                                        background: 'var(--primary-color)',
+                                        color: 'white',
+                                        fontSize: '0.9rem',
+                                        fontWeight: '600',
+                                        cursor: 'pointer'
+                                    }}
+                                    onClick={() => {
+                                        setShowViewModal(false);
+                                        handleEditClick(selectedUser);
+                                    }}
+                                >Edit Profile</button>
                             </div>
                         </div>
                     </div>

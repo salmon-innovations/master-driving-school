@@ -33,6 +33,7 @@ const apiRequest = async (endpoint, options = {}) => {
       const error = new Error(data.error || 'Something went wrong');
       error.statusCode = response.status;
       error.needsVerification = data.needsVerification;
+      error.accountLocked = data.accountLocked;
       error.email = data.email;
       error.userId = data.userId;
       throw error;
@@ -108,10 +109,21 @@ export const authAPI = {
     });
   },
 
-  // Logout (client-side)
-  logout: () => {
-    localStorage.removeItem('userToken');
-    localStorage.removeItem('user');
+  // Logout (update last activity and clear local storage)
+  logout: async () => {
+    try {
+      // Call server to update last_login timestamp
+      await apiRequest('/auth/logout', {
+        method: 'POST',
+      });
+    } catch (error) {
+      console.warn('Failed to update last activity on server:', error);
+      // Continue with logout even if server call fails
+    } finally {
+      // Clear local storage
+      localStorage.removeItem('userToken');
+      localStorage.removeItem('user');
+    }
   },
 };
 

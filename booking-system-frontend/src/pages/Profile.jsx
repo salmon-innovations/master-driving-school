@@ -104,11 +104,19 @@ function Profile({ onNavigate, setIsLoggedIn }) {
     }
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem('user')
-    localStorage.removeItem('userToken')
-    setIsLoggedIn(false)
-    onNavigate('home')
+  const handleLogout = async () => {
+    try {
+      await authAPI.logout()
+      setIsLoggedIn(false)
+      onNavigate('home')
+    } catch (error) {
+      console.error('Logout error:', error)
+      // Still logout on client side even if server call fails
+      localStorage.removeItem('user')
+      localStorage.removeItem('userToken')
+      setIsLoggedIn(false)
+      onNavigate('home')
+    }
   }
 
   const getStatusColor = (status) => {

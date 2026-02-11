@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { authAPI, setAuthToken } from '../services/api'
 import { useNotification } from '../context/NotificationContext'
 
-function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
+function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLockedAccountEmail }) {
   const { showNotification } = useNotification()
   const [formData, setFormData] = useState({
     email: '',
@@ -87,14 +87,39 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
           onNavigate('branches')
         }
       } catch (error) {
+        console.log('Login error:', error);
+        console.log('Error properties:', { 
+          accountLocked: error.accountLocked,
+          needsVerification: error.needsVerification,
+          statusCode: error.statusCode,
+          message: error.message 
+        });
+        
+        // IMPORTANT: Check account locked FIRST before email verification
+        // Both return 403, but accountLocked flag differentiates them
+        if (error.accountLocked === true) {
+          console.log('Account is locked, navigating to lock-account page');
+          setLockedAccountEmail(error.email || formData.email)
+          onNavigate('lock-account')
+          return
+        }
+        
+        // Check if message contains 'locked' (fallback check)
+        if (error.message && error.message.toLowerCase().includes('locked')) {
+          console.log('Lock detected in message, navigating to lock-account page');
+          setLockedAccountEmail(error.email || formData.email)
+          onNavigate('lock-account')
+          return
+        }
+        
         // Check if user needs email verification
-        if (error.needsVerification || error.statusCode === 403 || (error.message && error.message.includes('verify'))) {
+        if (error.needsVerification === true || (error.statusCode === 403 && error.message && error.message.toLowerCase().includes('verify'))) {
           setPendingVerificationEmail(error.email || formData.email)
-          // Show success message that code was sent
           showNotification('A verification code has been sent to your email. Please check your inbox (including spam folder).', 'success')
           onNavigate('verify-email')
           return
         }
+        
         setErrors({ general: error.message || 'Login failed. Please try again.' })
       } finally {
         setLoading(false)

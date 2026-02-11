@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import AOS from 'aos'
 import 'aos/dist/aos.css'
+import { authAPI } from './services/api'
 import Header from './components/Header'
 import Footer from './components/Footer'
 import Cart from './components/Cart'
@@ -17,6 +18,7 @@ import SignIn from './pages/SignIn'
 import SignUp from './pages/SignUp'
 import VerifyEmail from './pages/VerifyEmail'
 import ForgotPassword from './pages/ForgotPassword'
+import LockAccount from './pages/LockAccount'
 import Profile from './pages/Profile'
 import Payment from './pages/Payment'
 import Schedule from './pages/Schedule'
@@ -34,6 +36,7 @@ function App() {
   const [showCart, setShowCart] = useState(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState(sessionStorage.getItem('pendingEmail') || '')
+  const [lockedAccountEmail, setLockedAccountEmail] = useState(sessionStorage.getItem('lockedEmail') || '')
   const [preSelectedBranch, setPreSelectedBranch] = useState(null)
   const [selectedCourseForSchedule, setSelectedCourseForSchedule] = useState(null)
   const [scheduleSelection, setScheduleSelection] = useState(null)
@@ -62,6 +65,10 @@ function App() {
     sessionStorage.setItem('pendingEmail', pendingVerificationEmail)
   }, [pendingVerificationEmail])
 
+  useEffect(() => {
+    sessionStorage.setItem('lockedEmail', lockedAccountEmail)
+  }, [lockedAccountEmail])
+
   // Check if user is logged in on mount
   useEffect(() => {
     const userToken = localStorage.getItem('userToken')
@@ -72,11 +79,19 @@ function App() {
     return cart.reduce((total, item) => total + item.quantity, 0)
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem('userToken')
-    localStorage.removeItem('user')
-    setIsLoggedIn(false)
-    setCurrentPage('home')
+  const handleLogout = async () => {
+    try {
+      await authAPI.logout()
+      setIsLoggedIn(false)
+      setCurrentPage('home')
+    } catch (error) {
+      console.error('Logout error:', error)
+      // Still logout on client side even if server call fails
+      localStorage.removeItem('userToken')
+      localStorage.removeItem('user')
+      setIsLoggedIn(false)
+      setCurrentPage('home')
+    }
   }
 
   const handleCartClick = () => {
@@ -95,10 +110,11 @@ function App() {
       case 'terms': return <TermsOfUse />
       case 'privacy': return <PrivacyPolicy />
       case 'conditions': return <TermsAndConditions />
-      case 'signin': return <SignIn onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} setPendingVerificationEmail={setPendingVerificationEmail} />
+      case 'signin': return <SignIn onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} setPendingVerificationEmail={setPendingVerificationEmail} setLockedAccountEmail={setLockedAccountEmail} />
       case 'signup': return <SignUp onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} setPendingVerificationEmail={setPendingVerificationEmail} />
       case 'verify-email': return <VerifyEmail onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} userEmail={pendingVerificationEmail} />
       case 'forgot-password': return <ForgotPassword onNavigate={setCurrentPage} />
+      case 'lock-account': return <LockAccount onNavigate={setCurrentPage} lockedEmail={lockedAccountEmail} />
       case 'profile': return <Profile onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
       case 'payment': return <Payment cart={cart} setCart={setCart} onNavigate={setCurrentPage} isLoggedIn={isLoggedIn} preSelectedBranch={preSelectedBranch} scheduleSelection={scheduleSelection} />
       case 'admin': return <Admin onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
@@ -106,7 +122,7 @@ function App() {
     }
   }
 
-  const isAuthPage = ['signin', 'signup', 'verify-email', 'forgot-password', 'admin'].includes(currentPage)
+  const isAuthPage = ['signin', 'signup', 'verify-email', 'forgot-password', 'lock-account', 'admin'].includes(currentPage)
 
   return (
     <ThemeProvider>

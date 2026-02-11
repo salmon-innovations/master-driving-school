@@ -6,6 +6,7 @@ import Booking from './Booking';
 import SalePayment from './SalePayment';
 import UserManagement from './User';
 import WalkInEnrollment from './WalkInEnrollment';
+import CourseManagement from './CourseManagement';
 import { useTheme } from '../context/ThemeContext';
 import { useNotification } from '../context/NotificationContext';
 import { authAPI, adminAPI } from '../services/api';
@@ -425,7 +426,9 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                                     activeTab === 'settings' ? 'Settings' :
                                                         activeTab === 'walk-in' ? 'Walk-in Enrollment' :
                                                             activeTab === 'news' ? 'News & Events' :
-                                                                'Accounts'}
+                                                                activeTab === 'users' ? 'Account Management' :
+                                                                    activeTab === 'courses' ? 'Course Management' :
+                                                                        'Dashboard'}
                             </h1>
                             <p>Welcome back, Admin</p>
                         </div>
@@ -1041,9 +1044,11 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                             </div>
                         </div>
                     </div>
-                ) : (
+                ) : activeTab === 'users' ? (
                     <UserManagement />
-                )}
+                ) : activeTab === 'courses' ? (
+                    <CourseManagement />
+                ) : null}
                 {/* Add Student Modal */}
                 {showStudentModal && (
                     <div className="modal-overlay">

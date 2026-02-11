@@ -174,12 +174,32 @@ const login = async (req, res) => {
     }
 
     const user = result.rows[0];
+    
+    // Debug: Log user status from database
+    console.log('🔍 Login attempt for:', user.email);
+    console.log('🔍 User status from DB:', user.status);
+    console.log('🔍 User role:', user.role);
 
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
+
+    // Check if account is inactive (check before email verification)
+    const userStatus = (user.status || 'active').toLowerCase();
+    console.log('🔍 Processed status:', userStatus);
+    
+    if (userStatus === 'inactive') {
+      console.log('❌ Login blocked: Account is inactive for user:', user.email);
+      return res.status(403).json({ 
+        error: 'Your account has been locked. Please contact support for assistance.',
+        accountLocked: true,
+        email: user.email
+      });
+    }
+    
+    console.log('✅ Status check passed, account is active');
 
     // Check if email is verified
     if (!user.is_verified) {
@@ -519,9 +539,31 @@ const resetPassword = async (req, res) => {
   }
 };
 
+// Logout user (update last_login timestamp)
+const logout = async (req, res) => {
+  try {
+    const userId = req.user.id; // From authenticateToken middleware
+
+    // Update last_login timestamp
+    await pool.query(
+      'UPDATE users SET last_login = NOW() WHERE id = $1',
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Logged out successfully',
+    });
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({ error: 'Server error during logout' });
+  }
+};
+
 module.exports = {
   register,
   login,
+  logout,
   getProfile,
   verifyEmail,
   resendVerificationCode,

@@ -92,20 +92,25 @@ const getAllUsers = async (req, res) => {
     const { role, limit = 100 } = req.query;
 
     let query = `
-      SELECT id, first_name, middle_name, last_name, email, role, 
-             contact_numbers, address, created_at, is_verified
-      FROM users
+      SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.role, 
+             u.contact_numbers, u.address, u.gender, u.age, u.birthday, 
+             u.status, u.last_login, u.created_at, u.is_verified,
+             u.birth_place, u.nationality, u.marital_status, u.zip_code,
+             u.emergency_contact_person, u.emergency_contact_number,
+             u.branch_id, b.name as branch_name
+      FROM users u
+      LEFT JOIN branches b ON u.branch_id = b.id
     `;
 
     const queryParams = [];
     
     if (role) {
-      query += ` WHERE role = $1`;
+      query += ` WHERE u.role = $1`;
       queryParams.push(role);
-      query += ` ORDER BY created_at DESC LIMIT $2`;
+      query += ` ORDER BY u.created_at DESC LIMIT $2`;
       queryParams.push(limit);
     } else {
-      query += ` ORDER BY created_at DESC LIMIT $1`;
+      query += ` ORDER BY u.created_at DESC LIMIT $1`;
       queryParams.push(limit);
     }
 
@@ -293,9 +298,9 @@ const createUser = async (req, res) => {
       `INSERT INTO users (
         first_name, middle_name, last_name, email, password, 
         gender, age, birthday, address, contact_numbers, 
-        role, branch, status, is_verified
+        role, branch_id, status, is_verified
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-      RETURNING id, first_name, middle_name, last_name, email, role, branch, status, created_at`,
+      RETURNING id, first_name, middle_name, last_name, email, role, branch_id, status, created_at`,
       [
         firstName,
         middleInitial || null,
@@ -308,7 +313,7 @@ const createUser = async (req, res) => {
         address,
         contactNumber,
         role,
-        branch,
+        branch ? parseInt(branch) : null, // branch_id is integer
         'active',
         true, // Auto-verify admin/staff accounts
       ]
@@ -418,12 +423,12 @@ const toggleUserStatus = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const currentStatus = userResult.rows[0].status;
+    const currentStatus = (userResult.rows[0].status || 'active').toLowerCase();
     const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
 
     // Update status
     const result = await pool.query(
-      `UPDATE users SET status = $1, updated_at = CURRENT_TIMESTAMP 
+      `UPDATE users SET status = $1 
        WHERE id = $2 
        RETURNING id, status`,
       [newStatus, id]
