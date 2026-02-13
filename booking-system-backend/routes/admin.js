@@ -12,12 +12,13 @@ const {
   createUser,
   updateUser,
   toggleUserStatus,
+  resetUserPassword,
 } = require('../controllers/adminController');
 const { authenticateToken } = require('../middleware/auth');
 
 // Middleware to check if user is admin
 const isAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'staff') {
+  if (req.user.role !== 'admin' && req.user.role !== 'hrm' && req.user.role !== 'staff') {
     return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
   }
   next();
@@ -55,5 +56,6 @@ router.get('/best-selling-courses', getBestSellingCourses);
 router.post('/users', createUser);
 router.put('/users/:id', updateUser);
 router.patch('/users/:id/status', toggleUserStatus);
+router.post('/users/:id/reset-password', resetUserPassword);
 
 module.exports = router;

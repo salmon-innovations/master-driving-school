@@ -7,6 +7,28 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
   const [branches, setBranches] = useState([])
   const [loading, setLoading] = useState(true)
 
+  // Format branch name - remove company prefixes
+  const formatBranchName = (name) => {
+    if (!name) return name;
+    
+    const prefixes = [
+      'Master Driving School ',
+      'Master Prime Driving School ',
+      'Masters Prime Holdings Corp. ',
+      'Master Prime Holdings Corp. '
+    ];
+    
+    let formattedName = name;
+    for (const prefix of prefixes) {
+      if (formattedName.startsWith(prefix)) {
+        formattedName = formattedName.substring(prefix.length);
+        break;
+      }
+    }
+    
+    return formattedName;
+  };
+
   useEffect(() => {
     const fetchBranches = async () => {
       try {
@@ -93,7 +115,7 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
                   )}
                 </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-[#2157da] mb-3 sm:mb-4">
-                  {branch.name}
+                  {formatBranchName(branch.name)}
                 </h3>
                 <div className="space-y-2 sm:space-y-3 text-gray-700 flex-grow">
                   <div className="flex items-start">

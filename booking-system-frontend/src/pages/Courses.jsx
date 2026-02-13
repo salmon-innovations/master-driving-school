@@ -9,6 +9,28 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   const [courseType, setCourseType] = useState('online')
   const [quantity, setQuantity] = useState(1)
 
+  // Format branch name - remove company prefixes
+  const formatBranchName = (name) => {
+    if (!name) return name;
+    
+    const prefixes = [
+      'Master Driving School ',
+      'Master Prime Driving School ',
+      'Masters Prime Holdings Corp. ',
+      'Master Prime Holdings Corp. '
+    ];
+    
+    let formattedName = name;
+    for (const prefix of prefixes) {
+      if (formattedName.startsWith(prefix)) {
+        formattedName = formattedName.substring(prefix.length);
+        break;
+      }
+    }
+    
+    return formattedName;
+  };
+
   const packages = [
     {
       id: 1,
@@ -224,7 +246,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                 </div>
                 <div>
                   <p className="text-xs font-bold text-[#2157da] uppercase tracking-wide mb-1">Enrolling at this branch</p>
-                  <p className="text-base sm:text-lg font-bold text-gray-900 leading-tight">{preSelectedBranch.name}</p>
+                  <p className="text-base sm:text-lg font-bold text-gray-900 leading-tight">{formatBranchName(preSelectedBranch.name)}</p>
                 </div>
               </div>
               <button 
@@ -411,7 +433,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] font-semibold text-[#2157da] uppercase tracking-wide">Branch</p>
-                  <p className="text-xs font-bold text-gray-900 truncate">{preSelectedBranch.name}</p>
+                  <p className="text-xs font-bold text-gray-900 truncate">{formatBranchName(preSelectedBranch.name)}</p>
                 </div>
               </div>
               <button 

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import './css/user.css';
 import { adminAPI, branchesAPI } from '../services/api';
+import { useNotification } from '../context/NotificationContext';
 
 const UserManagement = () => {
+    const { showNotification } = useNotification();
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState('All');
     const [users, setUsers] = useState([]);
@@ -10,10 +12,12 @@ const UserManagement = () => {
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [showViewModal, setShowViewModal] = useState(false);
+    const [showPasswordModal, setShowPasswordModal] = useState(false);
     const [selectedUser, setSelectedUser] = useState(null);
+    const [passwordResetUser, setPasswordResetUser] = useState(null);
+    const [newPassword, setNewPassword] = useState('');
+    const [passwordError, setPasswordError] = useState('');
     const [editingUser, setEditingUser] = useState(null);
-    const [showPassword, setShowPassword] = useState(false);
-    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [errors, setErrors] = useState({});
     const [submitError, setSubmitError] = useState('');
     const [userData, setUserData] = useState({
@@ -26,12 +30,11 @@ const UserManagement = () => {
         address: '',
         contactNumber: '',
         email: '',
-        password: '',
-        confirmPassword: '',
         role: 'staff',
         branch: '',
         status: 'active'
     });
+    const [originalEmail, setOriginalEmail] = useState('');
 
     // Fetch users and branches from database
     useEffect(() => {
@@ -83,7 +86,7 @@ const UserManagement = () => {
             setUsers(transformedUsers);
         } catch (error) {
             console.error('Error fetching users:', error);
-            alert('Failed to load users. Please try again.');
+            showNotification('Failed to load users. Please try again.', 'error');
         } finally {
             setLoading(false);
         }
@@ -108,9 +111,53 @@ const UserManagement = () => {
 
     const handleSearch = (e) => setSearchTerm(e.target.value);
 
+    // Format branch name - remove company prefixes
+    const formatBranchName = (name) => {
+        if (!name) return name;
+        
+        const prefixes = [
+            'Master Driving School ',
+            'Master Prime Driving School ',
+            'Masters Prime Holdings Corp. ',
+            'Master Prime Holdings Corp. '
+        ];
+        
+        let formattedName = name;
+        for (const prefix of prefixes) {
+            if (formattedName.startsWith(prefix)) {
+                formattedName = formattedName.substring(prefix.length);
+                break;
+            }
+        }
+        
+        return formattedName;
+    };
+
+    // Format phone number as "09XX XXX XXXX"
+    const formatPhoneNumber = (value) => {
+        // Remove all non-numeric characters
+        const cleaned = value.replace(/\D/g, '');
+        
+        // Limit to 11 digits
+        const limited = cleaned.slice(0, 11);
+        
+        // Format as "09XX XXX XXXX"
+        if (limited.length === 0) return '';
+        if (limited.length <= 4) return limited;
+        if (limited.length <= 7) return `${limited.slice(0, 4)} ${limited.slice(4)}`;
+        return `${limited.slice(0, 4)} ${limited.slice(4, 7)} ${limited.slice(7, 11)}`;
+    };
+
     const handleInputChange = (e) => {
         const { name, value } = e.target;
-        setUserData({ ...userData, [name]: value });
+        
+        // Format phone numbers
+        let formattedValue = value;
+        if (name === 'contactNumber') {
+            formattedValue = formatPhoneNumber(value);
+        }
+        
+        setUserData({ ...userData, [name]: formattedValue });
         
         // Clear error for this field when user starts typing
         if (errors[name]) {
@@ -142,8 +189,11 @@ const UserManagement = () => {
         // Contact number validation
         if (!userData.contactNumber.trim()) {
             newErrors.contactNumber = 'Contact number is required';
-        } else if (!/^[0-9]{10,11}$/.test(userData.contactNumber.replace(/[\s-]/g, ''))) {
-            newErrors.contactNumber = 'Please enter a valid 10-11 digit phone number';
+        } else {
+            const cleanedNumber = userData.contactNumber.replace(/\s/g, '');
+            if (!/^09\d{9}$/.test(cleanedNumber)) {
+                newErrors.contactNumber = 'Phone number must start with 09 and be exactly 11 digits';
+            }
         }
 
         // Age validation
@@ -163,21 +213,6 @@ const UserManagement = () => {
             newErrors.branch = 'Branch selection is required';
         }
 
-        // Password validation (only for new users or if password is being changed)
-        if (!editingUser || userData.password) {
-            if (!userData.password) {
-                newErrors.password = 'Password is required';
-            } else if (userData.password.length < 8) {
-                newErrors.password = 'Password must be at least 8 characters';
-            }
-
-            if (!userData.confirmPassword) {
-                newErrors.confirmPassword = 'Please confirm your password';
-            } else if (userData.password !== userData.confirmPassword) {
-                newErrors.confirmPassword = 'Passwords do not match';
-            }
-        }
-
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
@@ -192,16 +227,19 @@ const UserManagement = () => {
             return;
         }
 
-        // Only allow Admin or Staff creation
-        if (userData.role.toLowerCase() !== 'admin' && userData.role.toLowerCase() !== 'staff') {
-            setSubmitError('Only Admin or Staff members can be added.');
+        // Only allow Admin, HRM, or Staff creation
+        if (userData.role.toLowerCase() !== 'admin' && userData.role.toLowerCase() !== 'hrm' && userData.role.toLowerCase() !== 'staff') {
+            setSubmitError('Only Admin, HRM, or Staff members can be added.');
             return;
         }
 
         try {
             if (editingUser) {
+                // Check if email has changed
+                const emailChanged = userData.email !== originalEmail;
+                
                 // Update existing user
-                await adminAPI.updateUser(editingUser.id, {
+                const response = await adminAPI.updateUser(editingUser.id, {
                     firstName: userData.firstName,
                     middleInitial: userData.middleInitial,
                     lastName: userData.lastName,
@@ -214,11 +252,17 @@ const UserManagement = () => {
                     role: userData.role.toLowerCase(),
                     branch: userData.branch,
                     status: userData.status.toLowerCase(),
+                    emailChanged: emailChanged,
                 });
-                alert('User updated successfully!');
+                
+                if (emailChanged && response.passwordSent) {
+                    showNotification('User updated successfully! A new password has been sent to the updated email address.', 'success');
+                } else {
+                    showNotification('User updated successfully!', 'success');
+                }
             } else {
-                // Create new user (Admin or Staff only)
-                await adminAPI.createUser({
+                // Create new user (Admin or Staff only) - password auto-generated
+                const response = await adminAPI.createUser({
                     firstName: userData.firstName,
                     middleInitial: userData.middleInitial,
                     lastName: userData.lastName,
@@ -228,11 +272,10 @@ const UserManagement = () => {
                     address: userData.address,
                     contactNumber: userData.contactNumber,
                     email: userData.email,
-                    password: userData.password,
                     role: userData.role.toLowerCase(),
                     branch: userData.branch,
                 });
-                alert('User created successfully!');
+                showNotification('User created successfully! Login credentials have been sent to their email.', 'success');
             }
 
             // Refresh users list
@@ -251,36 +294,54 @@ const UserManagement = () => {
                 address: '',
                 contactNumber: '',
                 email: '',
-                password: '',
-                confirmPassword: '',
                 role: 'staff',
                 branch: '',
                 status: 'active'
             });
+            setOriginalEmail('');
         } catch (error) {
             console.error('Error saving user:', error);
             
-            // Handle specific error types
-            if (error.message.includes('email')) {
-                setErrors({ ...errors, email: error.message });
-                setSubmitError('Email validation failed. Please check the email address.');
-            } else if (error.message.includes('already exists')) {
-                setErrors({ ...errors, email: 'This email is already registered' });
-                setSubmitError('A user with this email already exists.');
+            // Handle specific error types with detailed messages
+            if (error.message) {
+                const errorMsg = error.message.toLowerCase();
+                
+                if (errorMsg.includes('email')) {
+                    if (errorMsg.includes('already') || errorMsg.includes('exists')) {
+                        setErrors({ ...errors, email: 'This email is already registered' });
+                        setSubmitError('A user with this email already exists. Please use a different email.');
+                    } else if (errorMsg.includes('invalid')) {
+                        setErrors({ ...errors, email: 'Invalid email format' });
+                        setSubmitError('Please enter a valid email address.');
+                    } else {
+                        setErrors({ ...errors, email: error.message });
+                        setSubmitError('Email validation failed. Please check the email address.');
+                    }
+                } else if (errorMsg.includes('phone') || errorMsg.includes('contact')) {
+                    setErrors({ ...errors, contactNumber: 'Invalid phone number format' });
+                    setSubmitError('Phone number must start with 09 and be exactly 11 digits.');
+                } else if (errorMsg.includes('network') || errorMsg.includes('connection')) {
+                    setSubmitError('Network error. Please check your internet connection and try again.');
+                } else if (errorMsg.includes('password')) {
+                    setSubmitError('Password email could not be sent. User created but may need password reset.');
+                } else {
+                    setSubmitError(error.message || 'Failed to save user. Please check all fields and try again.');
+                }
             } else {
-                setSubmitError(error.message || 'Failed to save user. Please try again.');
+                setSubmitError('An unexpected error occurred. Please try again later.');
             }
         }
     };
 
     const handleEditClick = (user) => {
-        // Only allow editing Admin or Staff
-        if (user.role !== 'Admin' && user.role !== 'Staff') {
-            alert('Only Admin or Staff accounts can be edited.');
+        // Only allow editing Admin, HRM, or Staff
+        if (user.role !== 'Admin' && user.role !== 'HRM' && user.role !== 'Staff') {
+            showNotification('Only Admin, HRM, or Staff accounts can be edited.', 'error');
             return;
         }
         
         setEditingUser(user);
+        setOriginalEmail(user.email);
         setUserData({
             firstName: user.firstName || '',
             middleInitial: user.middleInitial || '',
@@ -291,10 +352,8 @@ const UserManagement = () => {
             address: user.address || '',
             contactNumber: user.contactNumber || '',
             email: user.email,
-            password: '',
-            confirmPassword: '',
             role: user.role,
-            branch: user.branch,
+            branch: user.branchId || '',
             status: user.status
         });
         setShowModal(true);
@@ -303,10 +362,9 @@ const UserManagement = () => {
     const handleCloseModal = () => {
         setShowModal(false);
         setEditingUser(null);
-        setShowPassword(false);
-        setShowConfirmPassword(false);
         setErrors({});
         setSubmitError('');
+        setOriginalEmail('');
         setUserData({
             firstName: '',
             middleInitial: '',
@@ -317,8 +375,6 @@ const UserManagement = () => {
             address: '',
             contactNumber: '',
             email: '',
-            password: '',
-            confirmPassword: '',
             role: 'staff',
             branch: '',
             status: 'active'
@@ -339,7 +395,7 @@ const UserManagement = () => {
             await fetchUsers();
         } catch (error) {
             console.error('Error toggling user status:', error);
-            alert('Failed to update user status. Please try again.');
+            showNotification('Failed to update user status. Please try again.', 'error');
         }
     };
 
@@ -348,12 +404,48 @@ const UserManagement = () => {
         setShowViewModal(true);
     };
 
+    const handlePasswordReset = (user) => {
+        setPasswordResetUser(user);
+        setNewPassword('');
+        setPasswordError('');
+        setShowPasswordModal(true);
+    };
+
+    const handlePasswordSubmit = async (e) => {
+        e.preventDefault();
+        setPasswordError('');
+
+        // Validate password
+        if (!newPassword || newPassword.length < 6) {
+            setPasswordError('Password must be at least 6 characters long');
+            return;
+        }
+
+        try {
+            await adminAPI.resetUserPassword(passwordResetUser.id, { newPassword });
+            showNotification(`Password updated successfully for ${passwordResetUser.firstName} ${passwordResetUser.lastName}`, 'success');
+            setShowPasswordModal(false);
+            setPasswordResetUser(null);
+            setNewPassword('');
+        } catch (error) {
+            console.error('Error resetting password:', error);
+            setPasswordError(error.message || 'Failed to reset password. Please try again.');
+        }
+    };
+
+    const handleClosePasswordModal = () => {
+        setShowPasswordModal(false);
+        setPasswordResetUser(null);
+        setNewPassword('');
+        setPasswordError('');
+    };
+
     return (
         <div className="user-module">
             <div className="user-header">
                 <div className="header-left">
                     <h2>User Management</h2>
-                    <p>Manage system access for admins, staff members, and students</p>
+                    <p>Manage system access for admins, HR managers, staff members, and students</p>
                 </div>
                 <div className="header-actions">
                     <button className="add-user-btn" onClick={() => setShowModal(true)}>
@@ -374,7 +466,7 @@ const UserManagement = () => {
                     />
                 </div>
                 <div className="role-filters">
-                    {['All', 'Admin', 'Staff', 'Student'].map(role => (
+                    {['All', 'Admin', 'HRM', 'Staff', 'Student'].map(role => (
                         <button
                             key={role}
                             className={`filter-chip ${roleFilter === role ? 'active' : ''}`}
@@ -435,7 +527,7 @@ const UserManagement = () => {
                                         <span className={`role-pill ${user.role.toLowerCase()}`}>{user.role}</span>
                                     </td>
                                     <td>
-                                        <span className="branch-text">{user.branch}</span>
+                                        <span className="branch-text">{formatBranchName(user.branch)}</span>
                                     </td>
                                     <td>
                                         <span className="last-login-text">{user.lastLogin}</span>
@@ -450,6 +542,9 @@ const UserManagement = () => {
                                         <div className="table-actions">
                                             <button className="action-btn view" title="View Details" onClick={() => handleViewUser(user)}>
                                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                            </button>
+                                            <button className="action-btn password" title="Reset Password" onClick={() => handlePasswordReset(user)}>
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
                                             </button>
                                             <button
                                                 className={`action-btn toggle ${user.status === 'Active' ? 'deactivate' : 'activate'}`}
@@ -484,10 +579,10 @@ const UserManagement = () => {
                             }}>
                                 <div>
                                     <h2 style={{ color: 'var(--text-color)', marginBottom: '4px', fontWeight: '700' }}>
-                                        {editingUser ? 'Edit Staff Account' : 'Add New User Account'}
+                                        {editingUser ? 'Edit Account' : 'Add New User Account'}
                                     </h2>
                                     <p style={{ fontSize: '0.85rem', color: 'var(--secondary-text)', margin: 0 }}>
-                                        {editingUser ? 'Update account information and permissions' : 'Fill in the details to add a new admin or staff member'}
+                                        {editingUser ? 'Update account information and permissions' : 'Fill in the details to add a new admin, HRM, or staff member'}
                                     </p>
                                 </div>
                                 <button 
@@ -857,9 +952,10 @@ const UserManagement = () => {
                                                 <input
                                                     type="tel"
                                                     name="contactNumber"
-                                                    placeholder="+63 912 345 6789"
+                                                    placeholder="09XX XXX XXXX"
                                                     value={userData.contactNumber}
                                                     onChange={handleInputChange}
+                                                    maxLength="13"
                                                     required
                                                     style={{
                                                         width: '100%',
@@ -871,9 +967,13 @@ const UserManagement = () => {
                                                         color: 'var(--text-color)'
                                                     }}
                                                 />
-                                                {errors.contactNumber && (
+                                                {errors.contactNumber ? (
                                                     <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
                                                         {errors.contactNumber}
+                                                    </span>
+                                                ) : (
+                                                    <span style={{ fontSize: '0.7rem', color: 'var(--secondary-text)', marginTop: '4px', display: 'block' }}>
+                                                        Must start with 09 (11 digits)
                                                     </span>
                                                 )}
                                             </div>
@@ -907,180 +1007,6 @@ const UserManagement = () => {
                                                 {errors.email && (
                                                     <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
                                                         {errors.email}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Account Security Section */}
-                                    <div style={{ marginBottom: '28px' }}>
-                                        <div style={{ 
-                                            display: 'flex', 
-                                            alignItems: 'center', 
-                                            gap: '10px', 
-                                            marginBottom: '20px',
-                                            paddingBottom: '12px',
-                                            borderBottom: '2px solid var(--border-color)'
-                                        }}>
-                                            <div style={{
-                                                width: '36px',
-                                                height: '36px',
-                                                borderRadius: '10px',
-                                                background: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                color: 'white'
-                                            }}>
-                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                                                </svg>
-                                            </div>
-                                            <div>
-                                                <h3 style={{ 
-                                                    fontSize: '1.05rem', 
-                                                    fontWeight: '700', 
-                                                    color: 'var(--text-color)',
-                                                    margin: 0 
-                                                }}>Account Security</h3>
-                                                <p style={{ 
-                                                    fontSize: '0.75rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    margin: 0 
-                                                }}>Login credentials and password</p>
-                                            </div>
-                                        </div>
-
-                                        <div className="form-row" style={{ gap: '15px' }}>
-                                            <div className="form-group" style={{ flex: 1 }}>
-                                                <label style={{ 
-                                                    fontSize: '0.8rem', 
-                                                    fontWeight: '600', 
-                                                    color: 'var(--text-color)',
-                                                    marginBottom: '6px',
-                                                    display: 'block'
-                                                }}>
-                                                    Password <span style={{ color: '#ef4444' }}>*</span>
-                                                </label>
-                                                <div style={{ position: 'relative' }}>
-                                                    <input
-                                                        type={showPassword ? "text" : "password"}
-                                                        name="password"
-                                                        placeholder="Min. 8 characters"
-                                                        minLength="8"
-                                                        value={userData.password}
-                                                        onChange={handleInputChange}
-                                                        required={!editingUser}
-                                                        style={{
-                                                            width: '100%',
-                                                            padding: '11px 40px 11px 14px',
-                                                            borderRadius: '10px',
-                                                            border: errors.password ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
-                                                            background: 'var(--card-bg)',
-                                                            fontSize: '0.9rem',
-                                                            color: 'var(--text-color)'
-                                                        }}
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setShowPassword(!showPassword)}
-                                                        style={{
-                                                            position: 'absolute',
-                                                            right: '12px',
-                                                            top: '50%',
-                                                            transform: 'translateY(-50%)',
-                                                            background: 'none',
-                                                            border: 'none',
-                                                            cursor: 'pointer',
-                                                            padding: '4px',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            color: 'var(--secondary-text)'
-                                                        }}
-                                                    >
-                                                        {showPassword ? (
-                                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                                                                <line x1="1" y1="1" x2="23" y2="23"></line>
-                                                            </svg>
-                                                        ) : (
-                                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                                                <circle cx="12" cy="12" r="3"></circle>
-                                                            </svg>
-                                                        )}
-                                                    </button>
-                                                </div>
-                                                {errors.password && (
-                                                    <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
-                                                        {errors.password}
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <div className="form-group" style={{ flex: 1 }}>
-                                                <label style={{ 
-                                                    fontSize: '0.8rem', 
-                                                    fontWeight: '600', 
-                                                    color: 'var(--text-color)',
-                                                    marginBottom: '6px',
-                                                    display: 'block'
-                                                }}>
-                                                    Confirm Password <span style={{ color: '#ef4444' }}>*</span>
-                                                </label>
-                                                <div style={{ position: 'relative' }}>
-                                                    <input
-                                                        type={showConfirmPassword ? "text" : "password"}
-                                                        name="confirmPassword"
-                                                        placeholder="Re-enter password"
-                                                        minLength="8"
-                                                        value={userData.confirmPassword}
-                                                        onChange={handleInputChange}
-                                                        required={!editingUser}
-                                                        style={{
-                                                            width: '100%',
-                                                            padding: '11px 40px 11px 14px',
-                                                            borderRadius: '10px',
-                                                            border: errors.confirmPassword ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
-                                                            background: 'var(--card-bg)',
-                                                            fontSize: '0.9rem',
-                                                            color: 'var(--text-color)'
-                                                        }}
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                                        style={{
-                                                            position: 'absolute',
-                                                            right: '12px',
-                                                            top: '50%',
-                                                            transform: 'translateY(-50%)',
-                                                            background: 'none',
-                                                            border: 'none',
-                                                            cursor: 'pointer',
-                                                            padding: '4px',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            color: 'var(--secondary-text)'
-                                                        }}
-                                                    >
-                                                        {showConfirmPassword ? (
-                                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                                                                <line x1="1" y1="1" x2="23" y2="23"></line>
-                                                            </svg>
-                                                        ) : (
-                                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                                                <circle cx="12" cy="12" r="3"></circle>
-                                                            </svg>
-                                                        )}
-                                                    </button>
-                                                </div>
-                                                {errors.confirmPassword && (
-                                                    <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
-                                                        {errors.confirmPassword}
                                                     </span>
                                                 )}
                                             </div>
@@ -1158,6 +1084,7 @@ const UserManagement = () => {
                                                     }}
                                                 >
                                                     <option value="Admin">Admin</option>
+                                                    <option value="HRM">HRM (HR Manager)</option>
                                                     <option value="Staff">Staff</option>
                                                 </select>
                                             </div>
@@ -1189,8 +1116,8 @@ const UserManagement = () => {
                                                 >
                                                     <option value="">Select a branch</option>
                                                     {branches.map((branch) => (
-                                                        <option key={branch.id} value={branch.name}>
-                                                            {branch.name}
+                                                        <option key={branch.id} value={branch.id}>
+                                                            {formatBranchName(branch.name)}
                                                         </option>
                                                     ))}
                                                 </select>
@@ -1694,7 +1621,15 @@ const UserManagement = () => {
                                                         fontWeight: '600', 
                                                         color: selectedUser.contactNumber ? 'var(--text-color)' : 'var(--secondary-text)',
                                                         fontSize: '0.95rem'
-                                                    }}>{selectedUser.contactNumber || 'Not provided'}</div>
+                                                    }}>
+                                                        {selectedUser.contactNumber ? (() => {
+                                                            const cleaned = String(selectedUser.contactNumber).replace(/\D/g, '');
+                                                            if (cleaned.length === 11 && cleaned.startsWith('09')) {
+                                                                return `${cleaned.slice(0, 4)} ${cleaned.slice(4, 7)} ${cleaned.slice(7, 11)}`;
+                                                            }
+                                                            return selectedUser.contactNumber;
+                                                        })() : 'Not provided'}
+                                                    </div>
                                                 </div>
                                             </div>
                                             
@@ -1828,7 +1763,7 @@ const UserManagement = () => {
                                                     fontWeight: '600', 
                                                     color: 'var(--text-color)',
                                                     fontSize: '0.95rem'
-                                                }}>{selectedUser.branch}</div>
+                                                }}>{formatBranchName(selectedUser.branch)}</div>
                                             </div>
                                             <div style={{
                                                 background: 'var(--card-bg)',
@@ -1897,6 +1832,145 @@ const UserManagement = () => {
                                     }}
                                 >Edit Profile</button>
                             </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Password Reset Modal */}
+                {showPasswordModal && passwordResetUser && (
+                    <div className="modal-overlay">
+                        <div className="modal-container" style={{ maxWidth: '500px', width: '90%' }}>
+                            <div className="modal-header" style={{ 
+                                background: 'var(--card-bg)',
+                                color: 'var(--text-color)',
+                                padding: '24px 30px',
+                                borderBottom: '1px solid var(--border-color)'
+                            }}>
+                                <div>
+                                    <h2 style={{ color: 'var(--text-color)', marginBottom: '4px', fontWeight: '700' }}>
+                                        Reset Password
+                                    </h2>
+                                    <p style={{ fontSize: '0.85rem', color: 'var(--secondary-text)', margin: 0 }}>
+                                        Reset password for {passwordResetUser.firstName} {passwordResetUser.lastName}
+                                    </p>
+                                </div>
+                                <button 
+                                    className="close-modal" 
+                                    onClick={handleClosePasswordModal}
+                                    style={{
+                                        background: 'var(--card-bg)',
+                                        border: '1.5px solid var(--border-color)',
+                                        color: 'var(--text-color)',
+                                        width: '36px',
+                                        height: '36px',
+                                        borderRadius: '10px',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                    }}
+                                >
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <form onSubmit={handlePasswordSubmit}>
+                                <div className="modal-content" style={{ padding: '30px' }}>
+                                    {passwordError && (
+                                        <div style={{
+                                            padding: '12px 16px',
+                                            background: '#fee',
+                                            border: '1px solid #fcc',
+                                            borderRadius: '8px',
+                                            marginBottom: '20px',
+                                            fontSize: '0.9rem',
+                                            color: '#c33'
+                                        }}>
+                                            {passwordError}
+                                        </div>
+                                    )}
+
+                                    <div className="form-group">
+                                        <label style={{ 
+                                            fontSize: '0.85rem', 
+                                            fontWeight: '600', 
+                                            color: 'var(--text-color)',
+                                            marginBottom: '8px',
+                                            display: 'block'
+                                        }}>
+                                            New Password <span style={{ color: '#ef4444' }}>*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={newPassword}
+                                            onChange={(e) => setNewPassword(e.target.value)}
+                                            placeholder="Enter new password"
+                                            required
+                                            style={{
+                                                width: '100%',
+                                                padding: '12px 16px',
+                                                borderRadius: '10px',
+                                                border: passwordError ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
+                                                background: 'var(--card-bg)',
+                                                fontSize: '0.95rem',
+                                                color: 'var(--text-color)',
+                                                transition: 'all 0.2s'
+                                            }}
+                                        />
+                                        <p style={{ 
+                                            fontSize: '0.75rem', 
+                                            color: 'var(--secondary-text)', 
+                                            marginTop: '6px',
+                                            marginBottom: 0
+                                        }}>
+                                            Password must be at least 6 characters long
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="modal-footer" style={{ 
+                                    borderTop: '1px solid var(--border-color)', 
+                                    padding: '20px 30px', 
+                                    display: 'flex', 
+                                    gap: '12px',
+                                    background: 'var(--card-bg)'
+                                }}>
+                                    <button 
+                                        type="button"
+                                        className="prev-btn" 
+                                        style={{ 
+                                            flex: 1,
+                                            padding: '12px 24px',
+                                            borderRadius: '10px',
+                                            border: '1.5px solid var(--border-color)',
+                                            background: 'var(--card-bg)',
+                                            color: 'var(--text-color)',
+                                            fontSize: '0.9rem',
+                                            fontWeight: '600',
+                                            cursor: 'pointer'
+                                        }} 
+                                        onClick={handleClosePasswordModal}
+                                    >Cancel</button>
+                                    <button 
+                                        type="submit"
+                                        className="confirm-btn" 
+                                        style={{ 
+                                            flex: 1,
+                                            padding: '12px 24px',
+                                            borderRadius: '10px',
+                                            border: 'none',
+                                            background: 'var(--primary-color)',
+                                            color: 'white',
+                                            fontSize: '0.9rem',
+                                            fontWeight: '600',
+                                            cursor: 'pointer'
+                                        }}
+                                    >Reset Password</button>
+                                </div>
+                            </form>
                         </div>
                     </div>
                 )}

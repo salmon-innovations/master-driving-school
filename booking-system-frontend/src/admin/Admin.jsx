@@ -115,7 +115,9 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         email: user.email,
                         phone: user.contactNumbers || '+63 912 345 6789',
                         branch: 'Main Office', // Update this based on your branch logic
-                        role: user.role === 'admin' ? 'Super Admin' : user.role === 'staff' ? 'Staff' : 'User',
+                        role: user.role === 'admin' ? 'Super Admin' : 
+                              user.role === 'hrm' ? 'HR Manager' : 
+                              user.role === 'staff' ? 'Staff' : 'User',
                         avatar: null
                     });
                 }

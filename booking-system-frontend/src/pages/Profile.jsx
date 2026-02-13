@@ -6,8 +6,15 @@ import { useNotification } from '../context/NotificationContext'
 const DetailItem = ({ label, value }) => {
   let displayValue = value;
 
+  // Format phone numbers
+  if (value && (label.toLowerCase().includes('contact') || label.toLowerCase().includes('number') || label.toLowerCase().includes('phone'))) {
+    const cleaned = String(value).replace(/\D/g, '');
+    if (cleaned.length === 11 && cleaned.startsWith('09')) {
+      displayValue = `${cleaned.slice(0, 4)} ${cleaned.slice(4, 7)} ${cleaned.slice(7, 11)}`;
+    }
+  }
   // Format dates for Birthday or other date strings
-  if (value && typeof value === 'string') {
+  else if (value && typeof value === 'string') {
     if (label === 'Birthday' || value.includes('T00:00:00')) {
       try {
         const date = new Date(value);

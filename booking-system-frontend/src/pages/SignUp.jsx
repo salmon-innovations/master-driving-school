@@ -40,22 +40,14 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
     // Remove all non-numeric characters
     const cleaned = value.replace(/\D/g, '')
     
-    // If starts with 0, remove it (convert from 09XX to 9XX)
-    let digits = cleaned.startsWith('0') ? cleaned.slice(1) : cleaned
+    // Limit to 11 digits
+    const limited = cleaned.slice(0, 11)
     
-    // If starts with 63, remove it (in case user pastes +63...)
-    if (digits.startsWith('63')) {
-      digits = digits.slice(2)
-    }
-    
-    // Limit to 10 digits
-    digits = digits.slice(0, 10)
-    
-    // Format as +63-9XX-XXX-XXXX
-    if (digits.length === 0) return ''
-    if (digits.length <= 3) return `+63-${digits}`
-    if (digits.length <= 6) return `+63-${digits.slice(0, 3)}-${digits.slice(3)}`
-    return `+63-${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6, 10)}`
+    // Format as "09XX XXX XXXX"
+    if (limited.length === 0) return ''
+    if (limited.length <= 4) return limited
+    if (limited.length <= 7) return `${limited.slice(0, 4)} ${limited.slice(4)}`
+    return `${limited.slice(0, 4)} ${limited.slice(4, 7)} ${limited.slice(7, 11)}`
   }
 
   const handleChange = (e) => {
@@ -100,12 +92,20 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
     if (!formData.birthPlace) newErrors.birthPlace = 'Birth place is required'
     if (!formData.contactNumbers) {
       newErrors.contactNumbers = 'Contact number is required'
-    } else if (formData.contactNumbers.length < 10) {
-      newErrors.contactNumbers = 'Invalid format'
+    } else {
+      const cleanedNumber = formData.contactNumbers.replace(/\s/g, '')
+      if (!/^09\d{9}$/.test(cleanedNumber)) {
+        newErrors.contactNumbers = 'Phone must start with 09 and be exactly 11 digits'
+      }
     }
     if (!formData.emergencyContactPerson) newErrors.emergencyContactPerson = 'Contact person is required'
     if (!formData.emergencyContactNumber) {
       newErrors.emergencyContactNumber = 'Contact number is required'
+    } else {
+      const cleanedNumber = formData.emergencyContactNumber.replace(/\s/g, '')
+      if (!/^09\d{9}$/.test(cleanedNumber)) {
+        newErrors.emergencyContactNumber = 'Phone must start with 09 and be exactly 11 digits'
+      }
     }
     if (!formData.email) {
       newErrors.email = 'Email is required'
@@ -382,6 +382,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
                       name="contactNumbers"
                       value={formData.contactNumbers}
                       onChange={handleChange}
+                      maxLength="13"
                       className={`w-full px-4 py-3 bg-gray-50 border ${errors.contactNumbers ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:ring-2 focus:ring-[#2157da] outline-none transition-all`}
                       placeholder="09XX XXX XXXX"
                     />
@@ -421,6 +422,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
                       name="emergencyContactNumber"
                       value={formData.emergencyContactNumber}
                       onChange={handleChange}
+                      maxLength="13"
                       className={`w-full px-4 py-3 bg-gray-50 border ${errors.emergencyContactNumber ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:ring-2 focus:ring-[#2157da] outline-none transition-all`}
                       placeholder="09XX XXX XXXX"
                     />

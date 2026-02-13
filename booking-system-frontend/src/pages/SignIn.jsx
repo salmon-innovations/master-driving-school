@@ -78,11 +78,9 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
         // Navigate based on role
         const role = (response.user.role || 'student').toLowerCase();
         
-        if (role === 'admin') {
+        if (role === 'admin' || role === 'hrm' || role === 'staff') {
+          // Admin, HRM, and Staff go to admin dashboard
           onNavigate('admin')
-        } else if (role === 'staff') {
-          // Assuming staff also goes to admin dashboard for now, or change if needed
-          onNavigate('admin') 
         } else {
           onNavigate('branches')
         }

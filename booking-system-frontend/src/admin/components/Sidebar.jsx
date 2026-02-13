@@ -15,6 +15,13 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onN
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
+    // Auto-open Management dropdown if users or courses tab is active
+    useEffect(() => {
+        if (activeTab === 'users' || activeTab === 'courses') {
+            setOpenDropdowns(prev => ({ ...prev, management: true }));
+        }
+    }, [activeTab]);
+
     const toggleDropdown = (id) => {
         setOpenDropdowns(prev => ({
             ...prev,

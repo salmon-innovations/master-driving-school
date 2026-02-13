@@ -3,6 +3,17 @@
 
 -- Connect to booking_system database before running the rest
 
+-- Branches Table (must be created first due to foreign key in users table)
+CREATE TABLE IF NOT EXISTS branches (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    address TEXT NOT NULL,
+    contact_number VARCHAR(50),
+    email VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Users Table
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
@@ -22,6 +33,15 @@ CREATE TABLE IF NOT EXISTS users (
     zip_code VARCHAR(20),
     emergency_contact_person VARCHAR(255),
     emergency_contact_number VARCHAR(50),
+    role VARCHAR(50) DEFAULT 'student' CHECK (role IN ('admin', 'hrm', 'staff', 'student')),
+    branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
+    status VARCHAR(50) DEFAULT 'active',
+    last_login TIMESTAMP,
+    is_verified BOOLEAN DEFAULT FALSE,
+    verification_code VARCHAR(6),
+    verification_code_expires TIMESTAMP,
+    reset_otp VARCHAR(6),
+    reset_otp_expires TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -33,20 +53,14 @@ CREATE TABLE IF NOT EXISTS courses (
     description TEXT,
     price DECIMAL(10, 2) NOT NULL,
     duration VARCHAR(100),
+    status VARCHAR(50) DEFAULT 'active',
+    category VARCHAR(50) DEFAULT 'Basic',
+    course_type VARCHAR(50),
+    pricing_data JSONB,
     image_url TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Branches Table
-CREATE TABLE IF NOT EXISTS branches (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    address TEXT NOT NULL,
-    contact_number VARCHAR(50),
-    email VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT courses_category_check CHECK (category IN ('TDC', 'PDC', 'Basic'))
 );
 
 -- Bookings Table
@@ -75,9 +89,19 @@ CREATE TABLE IF NOT EXISTS cart_items (
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_verification_code ON users(verification_code);
 CREATE INDEX IF NOT EXISTS idx_bookings_user_id ON bookings(user_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
 CREATE INDEX IF NOT EXISTS idx_cart_items_user_id ON cart_items(user_id);
+
+-- Add comments for documentation
+COMMENT ON COLUMN users.role IS 'User role: admin, hrm (HR Manager), staff, or student';
+COMMENT ON COLUMN users.branch_id IS 'Foreign key to branches table for admin/staff/hrm users';
+COMMENT ON COLUMN users.status IS 'Account status: active or inactive';
+COMMENT ON COLUMN users.is_verified IS 'Email verification status';
+COMMENT ON COLUMN courses.status IS 'Course status: active or inactive';
+COMMENT ON COLUMN courses.image_url IS 'JSON array of image URLs or single image URL';
 
 -- Insert sample courses
 INSERT INTO courses (name, description, price, duration, image_url) VALUES

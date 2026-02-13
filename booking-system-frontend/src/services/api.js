@@ -138,6 +138,29 @@ export const coursesAPI = {
   getById: async (id) => {
     return await apiRequest(`/courses/${id}`);
   },
+
+  // Create new course (Admin only)
+  create: async (courseData) => {
+    return await apiRequest('/courses', {
+      method: 'POST',
+      body: JSON.stringify(courseData),
+    });
+  },
+
+  // Update course (Admin only)
+  update: async (id, courseData) => {
+    return await apiRequest(`/courses/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(courseData),
+    });
+  },
+
+  // Delete course (Admin only)
+  delete: async (id) => {
+    return await apiRequest(`/courses/${id}`, {
+      method: 'DELETE',
+    });
+  },
 };
 
 // Branches API
@@ -262,6 +285,14 @@ export const adminAPI = {
   toggleUserStatus: async (id) => {
     return await apiRequest(`/admin/users/${id}/status`, {
       method: 'PATCH',
+    });
+  },
+
+  // Reset user password (admin)
+  resetUserPassword: async (id, data) => {
+    return await apiRequest(`/admin/users/${id}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   },
 };
