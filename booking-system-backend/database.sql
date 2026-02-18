@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS bookings (
     branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
     booking_date DATE NOT NULL,
     booking_time TIME,
-    status VARCHAR(50) DEFAULT 'pending',
+    status VARCHAR(50) DEFAULT 'collectable',
     notes TEXT,
     total_amount DECIMAL(10, 2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

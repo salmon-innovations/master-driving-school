@@ -41,9 +41,30 @@ const createCourse = async (req, res) => {
   try {
     const { name, description, price, duration, status, images, category, course_type, pricing_data } = req.body;
 
+    console.log('Create course request:', {
+      name,
+      category,
+      course_type,
+      imagesCount: images ? images.length : 0,
+      pricingDataCount: pricing_data ? pricing_data.length : 0
+    });
+
     // Validate required fields
     if (!name || !price) {
       return res.status(400).json({ error: 'Name and price are required' });
+    }
+
+    // Prepare image data
+    let imageData = null;
+    if (images && images.length > 0) {
+      imageData = JSON.stringify(images);
+      console.log('Image data size:', imageData.length, 'characters');
+    }
+
+    // Prepare pricing data
+    let pricingDataJson = null;
+    if (pricing_data && pricing_data.length > 0) {
+      pricingDataJson = JSON.stringify(pricing_data);
     }
 
     const result = await pool.query(
@@ -56,12 +77,14 @@ const createCourse = async (req, res) => {
         parseFloat(price), 
         duration || null,
         status || 'active',
-        images && images.length > 0 ? JSON.stringify(images) : null,
+        imageData,
         category || 'Basic',
         course_type || null,
-        pricing_data && pricing_data.length > 0 ? JSON.stringify(pricing_data) : null
+        pricingDataJson
       ]
     );
+
+    console.log('Course created successfully:', result.rows[0].id);
 
     res.status(201).json({
       success: true,
@@ -69,8 +92,12 @@ const createCourse = async (req, res) => {
       course: result.rows[0],
     });
   } catch (error) {
-    console.error('Create course error:', error);
-    res.status(500).json({ error: 'Server error while creating course' });
+    console.error('Create course error:', error.message);
+    console.error('Stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Server error while creating course',
+      details: error.message 
+    });
   }
 };
 
@@ -80,10 +107,32 @@ const updateCourse = async (req, res) => {
     const { id } = req.params;
     const { name, description, price, duration, status, images, category, course_type, pricing_data } = req.body;
 
+    console.log('Update course request:', {
+      id,
+      name,
+      category,
+      course_type,
+      imagesCount: images ? images.length : 0,
+      pricingDataCount: pricing_data ? pricing_data.length : 0
+    });
+
     // Check if course exists
     const existingCourse = await pool.query('SELECT * FROM courses WHERE id = $1', [id]);
     if (existingCourse.rows.length === 0) {
       return res.status(404).json({ error: 'Course not found' });
+    }
+
+    // Prepare image data
+    let imageData = null;
+    if (images && images.length > 0) {
+      imageData = JSON.stringify(images);
+      console.log('Image data size:', imageData.length, 'characters');
+    }
+
+    // Prepare pricing data
+    let pricingDataJson = null;
+    if (pricing_data && pricing_data.length > 0) {
+      pricingDataJson = JSON.stringify(pricing_data);
     }
 
     const result = await pool.query(
@@ -106,13 +155,15 @@ const updateCourse = async (req, res) => {
         parseFloat(price), 
         duration || null,
         status || 'active',
-        images && images.length > 0 ? JSON.stringify(images) : null,
+        imageData,
         category || 'Basic',
         course_type || null,
-        pricing_data && pricing_data.length > 0 ? JSON.stringify(pricing_data) : null,
+        pricingDataJson,
         id
       ]
     );
+
+    console.log('Course updated successfully:', result.rows[0].id);
 
     res.json({
       success: true,
@@ -120,8 +171,12 @@ const updateCourse = async (req, res) => {
       course: result.rows[0],
     });
   } catch (error) {
-    console.error('Update course error:', error);
-    res.status(500).json({ error: 'Server error while updating course' });
+    console.error('Update course error:', error.message);
+    console.error('Stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Server error while updating course',
+      details: error.message 
+    });
   }
 };
 

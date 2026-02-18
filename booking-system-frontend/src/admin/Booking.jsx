@@ -1,21 +1,81 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './css/booking.css';
+import { adminAPI } from '../services/api';
+import { useNotification } from '../context/NotificationContext';
 const logo = '/images/logo.png';
 
 const Booking = () => {
+    const { showNotification } = useNotification();
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('All');
     const [showViewModal, setShowViewModal] = useState(false);
     const [selectedBooking, setSelectedBooking] = useState(null);
+    const [bookings, setBookings] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
 
-    // Mock data for bookings
-    const [bookings, setBookings] = useState([
-        { id: 'BK-001', student: 'Juan Dela Cruz', type: 'TDC', branch: 'Lipa Branch', date: '2024-03-20', time: '08:00 AM - 12:00 PM', status: 'Pending', amount: 'P 2,500', paymentType: 'Full Payment', paymentMethod: 'GCash' },
-        { id: 'BK-002', student: 'Maria Santos', type: 'PDC', branch: 'Batangas Branch', date: '2024-03-21', time: '01:00 PM - 03:00 PM', status: 'Confirmed', amount: 'P 5,000', paymentType: 'Down Payment', paymentMethod: 'StarPay' },
-        { id: 'BK-003', student: 'Jose Rizal', type: 'TDC', branch: 'Tanauan Branch', date: '2024-03-22', time: '08:00 AM - 12:00 PM', status: 'Pending', amount: 'P 2,500', paymentType: 'Full Payment', paymentMethod: 'StarPay' },
-        { id: 'BK-004', student: 'Andres Bonifacio', type: 'PDC', branch: 'Lipa Branch', date: '2024-03-23', time: '10:00 AM - 12:00 PM', status: 'Cancelled', amount: 'P 4,500', paymentType: 'Full Payment', paymentMethod: 'GCash' },
-        { id: 'BK-005', student: 'Emilio Aguinaldo', type: 'TDC', branch: 'Lipa Branch', date: '2024-03-24', time: '01:00 PM - 05:00 PM', status: 'Confirmed', amount: 'P 2,500', paymentType: 'Down Payment', paymentMethod: 'GCash' },
-    ]);
+    // Fetch bookings from database
+    useEffect(() => {
+        loadBookings();
+    }, []);
+
+    const loadBookings = async () => {
+        try {
+            setLoading(true);
+            setError(null);
+            const response = await adminAPI.getAllBookings(null, 100);
+            if (response.success) {
+                // Transform database fields to match UI expectations
+                const transformedBookings = response.bookings.map(booking => {
+                    // Normalize status - map legacy statuses to current ones
+                    const rawStatus = (booking.status || 'collectable').toLowerCase();
+                    let status;
+                    if (rawStatus === 'paid' || rawStatus === 'confirmed' || rawStatus === 'completed') {
+                        status = 'Paid';
+                    } else if (rawStatus === 'cancelled') {
+                        status = 'Cancelled';
+                    } else {
+                        // pending, collectable, or any other → Collectable
+                        status = 'Collectable';
+                    }
+                    // Automatically set to Paid if payment type is Full Payment
+                    if (booking.payment_type === 'Full Payment' && status === 'Collectable') {
+                        status = 'Paid';
+                    }
+                    
+                    // Shorten branch name (remove "Master Driving School" only, keep "Branch")
+                    let branchName = booking.branch_name || 'N/A';
+                    if (branchName !== 'N/A') {
+                        branchName = branchName
+                            .replace('Master Driving School ', '')
+                            .trim()
+                            .toUpperCase();
+                    }
+                    
+                    return {
+                        id: `BK-${String(booking.id).padStart(3, '0')}`,
+                        student: booking.student_name || 'N/A',
+                        type: booking.course_name?.includes('TDC') ? 'TDC' : booking.course_name?.includes('PDC') ? 'PDC' : 'Course',
+                        branch: branchName,
+                        date: booking.booking_date ? new Date(booking.booking_date).toLocaleDateString() : 'N/A',
+                        time: booking.booking_time || 'N/A',
+                        status: status,
+                        amount: `₱ ${Number(booking.total_amount || 0).toLocaleString()}`,
+                        paymentType: booking.payment_type || 'Full Payment',
+                        paymentMethod: booking.payment_method || 'Online Payment',
+                        rawId: booking.id
+                    };
+                });
+                setBookings(transformedBookings);
+            }
+        } catch (err) {
+            console.error('Error loading bookings:', err);
+            setError('Failed to load bookings. Please try again.');
+            showNotification('Failed to load bookings. Please try again.', 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleSearch = (e) => setSearchTerm(e.target.value);
 
@@ -26,8 +86,19 @@ const Booking = () => {
         return matchesSearch && matchesStatus;
     });
 
-    const updateStatus = (id, newStatus) => {
-        setBookings(bookings.map(b => b.id === id ? { ...b, status: newStatus } : b));
+    const updateStatus = async (id, newStatus) => {
+        try {
+            // Find the booking to get the raw database ID
+            const booking = bookings.find(b => b.id === id);
+            const dbId = booking?.rawId || id;
+            
+            await adminAPI.updateBookingStatus(dbId, newStatus.toLowerCase());
+            setBookings(bookings.map(b => b.id === id ? { ...b, status: newStatus } : b));
+            showNotification(`Booking status updated to ${newStatus} successfully!`, 'success');
+        } catch (err) {
+            console.error('Error updating status:', err);
+            showNotification('Failed to update booking status. Please try again.', 'error');
+        }
     };
 
     const handleViewClick = (booking) => {
@@ -50,9 +121,10 @@ const Booking = () => {
                     .meta { font-size: 11pt; color: #64748b; padding-bottom: 25px; text-align: left; }
                     .column-header th { background-color: #1a4fba !important; color: #ffffff !important; padding: 12px 10px; font-weight: bold; border: 1px solid #cbd5e1; text-align: center; -webkit-print-color-adjust: exact; }
                     .row td { padding: 10px; border: 1px solid #e2e8f0; color: #334155; background-color: #ffffff; text-align: center; }
-                    .status-confirmed { color: #16a34a; font-weight: bold; }
-                    .status-pending { color: #ea580c; font-weight: bold; }
+                    .status-paid { color: #16a34a; font-weight: bold; }
+                    .status-collectable { color: #0ea5e9; font-weight: bold; }
                     .status-cancelled { color: #dc2626; font-weight: bold; }
+                    .status-pending { color: #ea580c; font-weight: bold; }
                 </style>
             </head>
             <body>
@@ -80,7 +152,7 @@ const Booking = () => {
                             <td>${b.branch}</td>
                             <td>${b.date}</td>
                             <td>${b.amount} (${b.paymentType}) via ${b.paymentMethod}</td>
-                            <td class="${b.status.toLowerCase() === 'confirmed' ? 'status-confirmed' : b.status.toLowerCase() === 'pending' ? 'status-pending' : 'status-cancelled'}">${b.status.toUpperCase()}</td>
+                            <td class="${b.status.toLowerCase() === 'paid' ? 'status-paid' : b.status.toLowerCase() === 'collectable' ? 'status-collectable' : b.status.toLowerCase() === 'pending' ? 'status-pending' : 'status-cancelled'}">${b.status.toUpperCase()}</td>
                         </tr>
                     `).join('')}
                     <tr><td colspan="7" style="height: 15px; background-color: #ffffff;"></td></tr>
@@ -101,6 +173,7 @@ const Booking = () => {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        showNotification('Booking report exported successfully!', 'success');
     };
 
     return (
@@ -108,8 +181,10 @@ const Booking = () => {
             <div className="booking-header-section">
                 <div className="booking-header">
                     <div className="header-left">
-                        <h2>Booking Requests</h2>
-                        <p>Manage and review student course enrolments</p>
+                        <div>
+                            <h2>Booking Requests</h2>
+                            <p>Manage and review student course enrolments</p>
+                        </div>
                     </div>
                 </div>
 
@@ -122,63 +197,120 @@ const Booking = () => {
                             value={searchTerm}
                             onChange={handleSearch}
                         />
+                        {searchTerm && (
+                            <button className="search-clear" onClick={() => setSearchTerm('')}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
 
             {/* View Booking Modal */}
             {showViewModal && selectedBooking && (
-                <div className="modal-overlay">
-                    <div className="modal-container user-modal" style={{ maxWidth: '500px' }}>
-                        <div className="modal-header">
-                            <h2>Booking Details</h2>
-                            <button className="close-modal" onClick={() => setShowViewModal(false)}>&times;</button>
+                <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowViewModal(false)}>
+                    <div className="bk-modal">
+                        <div className="bk-modal-header">
+                            <div>
+                                <h2>Booking Details</h2>
+                                <p>{selectedBooking.id}</p>
+                            </div>
+                            <button className="bk-modal-close" onClick={() => setShowViewModal(false)}>&times;</button>
                         </div>
-                        <div className="modal-body" style={{ padding: '25px' }}>
-                            <div className="booking-details-header" style={{ textAlign: 'center', marginBottom: '30px' }}>
-                                <div className={`status-pill ${selectedBooking.status.toLowerCase()}`} style={{ display: 'inline-block', marginBottom: '15px' }}>
+                        <div className="bk-modal-body">
+                            <div className="bk-modal-status-center">
+                                <div className={`status-pill ${selectedBooking.status.toLowerCase()}`}>
                                     {selectedBooking.status}
                                 </div>
-                                <h1 style={{ fontSize: '1.4rem', fontWeight: '800', color: '#1e293b' }}>{selectedBooking.id}</h1>
-                                <p style={{ color: '#64748b' }}>Submitted on March 15, 2024</p>
                             </div>
 
-                            <div className="details-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                                <div className="detail-field">
-                                    <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '4px' }}>Student Name</label>
-                                    <div style={{ fontWeight: '600', color: '#334155' }}>{selectedBooking.student}</div>
+                            <div className="bk-modal-sections">
+                                {/* Student Information */}
+                                <div className="bk-modal-card bk-modal-student">
+                                    <div className="bk-modal-card-label">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                            <circle cx="12" cy="7" r="4"></circle>
+                                        </svg>
+                                        <label>Student Name</label>
+                                    </div>
+                                    <div className="bk-modal-card-value">{selectedBooking.student}</div>
                                 </div>
-                                <div className="detail-field">
-                                    <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '4px' }}>Course Type</label>
-                                    <div style={{ fontWeight: '600', color: '#334155' }}>{selectedBooking.type} Training</div>
-                                </div>
-                                <div className="detail-field">
-                                    <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '4px' }}>Branch Office</label>
-                                    <div style={{ fontWeight: '600', color: '#334155' }}>{selectedBooking.branch}</div>
-                                </div>
-                                <div className="detail-field">
-                                    <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '4px' }}>Amount Due</label>
-                                    <div style={{ fontWeight: '700', color: '#1a4fba' }}>{selectedBooking.amount}</div>
-                                </div>
-                            </div>
 
-                            <div className="detail-field" style={{ marginTop: '20px', padding: '15px', background: '#f8fafc', borderRadius: '12px' }}>
-                                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '4px' }}>Payment Mode ({selectedBooking.paymentType})</label>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span style={{ fontWeight: '600', color: '#334155' }}>{selectedBooking.paymentMethod} (Transaction ID: 9283741)</span>
-                                    <span style={{ fontSize: '0.7rem', background: '#dcfce7', color: '#16a34a', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>VERIFIED</span>
-                                </div>
-                            </div>
+                                {/* Course & Branch Grid */}
+                                <div className="bk-modal-grid">
+                                    <div className="bk-modal-card">
+                                        <div className="bk-modal-card-label">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" strokeWidth="2">
+                                                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                                                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                                            </svg>
+                                            <label>Course</label>
+                                        </div>
+                                        <div className="bk-modal-card-value">{selectedBooking.type}</div>
+                                        <div className="bk-modal-card-sub">Training Program</div>
+                                    </div>
 
-                            <div className="detail-field" style={{ marginTop: '20px' }}>
-                                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '4px' }}>Schedule Summary</label>
-                                <div style={{ fontWeight: '600', color: '#334155' }}>{selectedBooking.date} | {selectedBooking.time}</div>
+                                    <div className="bk-modal-card">
+                                        <div className="bk-modal-card-label">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2">
+                                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                                                <circle cx="12" cy="10" r="3"></circle>
+                                            </svg>
+                                            <label>Branch</label>
+                                        </div>
+                                        <div className="bk-modal-card-value">{selectedBooking.branch}</div>
+                                    </div>
+                                </div>
+
+                                {/* Payment Information */}
+                                <div className="bk-modal-payment">
+                                    <div className="bk-modal-payment-header">
+                                        <div className="bk-modal-card-label">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
+                                                <line x1="1" y1="10" x2="23" y2="10"></line>
+                                            </svg>
+                                            <label>Payment Details</label>
+                                        </div>
+                                        <span className="bk-verified-badge">VERIFIED</span>
+                                    </div>
+                                    <div className="bk-modal-payment-row main">
+                                        <span>Amount</span>
+                                        <span className="bk-payment-amount">{selectedBooking.amount}</span>
+                                    </div>
+                                    <div className="bk-modal-payment-row">
+                                        <span>Payment Type</span>
+                                        <span className="bk-payment-value">{selectedBooking.paymentType}</span>
+                                    </div>
+                                    <div className="bk-modal-payment-row">
+                                        <span>Method</span>
+                                        <span className="bk-payment-value">{selectedBooking.paymentMethod}</span>
+                                    </div>
+                                </div>
+
+                                {/* Schedule Information */}
+                                <div className="bk-modal-card">
+                                    <div className="bk-modal-card-label">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2">
+                                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                            <line x1="16" y1="2" x2="16" y2="6"></line>
+                                            <line x1="8" y1="2" x2="8" y2="6"></line>
+                                            <line x1="3" y1="10" x2="21" y2="10"></line>
+                                        </svg>
+                                        <label>Schedule</label>
+                                    </div>
+                                    <div className="bk-modal-schedule-content">
+                                        <div className="bk-modal-card-value">{selectedBooking.date}</div>
+                                        <div className="bk-modal-card-sub">{selectedBooking.time}</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <div className="modal-footer" style={{ borderTop: '1px solid #f1f5f9', padding: '20px', display: 'flex', gap: '10px' }}>
-                            <button className="prev-btn" style={{ flex: 1 }} onClick={() => setShowViewModal(false)}>Close View</button>
-                            {selectedBooking.status === 'Pending' && (
-                                <button className="add-btn" style={{ flex: 1 }} onClick={() => { updateStatus(selectedBooking.id, 'Confirmed'); setShowViewModal(false); }}>Confirm Booking</button>
+                        <div className="bk-modal-footer">
+                            <button className="bk-modal-btn-close" onClick={() => setShowViewModal(false)}>Close</button>
+                            {selectedBooking.status === 'Collectable' && (
+                                <button className="bk-modal-btn-action" onClick={() => { updateStatus(selectedBooking.id, 'Paid'); setShowViewModal(false); }}>Mark as Paid</button>
                             )}
                         </div>
                     </div>
@@ -187,23 +319,41 @@ const Booking = () => {
 
             <div className="booking-stats">
                 <div className="mini-stat">
-                    <span className="label">Total Bookings</span>
-                    <span className="value">{bookings.length}</span>
+                    <div className="mini-stat-icon blue">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                    </div>
+                    <div className="mini-stat-content">
+                        <span className="label">Total Bookings</span>
+                        <span className="value">{loading ? <span className="bk-skeleton-text">--</span> : bookings.length}</span>
+                        <span className="mini-stat-subtitle">All time records</span>
+                    </div>
                 </div>
                 <div className="mini-stat">
-                    <span className="label">Pending Approval</span>
-                    <span className="value orange">{bookings.filter(b => b.status === 'Pending').length}</span>
+                    <div className="mini-stat-icon orange">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    </div>
+                    <div className="mini-stat-content">
+                        <span className="label">Collectable</span>
+                        <span className="value orange">{loading ? <span className="bk-skeleton-text">--</span> : bookings.filter(b => b.status === 'Collectable').length}</span>
+                        <span className="mini-stat-subtitle">Awaiting payment</span>
+                    </div>
                 </div>
                 <div className="mini-stat">
-                    <span className="label">Confirmed</span>
-                    <span className="value green">{bookings.filter(b => b.status === 'Confirmed').length}</span>
+                    <div className="mini-stat-icon green">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                    </div>
+                    <div className="mini-stat-content">
+                        <span className="label">Paid</span>
+                        <span className="value green">{loading ? <span className="bk-skeleton-text">--</span> : bookings.filter(b => b.status === 'Paid').length}</span>
+                        <span className="mini-stat-subtitle">Completed payments</span>
+                    </div>
                 </div>
             </div>
 
             <div className="booking-content">
                 <div className="filters-row">
                     <div className="status-tabs">
-                        {['All', 'Pending', 'Confirmed', 'Cancelled'].map(status => (
+                        {['All', 'Collectable', 'Paid', 'Cancelled'].map(status => (
                             <button
                                 key={status}
                                 className={`status-tab ${statusFilter === status ? 'active' : ''}`}
@@ -217,6 +367,22 @@ const Booking = () => {
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                         Export CSV
                     </button>
+                </div>
+
+                {error && (
+                    <div style={{ padding: '12px 20px', background: '#fee2e2', color: '#991b1b', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                        </svg>
+                        <span>{error}</span>
+                    </div>
+                )}
+
+                <div className="bk-results-bar">
+                    <span className="bk-results-count">{filteredBookings.length} {filteredBookings.length === 1 ? 'result' : 'results'}</span>
+                    {statusFilter !== 'All' && <span className="bk-active-filter">{statusFilter} <button onClick={() => setStatusFilter('All')}>&times;</button></span>}
                 </div>
 
                 <div className="booking-table-wrapper">
@@ -234,12 +400,49 @@ const Booking = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredBookings.map(booking => (
-                                <tr key={booking.id}>
+                            {loading ? (
+                                Array.from({ length: 5 }).map((_, i) => (
+                                    <tr key={`skeleton-${i}`} className="bk-skeleton-row">
+                                        <td><div className="bk-skeleton-cell" style={{ width: '70px' }}></div></td>
+                                        <td>
+                                            <div className="bk-table-student">
+                                                <div className="bk-skeleton-avatar"></div>
+                                                <div className="bk-skeleton-cell" style={{ width: '120px' }}></div>
+                                            </div>
+                                        </td>
+                                        <td><div className="bk-skeleton-cell" style={{ width: '50px' }}></div></td>
+                                        <td><div className="bk-skeleton-cell" style={{ width: '90px' }}></div></td>
+                                        <td><div className="bk-skeleton-cell" style={{ width: '100px' }}></div></td>
+                                        <td><div className="bk-skeleton-cell" style={{ width: '80px' }}></div></td>
+                                        <td><div className="bk-skeleton-cell" style={{ width: '70px', borderRadius: '20px' }}></div></td>
+                                        <td><div className="bk-skeleton-cell" style={{ width: '80px' }}></div></td>
+                                    </tr>
+                                ))
+                            ) : filteredBookings.length === 0 ? (
+                                <tr>
+                                    <td colSpan="8" className="no-data">
+                                        <div className="bk-empty-state">
+                                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                                <polyline points="14 2 14 8 20 8"></polyline>
+                                                <line x1="9" y1="15" x2="15" y2="15"></line>
+                                            </svg>
+                                            <p>No bookings found</p>
+                                            <span>Try adjusting your search or filter criteria</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ) : filteredBookings.map(booking => (
+                                <tr key={booking.id} className="bk-table-row">
                                     <td className="bk-id">{booking.id}</td>
                                     <td>
-                                        <div className="student-info">
-                                            <span className="name">{booking.student}</span>
+                                        <div className="bk-table-student">
+                                            <div className="bk-student-avatar">
+                                                {booking.student.split(' ').map(n => n[0]).join('').substring(0, 2)}
+                                            </div>
+                                            <div className="student-info">
+                                                <span className="name">{booking.student}</span>
+                                            </div>
                                         </div>
                                     </td>
                                     <td>
@@ -267,12 +470,12 @@ const Booking = () => {
                                     </td>
                                     <td>
                                         <div className="action-btns">
-                                            {booking.status === 'Pending' && (
+                                            {booking.status === 'Collectable' && (
                                                 <>
-                                                    <button className="approve-btn" title="Approve" onClick={() => updateStatus(booking.id, 'Confirmed')}>
+                                                    <button className="approve-btn" title="Mark as Paid" onClick={() => updateStatus(booking.id, 'Paid')}>
                                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
                                                     </button>
-                                                    <button className="reject-btn" title="Reject" onClick={() => updateStatus(booking.id, 'Cancelled')}>
+                                                    <button className="reject-btn" title="Cancel" onClick={() => updateStatus(booking.id, 'Cancelled')}>
                                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                                                     </button>
                                                 </>
@@ -284,13 +487,6 @@ const Booking = () => {
                                     </td>
                                 </tr>
                             ))}
-                            {filteredBookings.length === 0 && (
-                                <tr>
-                                    <td colSpan="8" className="no-data">
-                                        No bookings found matching your search.
-                                    </td>
-                                </tr>
-                            )}
                         </tbody>
                     </table>
                 </div>

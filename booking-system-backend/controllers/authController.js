@@ -254,10 +254,13 @@ const login = async (req, res) => {
 const getProfile = async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, first_name, middle_name, last_name, email, address, age, gender,
-       birthday, birth_place, nationality, marital_status, contact_numbers, zip_code,
-       emergency_contact_person, emergency_contact_number, created_at
-       FROM users WHERE id = $1`,
+      `SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.address, u.age, u.gender,
+       u.birthday, u.birth_place, u.nationality, u.marital_status, u.contact_numbers, u.zip_code,
+       u.emergency_contact_person, u.emergency_contact_number, u.created_at, u.role, u.branch_id,
+       b.name as branch_name
+       FROM users u
+       LEFT JOIN branches b ON u.branch_id = b.id
+       WHERE u.id = $1`,
       [req.user.id]
     );
 
@@ -286,6 +289,9 @@ const getProfile = async (req, res) => {
         emergencyContactPerson: user.emergency_contact_person,
         emergencyContactNumber: user.emergency_contact_number,
         createdAt: user.created_at,
+        role: user.role,
+        branchId: user.branch_id,
+        branchName: user.branch_name,
       },
     });
   } catch (error) {

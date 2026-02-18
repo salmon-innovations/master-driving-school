@@ -138,7 +138,7 @@ function App() {
             onLogout={handleLogout}
           />
         )}
-        <main className={`${!isAuthPage ? 'flex-grow pt-20 sm:pt-24 md:pt-28' : 'flex-grow'}`}>
+        <main className={`${!isAuthPage ? 'flex-grow pt-[84px] sm:pt-[108px] md:pt-[124px]' : 'flex-grow'}`}>
           {renderPage()}
         </main>
         {!isAuthPage && <Footer onNavigate={setCurrentPage} />}

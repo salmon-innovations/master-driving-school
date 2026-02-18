@@ -3,7 +3,7 @@ const pool = require('../config/db');
 // Create new booking
 const createBooking = async (req, res) => {
   try {
-    const { courseId, branchId, bookingDate, bookingTime, notes, totalAmount } = req.body;
+    const { courseId, branchId, bookingDate, bookingTime, notes, totalAmount, paymentType, paymentMethod } = req.body;
     const userId = req.user.id;
 
     // Validate required fields
@@ -11,12 +11,15 @@ const createBooking = async (req, res) => {
       return res.status(400).json({ error: 'Please provide all required fields' });
     }
 
+    // Automatically set status to 'paid' if payment type is Full Payment
+    const status = paymentType === 'Full Payment' ? 'paid' : 'collectable';
+
     // Insert booking
     const result = await pool.query(
-      `INSERT INTO bookings (user_id, course_id, branch_id, booking_date, booking_time, notes, total_amount, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO bookings (user_id, course_id, branch_id, booking_date, booking_time, notes, total_amount, payment_type, payment_method, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [userId, courseId, branchId, bookingDate, bookingTime, notes, totalAmount, 'pending']
+      [userId, courseId, branchId, bookingDate, bookingTime, notes, totalAmount, paymentType || 'Full Payment', paymentMethod || 'Online Payment', status]
     );
 
     res.status(201).json({
@@ -94,7 +97,7 @@ const updateBookingStatus = async (req, res) => {
     const userId = req.user.id;
 
     // Validate status
-    const validStatuses = ['pending', 'confirmed', 'cancelled', 'completed'];
+    const validStatuses = ['collectable', 'paid', 'cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }

@@ -13,6 +13,12 @@ const {
   updateUser,
   toggleUserStatus,
   resetUserPassword,
+  walkInEnrollment,
+  getAllTransactions,
+  getUnpaidBookings,
+  getFunnelData,
+  getCourseDistribution,
+  getBranchPerformance,
 } = require('../controllers/adminController');
 const { authenticateToken } = require('../middleware/auth');
 
@@ -57,5 +63,19 @@ router.post('/users', createUser);
 router.put('/users/:id', updateUser);
 router.patch('/users/:id/status', toggleUserStatus);
 router.post('/users/:id/reset-password', resetUserPassword);
+
+// Walk-in enrollment
+router.post('/walk-in-enrollment', walkInEnrollment);
+
+// Financial transactions
+router.get('/transactions', getAllTransactions);
+
+// Unpaid bookings
+router.get('/unpaid-bookings', getUnpaidBookings);
+
+// Analytics Routes
+router.get('/analytics/funnel', getFunnelData);
+router.get('/analytics/course-distribution', getCourseDistribution);
+router.get('/analytics/branch-performance', getBranchPerformance);
 
 module.exports = router;

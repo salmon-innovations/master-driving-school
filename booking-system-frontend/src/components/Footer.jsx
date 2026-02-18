@@ -32,7 +32,7 @@ function Footer({ onNavigate }) {
               </li>
               <li>
                 <button onClick={() => handleNavClick('payment')} className="hover:text-[#F3B74C] transition-colors">
-                  Book a Lesson
+                  Enroll Now
                 </button>
               </li>
               <li>

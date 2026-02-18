@@ -43,7 +43,7 @@ function Home({ onNavigate, isLoggedIn }) {
     {
       icon: '🌐',
       title: 'Accessibility',
-      description: 'Easy access to our services with convenient locations, online booking, and accommodations for all learners'
+      description: 'Easy access to our services with convenient locations, online enrollment, and accommodations for all learners'
     },
     {
       icon: '📍',
@@ -96,7 +96,7 @@ function Home({ onNavigate, isLoggedIn }) {
       validUntil: 'Limited Time Offer'
     },
     {
-      title: 'Group Booking',
+      title: 'Group Enrollment',
       discount: '15% OFF',
       description: 'Book with 3+ friends and save',
       validUntil: 'All Year Round'
@@ -111,7 +111,7 @@ function Home({ onNavigate, isLoggedIn }) {
 
   const handleNavigate = (page) => {
     if ((page === 'payment' || page === 'booking') && !isLoggedIn) {
-      showNotification("Please sign in to book a lesson", "error")
+      showNotification("Please sign in to enroll", "error")
       onNavigate('signin')
       return
     }
@@ -147,13 +147,13 @@ function Home({ onNavigate, isLoggedIn }) {
         {/* Gradient Overlay for better text visibility */}
         <div className="absolute inset-0 bg-black/20 z-20"></div>
 
-        {/* Book Now Button Overlay */}
+        {/* Enroll Now Button Overlay */}
         <div className="absolute inset-0 flex items-center justify-center z-30">
           <button
             onClick={() => handleNavigate('payment')}
             className="px-6 sm:px-10 md:px-12 py-3 sm:py-4 md:py-5 bg-[#F3B74C] text-[#2157da] font-bold text-base sm:text-lg md:text-xl rounded-full hover:bg-[#e1a63b] transition-all transform hover:scale-105 shadow-2xl"
           >
-            Book a Lesson Now
+            Enroll Now
           </button>
         </div>
 
@@ -257,7 +257,7 @@ function Home({ onNavigate, isLoggedIn }) {
             data-aos="fade-down"
             data-aos-delay="100"
           >
-            Save more when you book now! Limited slots available.
+            Save more when you enroll now! Limited slots available.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 max-w-6xl mx-auto">
             {specialOffers.map((offer, index) => (
@@ -289,7 +289,7 @@ function Home({ onNavigate, isLoggedIn }) {
               onClick={() => handleNavigate('payment')}
               className="px-8 sm:px-12 py-3 sm:py-4 bg-[#2157da] text-white font-bold text-base sm:text-lg rounded-full hover:bg-[#1a3a8a] transition-all shadow-lg hover:shadow-xl transform hover:scale-105"
             >
-              Book Now & Save!
+              Enroll Now & Save!
             </button>
           </div>
         </div>
@@ -399,7 +399,7 @@ function Home({ onNavigate, isLoggedIn }) {
                 <div className="bg-[#2157da] text-white w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold mx-auto mb-4">
                   2
                 </div>
-                <h3 className="text-xl font-semibold mb-3 text-gray-800">Book Your Schedule</h3>
+                <h3 className="text-xl font-semibold mb-3 text-gray-800">Enroll Your Schedule</h3>
                 <p className="text-gray-600">Pick a convenient time and location. We work around your schedule</p>
               </div>
               <div className="text-center" data-aos="flip-left" data-aos-delay="300">

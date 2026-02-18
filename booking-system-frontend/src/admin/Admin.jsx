@@ -7,6 +7,10 @@ import SalePayment from './SalePayment';
 import UserManagement from './User';
 import WalkInEnrollment from './WalkInEnrollment';
 import CourseManagement from './CourseManagement';
+import BranchManagement from './BranchManagement';
+import NewsEvents from './NewsEvents';
+import AnalyticsReports from './AnalyticsReports';
+import CRMManagement from './CRM';
 import { useTheme } from '../context/ThemeContext';
 import { useNotification } from '../context/NotificationContext';
 import { authAPI, adminAPI } from '../services/api';
@@ -21,21 +25,13 @@ import {
     Tooltip,
     Legend,
     ResponsiveContainer,
-    FunnelChart,
-    Funnel,
-    LabelList
+
 } from 'recharts';
 
 const logo = '/images/logo.png';
 const cover = '/images/cover.png';
 
-const funnelData = [
-    { value: 1000, name: 'Visitors', fill: '#1a4fba' },
-    { value: 750, name: 'Inquiries', fill: '#3b82f6' },
-    { value: 500, name: 'Enrolled', fill: '#60a5fa' },
-    { value: 380, name: 'Active', fill: '#93c5fd' },
-    { value: 200, name: 'Graduates', fill: '#bfdbfe' },
-];
+
 
 const Admin = ({ onNavigate, setIsLoggedIn }) => {
     const { theme, toggleTheme } = useTheme();
@@ -56,6 +52,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     const [revenueData, setRevenueData] = useState([]);
     const [enrollmentData, setEnrollmentData] = useState([]);
     const [bestSellingCourses, setBestSellingCourses] = useState([]);
+    const [enrollees, setEnrollees] = useState([]);
 
     useEffect(() => {
         // Set initial state based on window size
@@ -89,7 +86,6 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     useEffect(() => {
         localStorage.setItem('adminActiveTab', activeTab);
     }, [activeTab]);
-    const [showStudentModal, setShowStudentModal] = useState(false);
     const [showProfileModal, setShowProfileModal] = useState(false);
     const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -103,6 +99,29 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         avatar: null
     });
 
+    // Notifications State
+    const [notifications, setNotifications] = useState([
+        { id: 1, title: 'New Enrollment', message: 'Juan Dela Cruz signed up for TDC Course', time: '5 mins ago', type: 'info', read: false },
+        { id: 2, title: 'Payment Received', message: 'Maria Santos paid ₱2,500.00 for PDC', time: '12 mins ago', type: 'success', read: false },
+        { id: 3, title: 'System Alert', message: 'Scheduled maintenance this Sunday at 2 AM', time: '1 hour ago', type: 'warning', read: true },
+        { id: 4, title: 'New Lead', message: 'New inquiry from Quezon City branch', time: '3 hours ago', type: 'info', read: false }
+    ]);
+    const [showNotifications, setShowNotifications] = useState(false);
+
+    const markAsRead = (id) => {
+        setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    };
+
+    const deleteNotification = (id) => {
+        setNotifications(prev => prev.filter(n => n.id !== id));
+    };
+
+    const clearAllNotifications = () => {
+        setNotifications([]);
+    };
+
+    const unreadCount = notifications.filter(n => !n.read).length;
+
     // Fetch admin profile on mount
     useEffect(() => {
         const fetchAdminProfile = async () => {
@@ -114,10 +133,12 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         name: `${user.firstName} ${user.middleName || ''} ${user.lastName}`.trim(),
                         email: user.email,
                         phone: user.contactNumbers || '+63 912 345 6789',
-                        branch: 'Main Office', // Update this based on your branch logic
-                        role: user.role === 'admin' ? 'Super Admin' : 
-                              user.role === 'hrm' ? 'HR Manager' : 
-                              user.role === 'staff' ? 'Staff' : 'User',
+                        branch: user.branchName || 'Main Office',
+                        branchId: user.branchId || null,
+                        role: user.role === 'admin' ? 'Super Admin' :
+                            user.role === 'hrm' ? 'HR Manager' :
+                                user.role === 'staff' ? 'Staff' : 'User',
+                        rawRole: user.role || 'staff',
                         avatar: null
                     });
                 }
@@ -133,56 +154,52 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     useEffect(() => {
         const fetchDashboardData = async () => {
             if (activeTab === 'dashboard') {
+                setLoading(true);
                 try {
-                    setLoading(true);
-                    
-                    // Fetch stats
-                    const statsResponse = await adminAPI.getStats();
-                    if (statsResponse.success) {
-                        setStats(statsResponse.stats);
-                    }
+                    // Fetch core data needed for immediate display
+                    const [statsRes, bookingsRes] = await Promise.all([
+                        adminAPI.getStats(),
+                        adminAPI.getAllBookings(null, 10)
+                    ]);
 
-                    // Fetch revenue data
-                    const revenueResponse = await adminAPI.getRevenueData();
-                    if (revenueResponse.success) {
-                        setRevenueData(revenueResponse.data);
-                    }
+                    if (statsRes.success) setStats(statsRes.stats);
 
-                    // Fetch enrollment data
-                    const enrollmentResponse = await adminAPI.getEnrollmentData();
-                    if (enrollmentResponse.success) {
-                        setEnrollmentData(enrollmentResponse.data);
-                    }
-
-                    // Fetch best selling courses
-                    const coursesResponse = await adminAPI.getBestSellingCourses();
-                    if (coursesResponse.success) {
-                        setBestSellingCourses(coursesResponse.courses);
-                    }
-
-                    // Fetch recent bookings
-                    const bookingsResponse = await adminAPI.getAllBookings(null, 10);
-                    if (bookingsResponse.success) {
-                        const formattedEnrollees = bookingsResponse.bookings.map(booking => ({
-                            name: booking.student_name,
-                            course: booking.course_name,
-                            branch: booking.branch_name,
+                    if (bookingsRes.success) {
+                        const formattedEnrollees = bookingsRes.bookings.map(booking => ({
+                            name: booking.student_name || 'Unknown',
+                            course: booking.course_name || 'N/A',
+                            branch: booking.branch_name || 'N/A',
                             date: new Date(booking.booking_date).toLocaleDateString('en-US', {
                                 month: 'short',
                                 day: 'numeric',
                                 year: 'numeric'
                             }),
-                            status: booking.status === 'confirmed' ? 'Full Payment' : 
-                                    booking.status === 'pending' ? 'Pending' : 'Downpayment',
-                            method: 'GCash'
+                            status: booking.payment_type === 'Full Payment' ? 'Full Payment' :
+                                booking.status === 'pending' ? 'Pending' :
+                                    booking.status === 'collectable' ? 'Downpayment' :
+                                        booking.status === 'paid' ? 'Full Payment' : 'Pending',
+                            method: booking.payment_method || 'N/A',
+                            type: booking.enrollment_type || 'online'
                         }));
                         setEnrollees(formattedEnrollees);
                     }
 
+                    setLoading(false); // Show the dashboard cards and table
+
+                    // Fetch chart data and other details in the background
+                    Promise.all([
+                        adminAPI.getRevenueData(),
+                        adminAPI.getEnrollmentData(),
+                        adminAPI.getBestSellingCourses()
+                    ]).then(([revenueRes, enrollmentRes, bestSellingRes]) => {
+                        if (revenueRes.success) setRevenueData(revenueRes.data);
+                        if (enrollmentRes.success) setEnrollmentData(enrollmentRes.data);
+                        if (bestSellingRes.success) setBestSellingCourses(bestSellingRes.courses);
+                    }).catch(err => console.error('Error fetching secondary dashboard data:', err));
+
                 } catch (error) {
                     console.error('Error fetching dashboard data:', error);
-                    showNotification('Error loading dashboard data', 'error');
-                } finally {
+                    showNotification('Failed to load dashboard statistics', 'error');
                     setLoading(false);
                 }
             }
@@ -190,6 +207,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
         fetchDashboardData();
     }, [activeTab]);
+
 
     const fileInputRef = useRef(null);
 
@@ -287,45 +305,8 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     };
 
     // Enrollees Data for Table & Export
-    const [enrollees, setEnrollees] = useState([
-        { name: 'Juan Dela Cruz', course: 'TDC - Online', branch: 'Main Branch', date: 'Jan 15, 2024', status: 'Full Payment', method: 'GCash' },
-        { name: 'Maria Clara', course: 'PDC - Manual Sedan', branch: 'V. Luna', date: 'Jan 18, 2024 (AM)', status: 'Downpayment', method: 'StarPay' },
-        { name: 'Pedro Penduko', course: 'PDC - Motorcycle', branch: 'Marikina', date: 'Jan 20, 2024 (PM)', status: 'Pending', method: 'GCash' }
-    ]);
 
-    const [studentData, setStudentData] = useState({
-        name: '',
-        course: 'TDC - Online',
-        branch: 'Main Branch',
-        date: '',
-        status: 'Pending'
-    });
 
-    const handleStudentInputChange = (e) => {
-        const { name, value } = e.target;
-        setStudentData({ ...studentData, [name]: value });
-    };
-
-    const handleAddStudent = (e) => {
-        e.preventDefault();
-        const newStudent = {
-            name: studentData.name,
-            course: studentData.course,
-            branch: studentData.branch,
-            date: studentData.date,
-            status: studentData.status
-        };
-        setEnrollees([newStudent, ...enrollees]);
-        setShowStudentModal(false);
-        // Reset form
-        setStudentData({
-            name: '',
-            course: 'TDC - Online',
-            branch: 'Main Branch',
-            date: '',
-            status: 'Pending'
-        });
-    };
 
     const handleExport = () => {
         const timestamp = new Date().toLocaleString();
@@ -394,8 +375,8 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
     return (
         <div className={`dashboard-container ${isSidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
-            <Sidebar 
-                isSidebarOpen={isSidebarOpen} 
+            <Sidebar
+                isSidebarOpen={isSidebarOpen}
                 setIsSidebarOpen={setIsSidebarOpen}
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
@@ -430,13 +411,89 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                                             activeTab === 'news' ? 'News & Events' :
                                                                 activeTab === 'users' ? 'Account Management' :
                                                                     activeTab === 'courses' ? 'Course Management' :
-                                                                        'Dashboard'}
+                                                                        activeTab === 'branches' ? 'Configuration' :
+                                                                            activeTab === 'crm' ? 'CRM Management' :
+                                                                                'Dashboard'}
                             </h1>
-                            <p>Welcome back, Admin</p>
+                            <p>
+                                {(activeTab === 'users' || activeTab === 'courses' || activeTab === 'branches' || activeTab === 'crm')
+                                    ? 'Manage your system configurations and settings'
+                                    : 'Welcome back, Admin'}
+                            </p>
                         </div>
                     </div>
 
                     <div className="header-right">
+                        <div className="notification-wrapper">
+                            <button
+                                className={`notification-btn ${showNotifications ? 'active' : ''}`}
+                                title="View Notifications"
+                                onClick={() => setShowNotifications(!showNotifications)}
+                            >
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                                </svg>
+                                {unreadCount > 0 && <span className="notification-badge"></span>}
+                            </button>
+
+                            {showNotifications && (
+                                <>
+                                    <div className="dropdown-overlay" onClick={() => setShowNotifications(false)}></div>
+                                    <div className="notification-dropdown animate-dropdown">
+                                        <div className="dropdown-header">
+                                            <h3>Notifications</h3>
+                                            {notifications.length > 0 && (
+                                                <button className="clear-all-btn" onClick={clearAllNotifications}>Clear All</button>
+                                            )}
+                                        </div>
+                                        <div className="notifications-list">
+                                            {notifications.length > 0 ? (
+                                                notifications.map(n => (
+                                                    <div key={n.id} className={`notification-item ${n.read ? 'read' : 'unread'}`} onClick={() => markAsRead(n.id)}>
+                                                        <div className={`status-dot ${n.type}`}></div>
+                                                        <div className="notify-content">
+                                                            <div className="notify-title-row">
+                                                                <h4>{n.title}</h4>
+                                                                <span className="notify-time">{n.time}</span>
+                                                            </div>
+                                                            <p>{n.message}</p>
+                                                        </div>
+                                                        <button
+                                                            className="delete-notify"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                deleteNotification(n.id);
+                                                            }}
+                                                        >
+                                                            &times;
+                                                        </button>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="no-notifications">
+                                                    <div className="empty-icon">🔔</div>
+                                                    <p>Inbox is empty</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                        {notifications.length > 0 && (
+                                            <div className="dropdown-footer">
+                                                <button
+                                                    className="view-all-notify-btn"
+                                                    onClick={() => {
+                                                        setActiveTab('notifications');
+                                                        setShowNotifications(false);
+                                                    }}
+                                                >
+                                                    View All Notifications
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </div>
                         <button className="theme-toggle-btn" onClick={toggleTheme} title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}>
                             {theme === 'light' ? (
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
@@ -509,7 +566,8 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                             <div className="stat-card">
                                 <div className="stat-info">
                                     <span>Total Enrolled Students</span>
-                                    <h2>{loading ? '...' : stats.totalStudents.toLocaleString()}</h2>
+                                    <h2>{loading ? <span className="skeleton-text">---</span> : stats.totalStudents.toLocaleString()}</h2>
+                                    <p className="stat-subtitle">All time enrollments</p>
                                 </div>
                                 <div className="stat-icon blue">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
@@ -519,7 +577,8 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                             <div className="stat-card">
                                 <div className="stat-info">
                                     <span>Total Sales (This Month)</span>
-                                    <h2>{loading ? '...' : `₱ ${(stats.monthlyRevenue / 1000).toFixed(1)}k`}</h2>
+                                    <h2>{loading ? <span className="skeleton-text">---</span> : `₱ ${stats.monthlyRevenue > 0 ? (stats.monthlyRevenue / 1000).toFixed(1) + 'k' : '0.00'}`}</h2>
+                                    <p className="stat-subtitle">Monthly revenue</p>
                                 </div>
                                 <div className="stat-icon green">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
@@ -528,11 +587,12 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
                             <div className="stat-card">
                                 <div className="stat-info">
-                                    <span>Pending Bookings</span>
-                                    <h2>{loading ? '...' : stats.pendingBookings}</h2>
+                                    <span>Today's Enrollments</span>
+                                    <h2>{loading ? <span className="skeleton-text">---</span> : stats.todayEnrollments}</h2>
+                                    <p className="stat-subtitle">New students today</p>
                                 </div>
-                                <div className="stat-icon orange">
-                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                <div className="stat-icon purple">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                                 </div>
                             </div>
                         </section>
@@ -541,13 +601,27 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         <section className="charts-grid section">
                             <div className="chart-card">
                                 <div className="chart-header">
-                                    <h3>Monthly Revenue</h3>
-                                    <span>Financial Trends</span>
+                                    <div>
+                                        <h3>Monthly Revenue</h3>
+                                        <span>Financial Trends</span>
+                                    </div>
                                 </div>
-                                <div style={{ width: '100%', height: 300 }}>
+                                <div className="chart-container">
                                     {loading ? (
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#64748b' }}>
-                                            Loading chart data...
+                                        <div className="chart-loading-skeleton">
+                                            <div className="skeleton-bar" style={{ height: '40%' }}></div>
+                                            <div className="skeleton-bar" style={{ height: '70%' }}></div>
+                                            <div className="skeleton-bar" style={{ height: '55%' }}></div>
+                                            <div className="skeleton-bar" style={{ height: '85%' }}></div>
+                                            <div className="skeleton-bar" style={{ height: '60%' }}></div>
+                                            <div className="skeleton-bar" style={{ height: '45%' }}></div>
+                                        </div>
+                                    ) : revenueData.length === 0 ? (
+                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8' }}>
+                                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: '12px', opacity: 0.5 }}>
+                                                <line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                                            </svg>
+                                            <span style={{ fontSize: '14px' }}>No revenue data available yet</span>
                                         </div>
                                     ) : (
                                         <ResponsiveContainer>
@@ -599,13 +673,27 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
                             <div className="chart-card">
                                 <div className="chart-header">
-                                    <h3>Monthly Enrollments</h3>
-                                    <span>Student Acquisition</span>
+                                    <div>
+                                        <h3>Monthly Enrollments</h3>
+                                        <span>Student Acquisition</span>
+                                    </div>
                                 </div>
-                                <div style={{ width: '100%', height: 300 }}>
+                                <div className="chart-container">
                                     {loading ? (
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#64748b' }}>
-                                            Loading chart data...
+                                        <div className="chart-loading-skeleton">
+                                            <div className="skeleton-bar" style={{ height: '60%' }}></div>
+                                            <div className="skeleton-bar" style={{ height: '45%' }}></div>
+                                            <div className="skeleton-bar" style={{ height: '80%' }}></div>
+                                            <div className="skeleton-bar" style={{ height: '35%' }}></div>
+                                            <div className="skeleton-bar" style={{ height: '65%' }}></div>
+                                            <div className="skeleton-bar" style={{ height: '50%' }}></div>
+                                        </div>
+                                    ) : enrollmentData.length === 0 ? (
+                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8' }}>
+                                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: '12px', opacity: 0.5 }}>
+                                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle>
+                                            </svg>
+                                            <span style={{ fontSize: '14px' }}>No enrollment data available yet</span>
                                         </div>
                                     ) : (
                                         <ResponsiveContainer>
@@ -645,20 +733,20 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         </section>
 
                         {/* Best Selling Courses Section */}
-                        <section className="data-section">
+                        <section className="data-section best-courses-section">
                             <div className="section-header">
-                                <h2>Best Selling Courses</h2>
-                                <p style={{ color: 'var(--secondary-text)', fontSize: '0.9rem', marginTop: '5px' }}>
-                                    Top performing courses by enrollment count
-                                </p>
+                                <div>
+                                    <h2>Best Selling Courses</h2>
+                                    <p className="section-subtitle">Top performing courses by enrollment count</p>
+                                </div>
                             </div>
 
                             {loading ? (
-                                <div style={{ 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    justifyContent: 'center', 
-                                    height: '200px', 
+                                <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    height: '200px',
                                     color: 'var(--secondary-text)',
                                     background: 'var(--card-bg)',
                                     borderRadius: '16px',
@@ -666,10 +754,28 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                 }}>
                                     Loading courses data...
                                 </div>
+                            ) : bestSellingCourses.length === 0 ? (
+                                <div style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    height: '200px',
+                                    color: 'var(--secondary-text)',
+                                    background: 'var(--card-bg)',
+                                    borderRadius: '16px',
+                                    border: '1px solid var(--border-color)'
+                                }}>
+                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: '12px', opacity: 0.5 }}>
+                                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                                    </svg>
+                                    <span style={{ fontSize: '14px' }}>No course data available yet</span>
+                                    <span style={{ fontSize: '12px', marginTop: '4px', opacity: 0.7 }}>Courses will appear here once enrollments are recorded</span>
+                                </div>
                             ) : (
                                 <div className="courses-grid">
                                     {bestSellingCourses.slice(0, 6).map((course, index) => (
-                                        <div 
+                                        <div
                                             key={course.id}
                                             className="course-card"
                                             onMouseEnter={(e) => {
@@ -731,19 +837,20 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         </section>
 
                         {/* Recent Enrollees Table */}
-                        <section className="data-section">
+                        <section className="data-section recent-enrollees-section">
                             <div className="section-header">
-                                <h2>Recent Enrollees</h2>
+                                <div>
+                                    <h2>Recent Enrollees</h2>
+                                    <p className="section-subtitle">Latest student enrollment records</p>
+                                </div>
                                 <div className="section-actions">
                                     <button
                                         className="export-btn-secondary"
-                                        style={{ marginRight: '10px' }}
                                         onClick={handleExport}
                                     >
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                                         Export
                                     </button>
-                                    <button className="add-btn" onClick={() => setShowStudentModal(true)}>Add Student</button>
                                 </div>
                             </div>
 
@@ -760,9 +867,38 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {enrollees.map((student, index) => (
-                                            <tr key={index}>
-                                                <td className="student-name">{student.name}</td>
+                                        {enrollees.length === 0 ? (
+                                            <tr>
+                                                <td colSpan="6" style={{
+                                                    textAlign: 'center',
+                                                    padding: '40px 20px',
+                                                    color: 'var(--secondary-text)',
+                                                    fontSize: '14px'
+                                                }}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                                                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.4 }}>
+                                                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                                                        </svg>
+                                                        <span>No recent enrollees found</span>
+                                                        <span style={{ fontSize: '12px', opacity: 0.7 }}>New enrollments will appear here</span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ) : enrollees.map((student, index) => (
+                                            <tr key={index} className="table-row-hover">
+                                                <td>
+                                                    <div className="student-cell">
+                                                        <div className="student-avatar">
+                                                            {student.name?.charAt(0)?.toUpperCase() || '?'}
+                                                        </div>
+                                                        <div className="student-name-info">
+                                                            <span className="student-name">{student.name}</span>
+                                                            {student.type === 'walk-in' && (
+                                                                <span className="enrollment-type-badge walkin">Walk-in</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </td>
                                                 <td>{student.course}</td>
                                                 <td>{student.branch}</td>
                                                 <td>{student.date}</td>
@@ -787,143 +923,15 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                     <Booking />
                 ) : activeTab === 'sales' ? (
                     <SalePayment />
-                ) : activeTab === 'analytics' ? (
-                    <div className="analytics-view">
-                        <section className="stats-grid">
-                            <div className="stat-card">
-                                <div className="stat-info">
-                                    <h3>Growth Rate</h3>
-                                    <div className="stat-value">+12.5%</div>
-                                    <div className="stat-label">vs last month</div>
-                                </div>
-                            </div>
-                            <div className="stat-card">
-                                <div className="stat-info">
-                                    <h3>Retention</h3>
-                                    <div className="stat-value">94.2%</div>
-                                    <div className="stat-label">Student satisfaction</div>
-                                </div>
-                            </div>
-                            <div className="stat-card">
-                                <div className="stat-info">
-                                    <h3>Traffic</h3>
-                                    <div className="stat-value">12.8k</div>
-                                    <div className="stat-label">Page views</div>
-                                </div>
-                            </div>
-                        </section>
-                        <section className="charts-grid">
-                            <div className="chart-card">
-                                <div className="chart-header">
-                                    <h3>Conversion Funnel</h3>
-                                </div>
-                                <div className="chart-wrapper" style={{ height: '350px', padding: '20px' }}>
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <FunnelChart>
-                                            <Tooltip
-                                                contentStyle={{
-                                                    borderRadius: '12px',
-                                                    border: 'none',
-                                                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                                                }}
-                                            />
-                                            <Funnel
-                                                dataKey="value"
-                                                data={funnelData}
-                                                isAnimationActive
-                                            >
-                                                <LabelList
-                                                    position="right"
-                                                    fill="#64748b"
-                                                    stroke="none"
-                                                    dataKey="name"
-                                                    fontSize={12}
-                                                />
-                                            </Funnel>
-                                        </FunnelChart>
-                                    </ResponsiveContainer>
-                                </div>
-                            </div>
-                        </section>
-                    </div>
-                ) : activeTab === 'news' ? (
-                    <div className="news-view">
-                        <div className="section-header">
-                            <h2>News & Announcements</h2>
-                            <button className="add-btn">Post New</button>
-                        </div>
-                        <div className="news-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px', marginTop: '20px' }}>
-                            <div className="news-card" style={{ background: 'white', padding: '20px', borderRadius: '15px', border: '1px solid #e2e8f0' }}>
-                                <div className="news-tag" style={{ background: '#dcfce7', color: '#16a34a', display: 'inline-block', padding: '4px 12px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '600', marginBottom: '12px' }}>EVENT</div>
-                                <h3 style={{ fontSize: '1.1rem', marginBottom: '10px' }}>Summer Driving Bootcamp 2024</h3>
-                                <p style={{ color: '#64748b', fontSize: '0.9rem', lineHeight: '1.6' }}>Join our intensive 2-week course this summer. Limited slots available for all branches.</p>
-                                <div className="news-footer" style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>June 12, 2024</span>
-                                    <button style={{ color: '#3b82f6', border: 'none', background: 'none', fontWeight: '600', cursor: 'pointer' }}>Edit</button>
-                                </div>
-                            </div>
-                            <div className="news-card" style={{ background: 'white', padding: '20px', borderRadius: '15px', border: '1px solid #e2e8f0' }}>
-                                <div className="news-tag" style={{ background: '#fee2e2', color: '#dc2626', display: 'inline-block', padding: '4px 12px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '600', marginBottom: '12px' }}>URGENT</div>
-                                <h3 style={{ fontSize: '1.1rem', marginBottom: '10px' }}>System Maintenance Notice</h3>
-                                <p style={{ color: '#64748b', fontSize: '0.9rem', lineHeight: '1.6' }}>Online TDC platform will be undergoing scheduled maintenance this Sunday from 2AM to 5AM.</p>
-                                <div className="news-footer" style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>June 10, 2024</span>
-                                    <button style={{ color: '#3b82f6', border: 'none', background: 'none', fontWeight: '600', cursor: 'pointer' }}>Edit</button>
-                                </div>
-                            </div>
-                        </div>
 
-                        <div className="section-header" style={{ marginTop: '40px' }}>
-                            <h2>Featured Videos & Tutorials</h2>
-                        </div>
-                        <div className="video-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '25px', marginTop: '20px' }}>
-                            <div className="video-card" style={{ background: 'white', borderRadius: '20px', overflow: 'hidden', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-                                <div className="video-thumb" style={{ height: '180px', background: '#1e293b', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <div className="play-btn-circle" style={{ width: '50px', height: '50px', background: 'rgba(255,255,255,0.2)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)', cursor: 'pointer' }}>
-                                        <div style={{ width: 0, height: 0, borderTop: '10px solid transparent', borderBottom: '10px solid transparent', borderLeft: '15px solid white', marginLeft: '5px' }}></div>
-                                    </div>
-                                    <span style={{ position: 'absolute', bottom: '10px', right: '10px', background: 'rgba(0,0,0,0.7)', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '0.7rem' }}>12:45</span>
-                                </div>
-                                <div className="video-info" style={{ padding: '20px' }}>
-                                    <div style={{ color: '#3b82f6', fontSize: '0.75rem', fontWeight: '700', marginBottom: '8px', textTransform: 'uppercase' }}>Tutorial</div>
-                                    <h3 style={{ fontSize: '1rem', marginBottom: '8px', color: '#1e293b' }}>Parallel Parking Mastery</h3>
-                                    <p style={{ color: '#64748b', fontSize: '0.85rem', lineHeight: '1.5' }}>Step-by-step guide to mastering the hardest parking maneuver.</p>
-                                </div>
-                            </div>
-                            <div className="video-card" style={{ background: 'white', borderRadius: '20px', overflow: 'hidden', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-                                <div className="video-thumb" style={{ height: '180px', background: '#334155', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <div className="play-btn-circle" style={{ width: '50px', height: '50px', background: 'rgba(255,255,255,0.2)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)', cursor: 'pointer' }}>
-                                        <div style={{ width: 0, height: 0, borderTop: '10px solid transparent', borderBottom: '10px solid transparent', borderLeft: '15px solid white', marginLeft: '5px' }}></div>
-                                    </div>
-                                    <span style={{ position: 'absolute', bottom: '10px', right: '10px', background: 'rgba(0,0,0,0.7)', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '0.7rem' }}>08:20</span>
-                                </div>
-                                <div className="video-info" style={{ padding: '20px' }}>
-                                    <div style={{ color: '#8b5cf6', fontSize: '0.75rem', fontWeight: '700', marginBottom: '8px', textTransform: 'uppercase' }}>Highlights</div>
-                                    <h3 style={{ fontSize: '1rem', marginBottom: '8px', color: '#1e293b' }}>Student Success Story: Maria Clara</h3>
-                                    <p style={{ color: '#64748b', fontSize: '0.85rem', lineHeight: '1.5' }}>Hear from our top graduate about her journey at Master School.</p>
-                                </div>
-                            </div>
-                            <div className="video-card" style={{ background: 'white', borderRadius: '20px', overflow: 'hidden', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-                                <div className="video-thumb" style={{ height: '180px', background: '#0f172a', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <div className="play-btn-circle" style={{ width: '50px', height: '50px', background: 'rgba(255,255,255,0.2)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)', cursor: 'pointer' }}>
-                                        <div style={{ width: 0, height: 0, borderTop: '10px solid transparent', borderBottom: '10px solid transparent', borderLeft: '15px solid white', marginLeft: '5px' }}></div>
-                                    </div>
-                                    <span style={{ position: 'absolute', bottom: '10px', right: '10px', background: 'rgba(0,0,0,0.7)', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '0.7rem' }}>15:10</span>
-                                </div>
-                                <div className="video-info" style={{ padding: '20px' }}>
-                                    <div style={{ color: '#f59e0b', fontSize: '0.75rem', fontWeight: '700', marginBottom: '8px', textTransform: 'uppercase' }}>TDC Online</div>
-                                    <h3 style={{ fontSize: '1rem', marginBottom: '8px', color: '#1e293b' }}>Traffic Signs & Regulations</h3>
-                                    <p style={{ color: '#64748b', fontSize: '0.85rem', lineHeight: '1.5' }}>Essential knowledge for your student permit application.</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                ) : activeTab === 'news' ? (
+                    <NewsEvents />
                 ) : activeTab === 'walk-in' ? (
-                    <WalkInEnrollment 
+                    <WalkInEnrollment
                         adminProfile={adminProfile}
                         onEnroll={(newEnrollee) => {
                             setEnrollees(prev => [newEnrollee, ...prev]);
-                        }} 
+                        }}
                     />
                 ) : activeTab === 'profile' ? (
                     <div className="profile-view-container">
@@ -1050,78 +1058,22 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                     <UserManagement />
                 ) : activeTab === 'courses' ? (
                     <CourseManagement />
+                ) : activeTab === 'branches' ? (
+                    <BranchManagement />
+                ) : activeTab === 'analytics' ? (
+                    <AnalyticsReports />
+                ) : activeTab === 'crm' ? (
+                    <CRMManagement />
+                ) : activeTab === 'news' ? (
+                    <NewsEvents />
+                ) : activeTab === 'notifications' ? (
+                    <NotificationPage
+                        notifications={notifications}
+                        markAsRead={markAsRead}
+                        deleteNotification={deleteNotification}
+                        clearAll={clearAllNotifications}
+                    />
                 ) : null}
-                {/* Add Student Modal */}
-                {showStudentModal && (
-                    <div className="modal-overlay">
-                        <div className="modal-container user-modal">
-                            <div className="modal-header">
-                                <h2>Enroll New Student</h2>
-                                <button className="close-modal" onClick={() => setShowStudentModal(false)}>&times;</button>
-                            </div>
-                            <form onSubmit={handleAddStudent}>
-                                <div className="modal-body">
-                                    <div className="input-group">
-                                        <label>Student Full Name</label>
-                                        <input
-                                            type="text"
-                                            name="name"
-                                            placeholder="e.g. Juan Dela Cruz"
-                                            value={studentData.name}
-                                            onChange={handleStudentInputChange}
-                                            required
-                                        />
-                                    </div>
-                                    <div className="form-row" style={{ display: 'flex', gap: '15px' }}>
-                                        <div className="input-group" style={{ flex: 1 }}>
-                                            <label>Course Type</label>
-                                            <select name="course" value={studentData.course} onChange={handleStudentInputChange}>
-                                                <option>TDC - Online</option>
-                                                <option>TDC - Face to Face</option>
-                                                <option>PDC - Manual Sedan</option>
-                                                <option>PDC - Automatic Sedan</option>
-                                                <option>PDC - Motorcycle</option>
-                                            </select>
-                                        </div>
-                                        <div className="input-group" style={{ flex: 1 }}>
-                                            <label>Branch</label>
-                                            <select name="branch" value={studentData.branch} onChange={handleStudentInputChange}>
-                                                <option>Main Branch</option>
-                                                <option>V. Luna Branch</option>
-                                                <option>Marikina Branch</option>
-                                                <option>Fairview Branch</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div className="form-row" style={{ display: 'flex', gap: '15px' }}>
-                                        <div className="input-group" style={{ flex: 1 }}>
-                                            <label>Schedule Date</label>
-                                            <input
-                                                type="date"
-                                                name="date"
-                                                value={studentData.date}
-                                                onChange={handleStudentInputChange}
-                                                required
-                                            />
-                                        </div>
-                                        <div className="input-group" style={{ flex: 1 }}>
-                                            <label>Initial Status</label>
-                                            <select name="status" value={studentData.status} onChange={handleStudentInputChange}>
-                                                <option>Pending</option>
-                                                <option>Downpayment</option>
-                                                <option>Full Payment</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="modal-footer">
-                                    <button type="button" className="prev-btn" onClick={() => setShowStudentModal(false)}>Cancel</button>
-                                    <button type="submit" className="add-btn">Enroll Student</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )}
                 {/* Edit Profile Modal */}
                 {showEditProfileModal && (
                     <div className="modal-overlay">
@@ -1230,6 +1182,76 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                     </div>
                 )}
             </main>
+        </div>
+    );
+};
+
+const NotificationPage = ({ notifications, markAsRead, deleteNotification, clearAll }) => {
+    const unreadOnly = notifications.filter(n => !n.read);
+    const [filter, setFilter] = React.useState('all');
+
+    const filtered = filter === 'unread' ? unreadOnly : notifications;
+
+    return (
+        <div className="notifications-page animate-fade-in">
+            <div className="page-header-prime">
+                <div className="header-text">
+                    <h2>Notification Center</h2>
+                    <p>Manage your system alerts and activity updates</p>
+                </div>
+                <div className="header-actions">
+                    <button className="secondary-btn" onClick={clearAll}>Clear All History</button>
+                </div>
+            </div>
+
+            <div className="filter-bar-lux">
+                <button
+                    className={`filter-tab ${filter === 'all' ? 'active' : ''}`}
+                    onClick={() => setFilter('all')}
+                >
+                    All Notifications ({notifications.length})
+                </button>
+                <button
+                    className={`filter-tab ${filter === 'unread' ? 'active' : ''}`}
+                    onClick={() => setFilter('unread')}
+                >
+                    Unread ({unreadOnly.length})
+                </button>
+            </div>
+
+            <div className="notifications-container-lux">
+                {filtered.length > 0 ? (
+                    filtered.map(n => (
+                        <div key={n.id} className={`notify-card-lux ${n.read ? 'read' : 'unread'}`}>
+                            <div className="card-indicator"></div>
+                            <div className={`card-icon-box ${n.type}`}>
+                                {n.type === 'success' ? '✅' : n.type === 'warning' ? '⚠️' : 'ℹ️'}
+                            </div>
+                            <div className="card-main">
+                                <div className="card-top-row">
+                                    <h3>{n.title}</h3>
+                                    <span className="card-time">{n.time}</span>
+                                </div>
+                                <p>{n.message}</p>
+                                {!n.read && (
+                                    <button className="mark-read-link" onClick={() => markAsRead(n.id)}>
+                                        Mark as read
+                                    </button>
+                                )}
+                            </div>
+                            <button className="card-delete-btn" onClick={() => deleteNotification(n.id)}>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                            </button>
+                        </div>
+                    ))
+                ) : (
+                    <div className="empty-notification-state">
+                        <div className="empty-visual">📭</div>
+                        <h3>All caught up!</h3>
+                        <p>No new notifications to show right now.</p>
+                    </div>
+                )}
+            </div>
         </div>
     );
 };

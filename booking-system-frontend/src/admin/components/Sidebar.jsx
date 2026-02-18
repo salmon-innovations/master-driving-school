@@ -17,7 +17,7 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onN
 
     // Auto-open Management dropdown if users or courses tab is active
     useEffect(() => {
-        if (activeTab === 'users' || activeTab === 'courses') {
+        if (activeTab === 'users' || activeTab === 'courses' || activeTab === 'branches') {
             setOpenDropdowns(prev => ({ ...prev, management: true }));
         }
     }, [activeTab]);
@@ -88,6 +88,19 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onN
             )
         },
         {
+            id: 'crm',
+            label: 'CRM',
+            icon: (
+                <svg className="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" opacity="0.3"></polyline>
+                </svg>
+            )
+        },
+        {
             id: 'analytics',
             label: 'Analytics',
             icon: (
@@ -128,6 +141,16 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onN
                             <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
                         </svg>
                     )
+                },
+                {
+                    id: 'branches',
+                    label: 'Config Management',
+                    icon: (
+                        <svg className="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                            <circle cx="12" cy="10" r="3"></circle>
+                        </svg>
+                    )
                 }
             ]
         },
@@ -147,14 +170,14 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onN
     return (
         <>
             {/* Mobile Overlay */}
-            <div 
-                className={`sidebar-overlay ${isSidebarOpen ? 'active' : ''}`} 
+            <div
+                className={`sidebar-overlay ${isSidebarOpen ? 'active' : ''}`}
                 onClick={() => setIsSidebarOpen(false)}
             />
 
             <aside className={`sidebar ${isSidebarOpen ? 'open' : 'closed'}`}>
                 <div className="sidebar-header">
-                    <div 
+                    <div
                         className="sidebar-logo cursor-pointer hover:opacity-80 transition-opacity"
                         onClick={() => {
                             onNavigate('home');
@@ -166,7 +189,7 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onN
                         </div>
                         <h2>Master School</h2>
                     </div>
-                    
+
                     {isMobile && (
                         <button className="close-sidebar-btn" onClick={() => setIsSidebarOpen(false)}>
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -187,13 +210,13 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onN
                                         >
                                             {item.icon}
                                             <span className="menu-text">{item.label}</span>
-                                            <svg 
+                                            <svg
                                                 className={`dropdown-arrow ${openDropdowns[item.id] ? 'open' : ''}`}
-                                                width="16" 
-                                                height="16" 
-                                                viewBox="0 0 24 24" 
-                                                fill="none" 
-                                                stroke="currentColor" 
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
                                                 strokeWidth="2"
                                             >
                                                 <polyline points="6 9 12 15 18 9"></polyline>
@@ -234,9 +257,9 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onN
                     </div>
 
                     <div className="sidebar-bottom">
-                        <button 
-                            className="menu-item logout-item" 
-                            onClick={handleLogout} 
+                        <button
+                            className="menu-item logout-item"
+                            onClick={handleLogout}
                             title={!isSidebarOpen ? "Logout" : ""}
                         >
                             <svg className="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

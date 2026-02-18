@@ -174,6 +174,29 @@ export const branchesAPI = {
   getById: async (id) => {
     return await apiRequest(`/branches/${id}`);
   },
+
+  // Create new branch
+  create: async (branchData) => {
+    return await apiRequest('/branches', {
+      method: 'POST',
+      body: JSON.stringify(branchData),
+    });
+  },
+
+  // Update branch
+  update: async (id, branchData) => {
+    return await apiRequest(`/branches/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(branchData),
+    });
+  },
+
+  // Delete branch
+  delete: async (id) => {
+    return await apiRequest(`/branches/${id}`, {
+      method: 'DELETE',
+    });
+  },
 };
 
 // Bookings API
@@ -265,6 +288,21 @@ export const adminAPI = {
     return await apiRequest('/admin/best-selling-courses');
   },
 
+  // Get funnel data
+  getFunnelData: async () => {
+    return await apiRequest('/admin/analytics/funnel');
+  },
+
+  // Get course distribution
+  getCourseDistribution: async () => {
+    return await apiRequest('/admin/analytics/course-distribution');
+  },
+
+  // Get branch performance
+  getBranchPerformance: async () => {
+    return await apiRequest('/admin/analytics/branch-performance');
+  },
+
   // Create new user (Admin/Staff only)
   createUser: async (userData) => {
     return await apiRequest('/admin/users', {
@@ -295,17 +333,201 @@ export const adminAPI = {
       body: JSON.stringify(data),
     });
   },
+
+  // Walk-in enrollment
+  walkInEnrollment: async (enrollmentData) => {
+    return await apiRequest('/admin/walk-in-enrollment', {
+      method: 'POST',
+      body: JSON.stringify(enrollmentData),
+    });
+  },
+
+  // Get all financial transactions
+  getAllTransactions: async (limit = 100) => {
+    return await apiRequest(`/admin/transactions?limit=${limit}`);
+  },
+
+  // Get all unpaid bookings (No Pay Users)
+  getUnpaidBookings: async (limit = 100) => {
+    return await apiRequest(`/admin/unpaid-bookings?limit=${limit}`);
+  },
+};
+
+// Schedules API
+export const schedulesAPI = {
+  // Get all schedules
+  getAll: async (date = null, branchId = null) => {
+    const params = new URLSearchParams();
+    if (date) params.append('date', date);
+    if (branchId) params.append('branch_id', branchId);
+    const queryString = params.toString();
+    return await apiRequest(`/schedules${queryString ? `?${queryString}` : ''}`);
+  },
+
+  // Get schedule by ID
+  getById: async (id) => {
+    return await apiRequest(`/schedules/${id}`);
+  },
+
+  // Create new schedule
+  create: async (scheduleData) => {
+    return await apiRequest('/schedules', {
+      method: 'POST',
+      body: JSON.stringify(scheduleData),
+    });
+  },
+
+  // Update schedule
+  update: async (id, scheduleData) => {
+    return await apiRequest(`/schedules/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(scheduleData),
+    });
+  },
+
+  // Delete schedule
+  delete: async (id) => {
+    return await apiRequest(`/schedules/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Get slots for a specific date
+  getSlotsByDate: async (date, branchId = null) => {
+    const params = new URLSearchParams();
+    params.append('date', date);
+    if (branchId) params.append('branch_id', branchId);
+    return await apiRequest(`/schedules/slots?${params.toString()}`);
+  },
+
+  // Create new slot
+  createSlot: async (slotData) => {
+    return await apiRequest('/schedules/slots', {
+      method: 'POST',
+      body: JSON.stringify(slotData),
+    });
+  },
+
+  // Update slot
+  updateSlot: async (id, slotData) => {
+    return await apiRequest(`/schedules/slots/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(slotData),
+    });
+  },
+
+  // Delete slot
+  deleteSlot: async (id) => {
+    return await apiRequest(`/schedules/slots/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Get enrollments for a slot
+  getSlotEnrollments: async (slotId) => {
+    return await apiRequest(`/schedules/slots/${slotId}/enrollments`);
+  },
+
+  // Enroll student in slot
+  enrollStudent: async (slotId, studentData) => {
+    return await apiRequest(`/schedules/slots/${slotId}/enroll`, {
+      method: 'POST',
+      body: JSON.stringify(studentData),
+    });
+  },
+
+  // Update enrollment status
+  updateEnrollmentStatus: async (enrollmentId, status) => {
+    return await apiRequest(`/schedules/enrollments/${enrollmentId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  },
+
+  // Cancel enrollment
+  cancelEnrollment: async (enrollmentId) => {
+    return await apiRequest(`/schedules/enrollments/${enrollmentId}`, {
+      method: 'DELETE',
+    });
+  },
+};
+
+// CRM API
+export const crmAPI = {
+  // Stats
+  getStats: async () => await apiRequest('/crm/stats'),
+
+  // Leads
+  getAllLeads: async (filters = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, val]) => {
+      if (val) params.append(key, val);
+    });
+    const query = params.toString();
+    return await apiRequest(`/crm/leads${query ? `?${query}` : ''}`);
+  },
+  getLeadById: async (id) => await apiRequest(`/crm/leads/${id}`),
+  createLead: async (data) => await apiRequest('/crm/leads', { method: 'POST', body: JSON.stringify(data) }),
+  updateLead: async (id, data) => await apiRequest(`/crm/leads/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteLead: async (id) => await apiRequest(`/crm/leads/${id}`, { method: 'DELETE' }),
+
+  // Actions
+  convertLead: async (id, userId) => await apiRequest(`/crm/leads/${id}/convert`, {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId })
+  }),
+  addInteraction: async (leadId, data) => await apiRequest(`/crm/leads/${leadId}/interactions`, {
+    method: 'POST',
+    body: JSON.stringify(data)
+  }),
+  getAllInteractions: async (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return await apiRequest(`/crm/interactions${query ? `?${query}` : ''}`);
+  },
+
+  // Config: Sources
+  getLeadSources: async () => await apiRequest('/crm/sources'),
+  createLeadSource: async (data) => await apiRequest('/crm/sources', { method: 'POST', body: JSON.stringify(data) }),
+  updateLeadSource: async (id, data) => await apiRequest(`/crm/sources/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteLeadSource: async (id) => await apiRequest(`/crm/sources/${id}`, { method: 'DELETE' }),
+
+  // Config: Statuses
+  getLeadStatuses: async () => await apiRequest('/crm/statuses'),
+  createLeadStatus: async (data) => await apiRequest('/crm/statuses', { method: 'POST', body: JSON.stringify(data) }),
+  updateLeadStatus: async (id, data) => await apiRequest(`/crm/statuses/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteLeadStatus: async (id) => await apiRequest(`/crm/statuses/${id}`, { method: 'DELETE' }),
+
+  // Public
+  createLeadFromContact: async (data) => await apiRequest('/crm/public/contact', { method: 'POST', body: JSON.stringify(data) }),
+  createLeadFromCourseInterest: async (data) => await apiRequest('/crm/public/course-interest', { method: 'POST', body: JSON.stringify(data) })
+};
+
+// Roles API
+export const rolesAPI = {
+  getAll: async () => await apiRequest('/roles'),
+  create: async (data) => await apiRequest('/roles', { method: 'POST', body: JSON.stringify(data) }),
+  update: async (id, data) => await apiRequest(`/roles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: async (id) => await apiRequest(`/roles/${id}`, { method: 'DELETE' })
+};
+
+// News & Announcements API
+export const newsAPI = {
+  getAll: async () => await apiRequest('/news'),
+  create: async (data) => await apiRequest('/news', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  }),
+  update: async (id, data) => await apiRequest(`/news/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  }),
+  delete: async (id) => await apiRequest(`/news/${id}`, {
+    method: 'DELETE'
+  }),
+  getVideos: async () => await apiRequest('/news/videos')
 };
 
 // Export helper functions
-export const setAuthToken = (token) => {
-  localStorage.setItem('userToken', token);
-};
-
-export const removeAuthToken = () => {
-  localStorage.removeItem('userToken');
-};
-
-export const isAuthenticated = () => {
-  return !!getAuthToken();
-};
+export const setAuthToken = (token) => localStorage.setItem('userToken', token);
+export const removeAuthToken = () => localStorage.removeItem('userToken');
+export const isAuthenticated = () => !!localStorage.getItem('userToken');

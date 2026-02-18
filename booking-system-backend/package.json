@@ -1,6 +1,7 @@
 {
   "name": "booking-system-backend",
-  "version": "1.0.0",
+  "version": "1.0.1",
+  "reload": 1,
   "description": "Backend API for Master Driving School Booking System",
   "main": "server.js",
   "scripts": {

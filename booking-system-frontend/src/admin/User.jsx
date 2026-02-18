@@ -57,11 +57,22 @@ const UserManagement = () => {
             const response = await adminAPI.getAllUsers();
             
             // Transform database data to match component format
-            const transformedUsers = response.users.map(user => ({
+            const transformedUsers = response.users.map(user => {
+                // Format role display name
+                let roleDisplay = 'Student';
+                if (user.role) {
+                    if (user.role === 'walkin_student') {
+                        roleDisplay = 'Walkin Student';
+                    } else {
+                        roleDisplay = user.role.charAt(0).toUpperCase() + user.role.slice(1);
+                    }
+                }
+                
+                return {
                 id: user.id,
                 name: `${user.first_name} ${user.middle_name ? user.middle_name + ' ' : ''}${user.last_name}`.trim(),
                 email: user.email,
-                role: user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'Student',
+                role: roleDisplay,
                 branch: user.branch_name || 'Not enrolled',
                 branchId: user.branch_id,
                 status: user.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'Active',
@@ -81,7 +92,8 @@ const UserManagement = () => {
                 zipCode: user.zip_code || '',
                 emergencyContactPerson: user.emergency_contact_person || '',
                 emergencyContactNumber: user.emergency_contact_number || ''
-            }));
+            };
+            });
 
             setUsers(transformedUsers);
         } catch (error) {
@@ -466,7 +478,7 @@ const UserManagement = () => {
                     />
                 </div>
                 <div className="role-filters">
-                    {['All', 'Admin', 'HRM', 'Staff', 'Student'].map(role => (
+                    {['All', 'Admin', 'HRM', 'Staff', 'Student', 'Walkin Student'].map(role => (
                         <button
                             key={role}
                             className={`filter-chip ${roleFilter === role ? 'active' : ''}`}
@@ -524,7 +536,7 @@ const UserManagement = () => {
                                         </div>
                                     </td>
                                     <td>
-                                        <span className={`role-pill ${user.role.toLowerCase()}`}>{user.role}</span>
+                                        <span className={`role-pill ${user.role.toLowerCase().replace(/\s+/g, '-')}`}>{user.role}</span>
                                     </td>
                                     <td>
                                         <span className="branch-text">{formatBranchName(user.branch)}</span>

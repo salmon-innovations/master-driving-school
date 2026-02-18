@@ -76,3 +76,16 @@ body {
 .read-the-docs {
   color: #888;
 }
+
+/* Header responsive controls - using explicit CSS to avoid Tailwind cascade conflicts */
+@media (min-width: 1024px) {
+  .mobile-menu-toggle {
+    display: none !important;
+  }
+}
+
+@media (max-width: 1023px) {
+  .desktop-nav {
+    display: none !important;
+  }
+}

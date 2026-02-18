@@ -226,6 +226,11 @@
     color: #10b981;
 }
 
+.role-pill.walkin-student {
+    background: rgba(245, 158, 11, 0.1);
+    color: #d97706;
+}
+
 .status-pill {
     display: inline-flex;
     align-items: center;

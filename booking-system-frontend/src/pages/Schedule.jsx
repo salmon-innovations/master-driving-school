@@ -512,7 +512,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
               <span className="text-xl">⚠️</span>
             </div>
             <div>
-              <h4 className="font-black text-gray-900 text-base">Important Booking Information</h4>
+              <h4 className="font-black text-gray-900 text-base">Important Enrollment Information</h4>
               <p className="text-xs text-gray-600 mt-0.5">Please read carefully before proceeding</p>
             </div>
           </div>
@@ -529,7 +529,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
             </li>
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 bg-amber-500 rounded-full mt-2 flex-shrink-0"></div>
-              <span className="leading-relaxed"><strong className="font-bold text-gray-900">Limited Slots:</strong> Slots are available on a first-come, first-served basis. Book early to guarantee your preferred schedule.</span>
+              <span className="leading-relaxed"><strong className="font-bold text-gray-900">Limited Slots:</strong> Slots are available on a first-come, first-served basis. Enroll early to guarantee your preferred schedule.</span>
             </li>
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 bg-amber-500 rounded-full mt-2 flex-shrink-0"></div>

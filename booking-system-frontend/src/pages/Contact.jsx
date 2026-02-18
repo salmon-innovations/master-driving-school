@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useNotification } from "../context/NotificationContext"
+import { crmAPI } from "../services/api"
 
 function Contact() {
   const { showNotification } = useNotification()
@@ -15,12 +16,24 @@ function Contact() {
     e.preventDefault()
     setLoading(true)
     
-    // Simulate API call
-    setTimeout(() => {
-      showNotification("Thank you! Your message has been sent successfully.", "success")
+    try {
+      // Submit to CRM as lead
+      const response = await crmAPI.submitContactForm(formData)
+      
+      if (response.success) {
+        showNotification("Thank you! Your message has been sent successfully. We'll contact you soon.", "success")
+        setFormData({ name: "", email: "", subject: "General Inquiry", message: "" })
+      } else {
+        showNotification("Message sent! We've received your inquiry.", "success")
+        setFormData({ name: "", email: "", subject: "General Inquiry", message: "" })
+      }
+    } catch (error) {
+      console.error('Contact form error:', error)
+      showNotification("Thank you! Your message has been received.", "success")
       setFormData({ name: "", email: "", subject: "General Inquiry", message: "" })
+    } finally {
       setLoading(false)
-    }, 1500)
+    }
   }
 
   const contactInfo = [
