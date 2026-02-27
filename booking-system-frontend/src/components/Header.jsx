@@ -54,19 +54,18 @@ function Header({ currentPage, onNavigate, cartItemCount = 0, onCartClick, isLog
   }
 
   return (
-    <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 border-b ${
-      isScrolled ? 'bg-white/95 backdrop-blur-md shadow-lg border-gray-200' : 'bg-white border-transparent'
-    }`}>
+    <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 border-b ${isScrolled ? 'bg-white/95 backdrop-blur-md shadow-lg border-gray-200' : 'bg-white border-transparent'
+      }`}>
       <nav className="container mx-auto px-4 sm:px-6 lg:px-8 py-2 sm:py-3">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <div 
+          <div
             onClick={() => handleNavClick('home')}
             className="cursor-pointer hover:opacity-80 transition-opacity"
           >
-            <img 
-              src="/images/logo.png" 
-              alt="Master Driving School" 
+            <img
+              src="/images/logo.png"
+              alt="Master Driving School"
               className="h-16 sm:h-20 md:h-24 w-auto"
             />
           </div>
@@ -77,16 +76,15 @@ function Header({ currentPage, onNavigate, cartItemCount = 0, onCartClick, isLog
               <button
                 key={link.page}
                 onClick={() => handleNavClick(link.page)}
-                className={`font-medium transition-colors hover:text-[#2157da] ${
-                  currentPage === link.page ? 'text-[#2157da]' : 'text-gray-700'
-                }`}
+                className={`font-medium transition-colors hover:text-[#2157da] ${currentPage === link.page ? 'text-[#2157da]' : 'text-gray-700'
+                  }`}
               >
                 {link.name}
               </button>
             ))}
 
             {/* Shopping Cart Icon */}
-            {cartItemCount > 0 && (
+            {cartItemCount > 0 && isLoggedIn && (
               <button
                 onClick={onCartClick}
                 className="relative p-2 text-gray-700 hover:text-[#2157da] transition-colors"
@@ -146,18 +144,20 @@ function Header({ currentPage, onNavigate, cartItemCount = 0, onCartClick, isLog
               </div>
             )}
 
-            <button
-              onClick={handleBookNowClick}
-              className="px-6 py-2 bg-[#2157da] text-white rounded-full hover:bg-[#1a3a8a] transition-all shadow-md hover:shadow-lg transform hover:scale-105"
-            >
-              Enroll Now
-            </button>
+            {!isLoggedIn && (
+              <button
+                onClick={handleBookNowClick}
+                className="px-6 py-2 bg-[#2157da] text-white rounded-full hover:bg-[#1a3a8a] transition-all shadow-md hover:shadow-lg transform hover:scale-105"
+              >
+                Sign In
+              </button>
+            )}
           </div>
 
           {/* Mobile Controls */}
           <div className="mobile-menu-toggle flex items-center gap-3">
             {/* Mobile Cart Icon */}
-            {cartItemCount > 0 && (
+            {cartItemCount > 0 && isLoggedIn && (
               <button
                 onClick={onCartClick}
                 className="relative p-2 text-gray-700 hover:text-[#2157da] transition-colors"
@@ -240,11 +240,10 @@ function Header({ currentPage, onNavigate, cartItemCount = 0, onCartClick, isLog
               <li key={link.page}>
                 <button
                   onClick={() => handleNavClick(link.page)}
-                  className={`block w-full text-left px-4 py-3 rounded-lg transition-colors font-medium ${
-                    currentPage === link.page 
-                      ? 'bg-[#2157da] text-white' 
-                      : 'text-gray-700 hover:bg-gray-100'
-                  }`}
+                  className={`block w-full text-left px-4 py-3 rounded-lg transition-colors font-medium ${currentPage === link.page
+                    ? 'bg-[#2157da] text-white'
+                    : 'text-gray-700 hover:bg-gray-100'
+                    }`}
                 >
                   {link.name}
                 </button>

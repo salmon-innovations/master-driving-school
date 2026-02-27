@@ -32,7 +32,8 @@ const UserManagement = () => {
         email: '',
         role: 'staff',
         branch: '',
-        status: 'active'
+        status: 'active',
+        avatar: ''
     });
     const [originalEmail, setOriginalEmail] = useState('');
 
@@ -55,7 +56,7 @@ const UserManagement = () => {
         try {
             setLoading(true);
             const response = await adminAPI.getAllUsers();
-            
+
             // Transform database data to match component format
             const transformedUsers = response.users.map(user => {
                 // Format role display name
@@ -63,36 +64,38 @@ const UserManagement = () => {
                 if (user.role) {
                     if (user.role === 'walkin_student') {
                         roleDisplay = 'Walkin Student';
+                    } else if (user.role === 'hrm') {
+                        roleDisplay = 'HRM';
                     } else {
                         roleDisplay = user.role.charAt(0).toUpperCase() + user.role.slice(1);
                     }
                 }
-                
+
                 return {
-                id: user.id,
-                name: `${user.first_name} ${user.middle_name ? user.middle_name + ' ' : ''}${user.last_name}`.trim(),
-                email: user.email,
-                role: roleDisplay,
-                branch: user.branch_name || 'Not enrolled',
-                branchId: user.branch_id,
-                status: user.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'Active',
-                lastLogin: user.last_login ? formatLastLogin(user.last_login) : 'Never',
-                avatar: `https://i.pravatar.cc/150?u=${user.email}`,
-                firstName: user.first_name,
-                middleInitial: user.middle_name || '',
-                lastName: user.last_name,
-                gender: user.gender || '',
-                age: user.age || '',
-                birthday: user.birthday || '',
-                address: user.address || '',
-                contactNumber: user.contact_numbers || '',
-                birthPlace: user.birth_place || '',
-                nationality: user.nationality || '',
-                maritalStatus: user.marital_status || '',
-                zipCode: user.zip_code || '',
-                emergencyContactPerson: user.emergency_contact_person || '',
-                emergencyContactNumber: user.emergency_contact_number || ''
-            };
+                    id: user.id,
+                    name: `${user.first_name} ${user.middle_name ? user.middle_name + ' ' : ''}${user.last_name}`.trim(),
+                    email: user.email,
+                    role: roleDisplay,
+                    branch: user.branch_name ? user.branch_name : (roleDisplay === 'Admin' ? 'All Branches' : (['HRM', 'Staff'].includes(roleDisplay) ? 'Not Assigned' : 'Not enrolled')),
+                    branchId: user.branch_id,
+                    status: user.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'Active',
+                    lastLogin: user.last_login ? formatLastLogin(user.last_login) : 'Never',
+                    avatar: user.avatar || `https://i.pravatar.cc/150?u=${user.email}`,
+                    firstName: user.first_name,
+                    middleInitial: user.middle_name || '',
+                    lastName: user.last_name,
+                    gender: user.gender || '',
+                    age: user.age || '',
+                    birthday: user.birthday || '',
+                    address: user.address || '',
+                    contactNumber: user.contact_numbers || '',
+                    birthPlace: user.birth_place || '',
+                    nationality: user.nationality || '',
+                    maritalStatus: user.marital_status || '',
+                    zipCode: user.zip_code || '',
+                    emergencyContactPerson: user.emergency_contact_person || '',
+                    emergencyContactNumber: user.emergency_contact_number || ''
+                };
             });
 
             setUsers(transformedUsers);
@@ -126,33 +129,50 @@ const UserManagement = () => {
     // Format branch name - remove company prefixes
     const formatBranchName = (name) => {
         if (!name) return name;
-        
+
         const prefixes = [
             'Master Driving School ',
             'Master Prime Driving School ',
             'Masters Prime Holdings Corp. ',
             'Master Prime Holdings Corp. '
         ];
-        
+
         let formattedName = name;
+        if (formattedName === 'Not Assigned' || formattedName === 'Not enrolled' || formattedName === 'All Branches') return formattedName;
+
         for (const prefix of prefixes) {
             if (formattedName.startsWith(prefix)) {
                 formattedName = formattedName.substring(prefix.length);
                 break;
             }
         }
-        
+
         return formattedName;
+    };
+
+    const handleImageUpload = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            if (file.size > 2 * 1024 * 1024) { // 2MB limit
+                showNotification('Image size should be less than 2MB', 'error');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setUserData({ ...userData, avatar: reader.result });
+            };
+            reader.readAsDataURL(file);
+        }
     };
 
     // Format phone number as "09XX XXX XXXX"
     const formatPhoneNumber = (value) => {
         // Remove all non-numeric characters
         const cleaned = value.replace(/\D/g, '');
-        
+
         // Limit to 11 digits
         const limited = cleaned.slice(0, 11);
-        
+
         // Format as "09XX XXX XXXX"
         if (limited.length === 0) return '';
         if (limited.length <= 4) return limited;
@@ -162,15 +182,15 @@ const UserManagement = () => {
 
     const handleInputChange = (e) => {
         const { name, value } = e.target;
-        
+
         // Format phone numbers
         let formattedValue = value;
         if (name === 'contactNumber') {
             formattedValue = formatPhoneNumber(value);
         }
-        
+
         setUserData({ ...userData, [name]: formattedValue });
-        
+
         // Clear error for this field when user starts typing
         if (errors[name]) {
             setErrors({ ...errors, [name]: '' });
@@ -249,7 +269,7 @@ const UserManagement = () => {
             if (editingUser) {
                 // Check if email has changed
                 const emailChanged = userData.email !== originalEmail;
-                
+
                 // Update existing user
                 const response = await adminAPI.updateUser(editingUser.id, {
                     firstName: userData.firstName,
@@ -265,8 +285,9 @@ const UserManagement = () => {
                     branch: userData.branch,
                     status: userData.status.toLowerCase(),
                     emailChanged: emailChanged,
+                    avatar: userData.avatar,
                 });
-                
+
                 if (emailChanged && response.passwordSent) {
                     showNotification('User updated successfully! A new password has been sent to the updated email address.', 'success');
                 } else {
@@ -292,7 +313,7 @@ const UserManagement = () => {
 
             // Refresh users list
             await fetchUsers();
-            
+
             // Close modal and reset form
             setShowModal(false);
             setEditingUser(null);
@@ -308,16 +329,17 @@ const UserManagement = () => {
                 email: '',
                 role: 'staff',
                 branch: '',
-                status: 'active'
+                status: 'active',
+                avatar: ''
             });
             setOriginalEmail('');
         } catch (error) {
             console.error('Error saving user:', error);
-            
+
             // Handle specific error types with detailed messages
             if (error.message) {
                 const errorMsg = error.message.toLowerCase();
-                
+
                 if (errorMsg.includes('email')) {
                     if (errorMsg.includes('already') || errorMsg.includes('exists')) {
                         setErrors({ ...errors, email: 'This email is already registered' });
@@ -351,7 +373,7 @@ const UserManagement = () => {
             showNotification('Only Admin, HRM, or Staff accounts can be edited.', 'error');
             return;
         }
-        
+
         setEditingUser(user);
         setOriginalEmail(user.email);
         setUserData({
@@ -366,7 +388,8 @@ const UserManagement = () => {
             email: user.email,
             role: user.role,
             branch: user.branchId || '',
-            status: user.status
+            status: user.status,
+            avatar: user.avatar && !user.avatar.includes('pravatar.cc') ? user.avatar : ''
         });
         setShowModal(true);
     };
@@ -389,7 +412,8 @@ const UserManagement = () => {
             email: '',
             role: 'staff',
             branch: '',
-            status: 'active'
+            status: 'active',
+            avatar: ''
         });
     };
 
@@ -493,85 +517,87 @@ const UserManagement = () => {
             <div className="user-table-container">
                 {loading ? (
                     <div className="loading-state" style={{ textAlign: 'center', padding: '60px 20px' }}>
-                        <div style={{ 
-                            width: '50px', 
-                            height: '50px', 
-                            border: '4px solid #f3f4f6', 
-                            borderTop: '4px solid #3b82f6', 
-                            borderRadius: '50%', 
+                        <div style={{
+                            width: '50px',
+                            height: '50px',
+                            border: '4px solid #f3f4f6',
+                            borderTop: '4px solid #3b82f6',
+                            borderRadius: '50%',
                             animation: 'spin 1s linear infinite',
                             margin: '0 auto 20px'
                         }}></div>
                         <p style={{ color: 'var(--secondary-text)' }}>Loading users...</p>
                     </div>
                 ) : (
-                <div className="table-card">
-                    <table className="user-management-table">
-                        <thead>
-                            <tr>
-                                <th>Name & Profile</th>
-                                <th>Access Level</th>
-                                <th>Branch</th>
-                                <th>Last Active</th>
-                                <th>Status</th>
-                                <th style={{ textAlign: 'right' }}>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filteredUsers.map(user => (
-                                <tr key={user.id}>
-                                    <td>
-                                        <div className="user-profile-cell">
-                                            <div className="user-avatar-mini" onClick={() => handleViewUser(user)}>
-                                                {user.avatar ? (
-                                                    <img src={user.avatar} alt={user.name} />
-                                                ) : (
-                                                    user.name.split(' ').map(n => n[0]).join('')
+                    <div className="table-card">
+                        <table className="user-management-table">
+                            <thead>
+                                <tr>
+                                    <th>Name & Profile</th>
+                                    <th>Access Level</th>
+                                    <th>Branch</th>
+                                    <th>Last Active</th>
+                                    <th>Status</th>
+                                    <th style={{ textAlign: 'right' }}>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredUsers.map(user => (
+                                    <tr key={user.id}>
+                                        <td>
+                                            <div className="user-profile-cell">
+                                                <div className="user-avatar-mini" onClick={() => handleViewUser(user)}>
+                                                    {user.avatar ? (
+                                                        <img src={user.avatar} alt={user.name} />
+                                                    ) : (
+                                                        user.name.split(' ').map(n => n[0]).join('')
+                                                    )}
+                                                </div>
+                                                <div className="user-info-mini">
+                                                    <span className="user-name-bold">{user.name}</span>
+                                                    <span className="user-email-small">{user.email}</span>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span className={`role-pill ${user.role.toLowerCase().replace(/\s+/g, '-')}`}>{user.role}</span>
+                                        </td>
+                                        <td>
+                                            <span className="branch-text">{formatBranchName(user.branch)}</span>
+                                        </td>
+                                        <td>
+                                            <span className="last-login-text">{user.lastLogin}</span>
+                                        </td>
+                                        <td>
+                                            <span className={`status-pill ${user.status.toLowerCase()}`}>
+                                                <span className="dot"></span>
+                                                {user.status}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <div className="table-actions">
+                                                <button className="action-btn view" title="View Details" onClick={() => handleViewUser(user)}>
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                                </button>
+                                                <button className="action-btn password" title="Reset Password" onClick={() => handlePasswordReset(user)}>
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
+                                                </button>
+                                                {user.role !== 'Admin' && (
+                                                    <button
+                                                        className={`action-btn toggle ${user.status === 'Active' ? 'deactivate' : 'activate'}`}
+                                                        title={user.status === 'Active' ? 'Deactivate' : 'Activate'}
+                                                        onClick={() => toggleStatus(user.id)}
+                                                    >
+                                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                                                    </button>
                                                 )}
                                             </div>
-                                            <div className="user-info-mini">
-                                                <span className="user-name-bold">{user.name}</span>
-                                                <span className="user-email-small">{user.email}</span>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <span className={`role-pill ${user.role.toLowerCase().replace(/\s+/g, '-')}`}>{user.role}</span>
-                                    </td>
-                                    <td>
-                                        <span className="branch-text">{formatBranchName(user.branch)}</span>
-                                    </td>
-                                    <td>
-                                        <span className="last-login-text">{user.lastLogin}</span>
-                                    </td>
-                                    <td>
-                                        <span className={`status-pill ${user.status.toLowerCase()}`}>
-                                            <span className="dot"></span>
-                                            {user.status}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <div className="table-actions">
-                                            <button className="action-btn view" title="View Details" onClick={() => handleViewUser(user)}>
-                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                            </button>
-                                            <button className="action-btn password" title="Reset Password" onClick={() => handlePasswordReset(user)}>
-                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
-                                            </button>
-                                            <button
-                                                className={`action-btn toggle ${user.status === 'Active' ? 'deactivate' : 'activate'}`}
-                                                title={user.status === 'Active' ? 'Deactivate' : 'Activate'}
-                                                onClick={() => toggleStatus(user.id)}
-                                            >
-                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
                 {!loading && filteredUsers.length === 0 && (
                     <div className="no-users">
@@ -583,7 +609,7 @@ const UserManagement = () => {
                 {showModal && (
                     <div className="modal-overlay">
                         <div className="modal-container user-modal" style={{ maxWidth: '750px', width: '95%' }}>
-                            <div className="modal-header" style={{ 
+                            <div className="modal-header" style={{
                                 background: 'var(--card-bg)',
                                 color: 'var(--text-color)',
                                 padding: '24px 30px',
@@ -597,8 +623,8 @@ const UserManagement = () => {
                                         {editingUser ? 'Update account information and permissions' : 'Fill in the details to add a new admin, HRM, or staff member'}
                                     </p>
                                 </div>
-                                <button 
-                                    className="close-modal" 
+                                <button
+                                    className="close-modal"
                                     onClick={handleCloseModal}
                                     style={{
                                         background: 'var(--card-bg)',
@@ -608,8 +634,8 @@ const UserManagement = () => {
                                 >&times;</button>
                             </div>
                             <form onSubmit={handleAddUser}>
-                                <div className="modal-body" style={{ 
-                                    maxHeight: '550px', 
+                                <div className="modal-body" style={{
+                                    maxHeight: '550px',
                                     overflowY: 'auto',
                                     padding: '30px',
                                     background: 'var(--bg-color)'
@@ -636,13 +662,13 @@ const UserManagement = () => {
                                             <span>{submitError}</span>
                                         </div>
                                     )}
-                                    
+
                                     {/* Personal Information Section */}
                                     <div style={{ marginBottom: '28px' }}>
-                                        <div style={{ 
-                                            display: 'flex', 
-                                            alignItems: 'center', 
-                                            gap: '10px', 
+                                        <div style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '10px',
                                             marginBottom: '20px',
                                             paddingBottom: '12px',
                                             borderBottom: '2px solid var(--border-color)'
@@ -664,25 +690,76 @@ const UserManagement = () => {
                                                 </svg>
                                             </div>
                                             <div>
-                                                <h3 style={{ 
-                                                    fontSize: '1.05rem', 
-                                                    fontWeight: '700', 
+                                                <h3 style={{
+                                                    fontSize: '1.05rem',
+                                                    fontWeight: '700',
                                                     color: 'var(--text-color)',
-                                                    margin: 0 
+                                                    margin: 0
                                                 }}>Personal Information</h3>
-                                                <p style={{ 
-                                                    fontSize: '0.75rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    margin: 0 
+                                                <p style={{
+                                                    fontSize: '0.75rem',
+                                                    color: 'var(--secondary-text)',
+                                                    margin: 0
                                                 }}>Basic identity and demographic details</p>
                                             </div>
                                         </div>
 
+                                        {/* Avatar Upload (Only visible when editing) */}
+                                        {editingUser && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '25px', padding: '15px', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                                                <div style={{
+                                                    width: '80px',
+                                                    height: '80px',
+                                                    borderRadius: '50%',
+                                                    background: 'var(--bg-color)',
+                                                    border: '2px solid var(--border-color)',
+                                                    overflow: 'hidden',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    position: 'relative'
+                                                }}>
+                                                    {userData.avatar ? (
+                                                        <img src={userData.avatar} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                    ) : (
+                                                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--secondary-text)" strokeWidth="1.5">
+                                                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                                            <circle cx="12" cy="7" r="4"></circle>
+                                                        </svg>
+                                                    )}
+                                                </div>
+                                                <div>
+                                                    <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: 'var(--text-color)' }}>Profile Picture</h4>
+                                                    <label style={{
+                                                        display: 'inline-block',
+                                                        padding: '8px 16px',
+                                                        background: 'var(--bg-color)',
+                                                        border: '1px solid var(--border-color)',
+                                                        borderRadius: '8px',
+                                                        fontSize: '0.8rem',
+                                                        fontWeight: '600',
+                                                        color: 'var(--text-color)',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.2s'
+                                                    }}>
+                                                        Change Picture
+                                                        <input
+                                                            type="file"
+                                                            accept="image/*"
+                                                            onChange={handleImageUpload}
+                                                            style={{ display: 'none' }}
+                                                        />
+                                                    </label>
+                                                    <p style={{ margin: '8px 0 0 0', fontSize: '0.7rem', color: 'var(--secondary-text)' }}>Recommended: Square image, max 2MB.</p>
+                                                </div>
+                                            </div>
+                                        )}
+
                                         <div className="form-row" style={{ gap: '15px', marginBottom: '15px' }}>
                                             <div className="form-group" style={{ flex: 2 }}>
-                                                <label style={{ 
-                                                    fontSize: '0.8rem', 
-                                                    fontWeight: '600', 
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     marginBottom: '6px',
                                                     display: 'block'
@@ -714,9 +791,9 @@ const UserManagement = () => {
                                                 )}
                                             </div>
                                             <div className="form-group" style={{ flex: 0.6 }}>
-                                                <label style={{ 
-                                                    fontSize: '0.8rem', 
-                                                    fontWeight: '600', 
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     marginBottom: '6px',
                                                     display: 'block'
@@ -742,9 +819,9 @@ const UserManagement = () => {
                                                 />
                                             </div>
                                             <div className="form-group" style={{ flex: 2 }}>
-                                                <label style={{ 
-                                                    fontSize: '0.8rem', 
-                                                    fontWeight: '600', 
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     marginBottom: '6px',
                                                     display: 'block'
@@ -778,19 +855,19 @@ const UserManagement = () => {
 
                                         <div className="form-row" style={{ gap: '15px' }}>
                                             <div className="form-group" style={{ flex: 1 }}>
-                                                <label style={{ 
-                                                    fontSize: '0.8rem', 
-                                                    fontWeight: '600', 
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     marginBottom: '6px',
                                                     display: 'block'
                                                 }}>
                                                     Gender <span style={{ color: '#ef4444' }}>*</span>
                                                 </label>
-                                                <select 
-                                                    name="gender" 
-                                                    value={userData.gender} 
-                                                    onChange={handleInputChange} 
+                                                <select
+                                                    name="gender"
+                                                    value={userData.gender}
+                                                    onChange={handleInputChange}
                                                     required
                                                     style={{
                                                         width: '100%',
@@ -814,9 +891,9 @@ const UserManagement = () => {
                                                 )}
                                             </div>
                                             <div className="form-group" style={{ flex: 1 }}>
-                                                <label style={{ 
-                                                    fontSize: '0.8rem', 
-                                                    fontWeight: '600', 
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     marginBottom: '6px',
                                                     display: 'block'
@@ -849,9 +926,9 @@ const UserManagement = () => {
                                                 )}
                                             </div>
                                             <div className="form-group" style={{ flex: 1 }}>
-                                                <label style={{ 
-                                                    fontSize: '0.8rem', 
-                                                    fontWeight: '600', 
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     marginBottom: '6px',
                                                     display: 'block'
@@ -880,10 +957,10 @@ const UserManagement = () => {
 
                                     {/* Contact Information Section */}
                                     <div style={{ marginBottom: '28px' }}>
-                                        <div style={{ 
-                                            display: 'flex', 
-                                            alignItems: 'center', 
-                                            gap: '10px', 
+                                        <div style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '10px',
                                             marginBottom: '20px',
                                             paddingBottom: '12px',
                                             borderBottom: '2px solid var(--border-color)'
@@ -904,24 +981,24 @@ const UserManagement = () => {
                                                 </svg>
                                             </div>
                                             <div>
-                                                <h3 style={{ 
-                                                    fontSize: '1.05rem', 
-                                                    fontWeight: '700', 
+                                                <h3 style={{
+                                                    fontSize: '1.05rem',
+                                                    fontWeight: '700',
                                                     color: 'var(--text-color)',
-                                                    margin: 0 
+                                                    margin: 0
                                                 }}>Contact Information</h3>
-                                                <p style={{ 
-                                                    fontSize: '0.75rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    margin: 0 
+                                                <p style={{
+                                                    fontSize: '0.75rem',
+                                                    color: 'var(--secondary-text)',
+                                                    margin: 0
                                                 }}>Address, phone, and email details</p>
                                             </div>
                                         </div>
 
                                         <div className="form-group" style={{ marginBottom: '15px' }}>
-                                            <label style={{ 
-                                                fontSize: '0.8rem', 
-                                                fontWeight: '600', 
+                                            <label style={{
+                                                fontSize: '0.8rem',
+                                                fontWeight: '600',
                                                 color: 'var(--text-color)',
                                                 marginBottom: '6px',
                                                 display: 'block'
@@ -935,7 +1012,7 @@ const UserManagement = () => {
                                                 onChange={handleInputChange}
                                                 rows="2"
                                                 required
-                                                style={{ 
+                                                style={{
                                                     width: '100%',
                                                     padding: '11px 14px',
                                                     borderRadius: '10px',
@@ -943,7 +1020,7 @@ const UserManagement = () => {
                                                     background: 'var(--card-bg)',
                                                     fontSize: '0.9rem',
                                                     color: 'var(--text-color)',
-                                                    resize: 'vertical', 
+                                                    resize: 'vertical',
                                                     fontFamily: 'inherit',
                                                     minHeight: '60px'
                                                 }}
@@ -952,9 +1029,9 @@ const UserManagement = () => {
 
                                         <div className="form-row" style={{ gap: '15px' }}>
                                             <div className="form-group" style={{ flex: 1 }}>
-                                                <label style={{ 
-                                                    fontSize: '0.8rem', 
-                                                    fontWeight: '600', 
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     marginBottom: '6px',
                                                     display: 'block'
@@ -990,9 +1067,9 @@ const UserManagement = () => {
                                                 )}
                                             </div>
                                             <div className="form-group" style={{ flex: 1 }}>
-                                                <label style={{ 
-                                                    fontSize: '0.8rem', 
-                                                    fontWeight: '600', 
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     marginBottom: '6px',
                                                     display: 'block'
@@ -1027,10 +1104,10 @@ const UserManagement = () => {
 
                                     {/* Role & Branch Assignment Section */}
                                     <div>
-                                        <div style={{ 
-                                            display: 'flex', 
-                                            alignItems: 'center', 
-                                            gap: '10px', 
+                                        <div style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '10px',
                                             marginBottom: '20px',
                                             paddingBottom: '12px',
                                             borderBottom: '2px solid var(--border-color)'
@@ -1053,35 +1130,35 @@ const UserManagement = () => {
                                                 </svg>
                                             </div>
                                             <div>
-                                                <h3 style={{ 
-                                                    fontSize: '1.05rem', 
-                                                    fontWeight: '700', 
+                                                <h3 style={{
+                                                    fontSize: '1.05rem',
+                                                    fontWeight: '700',
                                                     color: 'var(--text-color)',
-                                                    margin: 0 
+                                                    margin: 0
                                                 }}>Role & Assignment</h3>
-                                                <p style={{ 
-                                                    fontSize: '0.75rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    margin: 0 
+                                                <p style={{
+                                                    fontSize: '0.75rem',
+                                                    color: 'var(--secondary-text)',
+                                                    margin: 0
                                                 }}>Access level and branch location</p>
                                             </div>
                                         </div>
 
                                         <div className="form-row" style={{ gap: '15px' }}>
                                             <div className="form-group" style={{ flex: 1 }}>
-                                                <label style={{ 
-                                                    fontSize: '0.8rem', 
-                                                    fontWeight: '600', 
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     marginBottom: '6px',
                                                     display: 'block'
                                                 }}>
                                                     Role <span style={{ color: '#ef4444' }}>*</span>
                                                 </label>
-                                                <select 
-                                                    name="role" 
-                                                    value={userData.role} 
-                                                    onChange={handleInputChange} 
+                                                <select
+                                                    name="role"
+                                                    value={userData.role}
+                                                    onChange={handleInputChange}
                                                     required
                                                     style={{
                                                         width: '100%',
@@ -1101,19 +1178,19 @@ const UserManagement = () => {
                                                 </select>
                                             </div>
                                             <div className="form-group" style={{ flex: 1 }}>
-                                                <label style={{ 
-                                                    fontSize: '0.8rem', 
-                                                    fontWeight: '600', 
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     marginBottom: '6px',
                                                     display: 'block'
                                                 }}>
                                                     Branch <span style={{ color: '#ef4444' }}>*</span>
                                                 </label>
-                                                <select 
-                                                    name="branch" 
-                                                    value={userData.branch} 
-                                                    onChange={handleInputChange} 
+                                                <select
+                                                    name="branch"
+                                                    value={userData.branch}
+                                                    onChange={handleInputChange}
                                                     required
                                                     style={{
                                                         width: '100%',
@@ -1150,9 +1227,9 @@ const UserManagement = () => {
                                     gap: '12px',
                                     justifyContent: 'flex-end'
                                 }}>
-                                    <button 
-                                        type="button" 
-                                        className="cancel-btn" 
+                                    <button
+                                        type="button"
+                                        className="cancel-btn"
                                         onClick={handleCloseModal}
                                         style={{
                                             padding: '12px 28px',
@@ -1166,8 +1243,8 @@ const UserManagement = () => {
                                             transition: 'all 0.2s'
                                         }}
                                     >Cancel</button>
-                                    <button 
-                                        type="submit" 
+                                    <button
+                                        type="submit"
                                         className="confirm-btn"
                                         style={{
                                             padding: '12px 28px',
@@ -1193,7 +1270,7 @@ const UserManagement = () => {
                 {/* View User Modal */}
                 {showViewModal && selectedUser && (
                     <div className="modal-overlay">
-                        <div className="modal-container profile-modal" style={{ 
+                        <div className="modal-container profile-modal" style={{
                             maxWidth: '700px',
                             width: '95%',
                             background: 'var(--card-bg)'
@@ -1204,20 +1281,20 @@ const UserManagement = () => {
                                 padding: '24px 30px'
                             }}>
                                 <div>
-                                    <h2 style={{ 
-                                        color: 'var(--text-color)', 
-                                        marginBottom: '4px', 
+                                    <h2 style={{
+                                        color: 'var(--text-color)',
+                                        marginBottom: '4px',
                                         fontWeight: '700',
                                         fontSize: '1.35rem'
                                     }}>User Profile</h2>
-                                    <p style={{ 
-                                        fontSize: '0.85rem', 
-                                        color: 'var(--secondary-text)', 
-                                        margin: 0 
+                                    <p style={{
+                                        fontSize: '0.85rem',
+                                        color: 'var(--secondary-text)',
+                                        margin: 0
                                     }}>Complete account information and details</p>
                                 </div>
-                                <button 
-                                    className="close-modal" 
+                                <button
+                                    className="close-modal"
                                     onClick={() => setShowViewModal(false)}
                                     style={{
                                         background: 'var(--card-bg)',
@@ -1226,8 +1303,8 @@ const UserManagement = () => {
                                     }}
                                 >&times;</button>
                             </div>
-                            
-                            <div className="modal-body profile-body" style={{ 
+
+                            <div className="modal-body profile-body" style={{
                                 padding: '0',
                                 maxHeight: '600px',
                                 overflowY: 'auto',
@@ -1236,30 +1313,37 @@ const UserManagement = () => {
                                 {/* Profile Header Section */}
                                 <div style={{
                                     background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                    padding: '40px 30px 80px',
+                                    padding: '40px 30px 100px',
                                     position: 'relative',
                                     textAlign: 'center'
+                                }}>
+                                </div>
+
+                                {/* Info Card Overlay */}
+                                <div className="profile-info-card" style={{
+                                    margin: "-60px 30px 0", textAlign: "center", marginBottom: "25px", padding: "0 25px 25px", borderRadius: "16px"
                                 }}>
                                     <div style={{
                                         width: '120px',
                                         height: '120px',
                                         borderRadius: '50%',
-                                        margin: '0 auto',
+                                        margin: '-60px auto 15px',
                                         border: '5px solid rgba(255,255,255,0.3)',
                                         overflow: 'hidden',
                                         boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-                                        position: 'relative'
+                                        position: 'relative',
+                                        zIndex: 20
                                     }}>
                                         <img
                                             src={selectedUser.avatar}
                                             alt={selectedUser.name}
-                                            style={{ 
-                                                width: '100%', 
-                                                height: '100%', 
+                                            style={{
+                                                width: '100%',
+                                                height: '100%',
                                                 objectFit: 'cover'
                                             }}
                                         />
-                                        <span 
+                                        <span
                                             className={`status-badge-overlay ${selectedUser.status.toLowerCase()}`}
                                             style={{
                                                 position: 'absolute',
@@ -1273,32 +1357,19 @@ const UserManagement = () => {
                                             }}
                                         ></span>
                                     </div>
-                                </div>
-
-                                {/* Info Card Overlay */}
-                                <div style={{
-                                    margin: '-50px 30px 0',
-                                    background: 'var(--card-bg)',
-                                    borderRadius: '16px',
-                                    padding: '25px',
-                                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                                    border: '1px solid var(--border-color)',
-                                    textAlign: 'center',
-                                    marginBottom: '25px'
-                                }}>
-                                    <h1 style={{ 
-                                        fontSize: '1.5rem', 
-                                        fontWeight: '700', 
-                                        color: 'var(--text-color)', 
+                                    <h1 style={{
+                                        fontSize: '1.5rem',
+                                        fontWeight: '700',
+                                        color: 'var(--text-color)',
                                         marginBottom: '5px',
                                         margin: 0
                                     }}>{selectedUser.name}</h1>
-                                    <p style={{ 
-                                        color: 'var(--secondary-text)', 
+                                    <p style={{
+                                        color: 'var(--secondary-text)',
                                         margin: '5px 0 15px',
                                         fontSize: '0.95rem'
                                     }}>{selectedUser.email}</p>
-                                    
+
                                     <div style={{
                                         display: 'flex',
                                         gap: '10px',
@@ -1361,194 +1432,154 @@ const UserManagement = () => {
                                             gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
                                             gap: '15px'
                                         }}>
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
+                                            <div className="profile-data-card">
+                                                <label style={{
+                                                    fontSize: '0.7rem',
+                                                    color: 'var(--secondary-text)',
+                                                    textTransform: 'uppercase',
                                                     letterSpacing: '0.05em',
                                                     display: 'block',
                                                     marginBottom: '5px'
                                                 }}>First Name</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
+                                                <div style={{
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     fontSize: '0.95rem'
                                                 }}>{selectedUser.firstName}</div>
                                             </div>
-                                            
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
+
+                                            <div className="profile-data-card">
+                                                <label style={{
+                                                    fontSize: '0.7rem',
+                                                    color: 'var(--secondary-text)',
+                                                    textTransform: 'uppercase',
                                                     letterSpacing: '0.05em',
                                                     display: 'block',
                                                     marginBottom: '5px'
                                                 }}>Middle Name</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
+                                                <div style={{
+                                                    fontWeight: '600',
                                                     color: selectedUser.middleInitial ? 'var(--text-color)' : 'var(--secondary-text)',
                                                     fontSize: '0.95rem'
                                                 }}>{selectedUser.middleInitial || 'Not provided'}</div>
                                             </div>
-                                            
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
+
+                                            <div className="profile-data-card">
+                                                <label style={{
+                                                    fontSize: '0.7rem',
+                                                    color: 'var(--secondary-text)',
+                                                    textTransform: 'uppercase',
                                                     letterSpacing: '0.05em',
                                                     display: 'block',
                                                     marginBottom: '5px'
                                                 }}>Last Name</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
+                                                <div style={{
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     fontSize: '0.95rem'
                                                 }}>{selectedUser.lastName}</div>
                                             </div>
-                                            
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
+
+                                            <div className="profile-data-card">
+                                                <label style={{
+                                                    fontSize: '0.7rem',
+                                                    color: 'var(--secondary-text)',
+                                                    textTransform: 'uppercase',
                                                     letterSpacing: '0.05em',
                                                     display: 'block',
                                                     marginBottom: '5px'
                                                 }}>Age</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
+                                                <div style={{
+                                                    fontWeight: '600',
                                                     color: selectedUser.age ? 'var(--text-color)' : 'var(--secondary-text)',
                                                     fontSize: '0.95rem'
                                                 }}>{selectedUser.age ? `${selectedUser.age} years old` : 'Not provided'}</div>
                                             </div>
-                                            
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
+
+                                            <div className="profile-data-card">
+                                                <label style={{
+                                                    fontSize: '0.7rem',
+                                                    color: 'var(--secondary-text)',
+                                                    textTransform: 'uppercase',
                                                     letterSpacing: '0.05em',
                                                     display: 'block',
                                                     marginBottom: '5px'
                                                 }}>Gender</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
+                                                <div style={{
+                                                    fontWeight: '600',
                                                     color: selectedUser.gender ? 'var(--text-color)' : 'var(--secondary-text)',
                                                     fontSize: '0.95rem'
                                                 }}>{selectedUser.gender || 'Not provided'}</div>
                                             </div>
-                                            
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
+
+                                            <div className="profile-data-card">
+                                                <label style={{
+                                                    fontSize: '0.7rem',
+                                                    color: 'var(--secondary-text)',
+                                                    textTransform: 'uppercase',
                                                     letterSpacing: '0.05em',
                                                     display: 'block',
                                                     marginBottom: '5px'
                                                 }}>Birthday</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
+                                                <div style={{
+                                                    fontWeight: '600',
                                                     color: selectedUser.birthday ? 'var(--text-color)' : 'var(--secondary-text)',
                                                     fontSize: '0.95rem'
                                                 }}>{selectedUser.birthday ? new Date(selectedUser.birthday).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not provided'}</div>
                                             </div>
-                                            
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
-                                                    letterSpacing: '0.05em',
-                                                    display: 'block',
-                                                    marginBottom: '5px'
-                                                }}>Birth Place</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
-                                                    color: selectedUser.birthPlace ? 'var(--text-color)' : 'var(--secondary-text)',
-                                                    fontSize: '0.95rem'
-                                                }}>{selectedUser.birthPlace || 'Not provided'}</div>
-                                            </div>
-                                            
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
-                                                    letterSpacing: '0.05em',
-                                                    display: 'block',
-                                                    marginBottom: '5px'
-                                                }}>Nationality</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
-                                                    color: selectedUser.nationality ? 'var(--text-color)' : 'var(--secondary-text)',
-                                                    fontSize: '0.95rem'
-                                                }}>{selectedUser.nationality || 'Not provided'}</div>
-                                            </div>
-                                            
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
-                                                    letterSpacing: '0.05em',
-                                                    display: 'block',
-                                                    marginBottom: '5px'
-                                                }}>Marital Status</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
-                                                    color: selectedUser.maritalStatus ? 'var(--text-color)' : 'var(--secondary-text)',
-                                                    fontSize: '0.95rem'
-                                                }}>{selectedUser.maritalStatus || 'Not provided'}</div>
-                                            </div>
+
+                                            {(!['Admin', 'HRM', 'Staff'].includes(selectedUser.role)) && (
+                                                <>
+                                                    <div className="profile-data-card">
+                                                        <label style={{
+                                                            fontSize: '0.7rem',
+                                                            color: 'var(--secondary-text)',
+                                                            textTransform: 'uppercase',
+                                                            letterSpacing: '0.05em',
+                                                            display: 'block',
+                                                            marginBottom: '5px'
+                                                        }}>Birth Place</label>
+                                                        <div style={{
+                                                            fontWeight: '600',
+                                                            color: selectedUser.birthPlace ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                            fontSize: '0.95rem'
+                                                        }}>{selectedUser.birthPlace || 'Not provided'}</div>
+                                                    </div>
+
+                                                    <div className="profile-data-card">
+                                                        <label style={{
+                                                            fontSize: '0.7rem',
+                                                            color: 'var(--secondary-text)',
+                                                            textTransform: 'uppercase',
+                                                            letterSpacing: '0.05em',
+                                                            display: 'block',
+                                                            marginBottom: '5px'
+                                                        }}>Nationality</label>
+                                                        <div style={{
+                                                            fontWeight: '600',
+                                                            color: selectedUser.nationality ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                            fontSize: '0.95rem'
+                                                        }}>{selectedUser.nationality || 'Not provided'}</div>
+                                                    </div>
+
+                                                    <div className="profile-data-card">
+                                                        <label style={{
+                                                            fontSize: '0.7rem',
+                                                            color: 'var(--secondary-text)',
+                                                            textTransform: 'uppercase',
+                                                            letterSpacing: '0.05em',
+                                                            display: 'block',
+                                                            marginBottom: '5px'
+                                                        }}>Marital Status</label>
+                                                        <div style={{
+                                                            fontWeight: '600',
+                                                            color: selectedUser.maritalStatus ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                            fontSize: '0.95rem'
+                                                        }}>{selectedUser.maritalStatus || 'Not provided'}</div>
+                                                    </div>
+                                                </>
+                                            )}
+
                                         </div>
                                     </div>
 
@@ -1571,66 +1602,54 @@ const UserManagement = () => {
                                             Address & Contact
                                         </h3>
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
+                                            <div className="profile-data-card">
+                                                <label style={{
+                                                    fontSize: '0.7rem',
+                                                    color: 'var(--secondary-text)',
+                                                    textTransform: 'uppercase',
                                                     letterSpacing: '0.05em',
                                                     display: 'block',
                                                     marginBottom: '5px'
                                                 }}>Full Address</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
+                                                <div style={{
+                                                    fontWeight: '600',
                                                     color: selectedUser.address ? 'var(--text-color)' : 'var(--secondary-text)',
                                                     fontSize: '0.95rem',
                                                     lineHeight: '1.5'
                                                 }}>{selectedUser.address || 'Not provided'}</div>
                                             </div>
-                                            
+
                                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
-                                                <div style={{
-                                                    background: 'var(--card-bg)',
-                                                    padding: '14px',
-                                                    borderRadius: '12px',
-                                                    border: '1px solid var(--border-color)'
-                                                }}>
-                                                    <label style={{ 
-                                                        fontSize: '0.7rem', 
-                                                        color: 'var(--secondary-text)', 
-                                                        textTransform: 'uppercase', 
-                                                        letterSpacing: '0.05em',
-                                                        display: 'block',
-                                                        marginBottom: '5px'
-                                                    }}>Zip Code</label>
-                                                    <div style={{ 
-                                                        fontWeight: '600', 
-                                                        color: selectedUser.zipCode ? 'var(--text-color)' : 'var(--secondary-text)',
-                                                        fontSize: '0.95rem'
-                                                    }}>{selectedUser.zipCode || 'Not provided'}</div>
-                                                </div>
-                                                
-                                                <div style={{
-                                                    background: 'var(--card-bg)',
-                                                    padding: '14px',
-                                                    borderRadius: '12px',
-                                                    border: '1px solid var(--border-color)'
-                                                }}>
-                                                    <label style={{ 
-                                                        fontSize: '0.7rem', 
-                                                        color: 'var(--secondary-text)', 
-                                                        textTransform: 'uppercase', 
+
+                                                {(!['Admin', 'HRM', 'Staff'].includes(selectedUser.role)) && (
+                                                    <div className="profile-data-card">
+                                                        <label style={{
+                                                            fontSize: '0.7rem',
+                                                            color: 'var(--secondary-text)',
+                                                            textTransform: 'uppercase',
+                                                            letterSpacing: '0.05em',
+                                                            display: 'block',
+                                                            marginBottom: '5px'
+                                                        }}>Zip Code</label>
+                                                        <div style={{
+                                                            fontWeight: '600',
+                                                            color: selectedUser.zipCode ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                            fontSize: '0.95rem'
+                                                        }}>{selectedUser.zipCode || 'Not provided'}</div>
+                                                    </div>
+                                                )}
+
+                                                <div className="profile-data-card">
+                                                    <label style={{
+                                                        fontSize: '0.7rem',
+                                                        color: 'var(--secondary-text)',
+                                                        textTransform: 'uppercase',
                                                         letterSpacing: '0.05em',
                                                         display: 'block',
                                                         marginBottom: '5px'
                                                     }}>Contact Number</label>
-                                                    <div style={{ 
-                                                        fontWeight: '600', 
+                                                    <div style={{
+                                                        fontWeight: '600',
                                                         color: selectedUser.contactNumber ? 'var(--text-color)' : 'var(--secondary-text)',
                                                         fontSize: '0.95rem'
                                                     }}>
@@ -1644,94 +1663,80 @@ const UserManagement = () => {
                                                     </div>
                                                 </div>
                                             </div>
-                                            
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
+
+                                            <div className="profile-data-card">
+                                                <label style={{
+                                                    fontSize: '0.7rem',
+                                                    color: 'var(--secondary-text)',
+                                                    textTransform: 'uppercase',
                                                     letterSpacing: '0.05em',
                                                     display: 'block',
                                                     marginBottom: '5px'
                                                 }}>Email Address</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
+                                                <div style={{
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     fontSize: '0.95rem'
                                                 }}>{selectedUser.email}</div>
                                             </div>
                                         </div>
                                     </div>
-                                    
-                                    {/* Emergency Contact */}
-                                    <div style={{ marginBottom: '25px' }}>
-                                        <h3 style={{
-                                            fontSize: '0.85rem',
-                                            fontWeight: '700',
-                                            color: 'var(--text-color)',
-                                            textTransform: 'uppercase',
-                                            letterSpacing: '0.05em',
-                                            marginBottom: '15px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '8px'
-                                        }}>
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-                                                <line x1="12" y1="9" x2="12" y2="13"></line>
-                                                <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                                            </svg>
-                                            Emergency Contact
-                                        </h3>
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
+
+                                    {(!['Admin', 'HRM', 'Staff'].includes(selectedUser.role)) && (
+                                        <div style={{ marginBottom: '25px' }}>
+                                            <h3 style={{
+                                                fontSize: '0.85rem',
+                                                fontWeight: '700',
+                                                color: 'var(--text-color)',
+                                                textTransform: 'uppercase',
+                                                letterSpacing: '0.05em',
+                                                marginBottom: '15px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '8px'
                                             }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
-                                                    letterSpacing: '0.05em',
-                                                    display: 'block',
-                                                    marginBottom: '5px'
-                                                }}>Contact Person</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
-                                                    color: selectedUser.emergencyContactPerson ? 'var(--text-color)' : 'var(--secondary-text)',
-                                                    fontSize: '0.95rem'
-                                                }}>{selectedUser.emergencyContactPerson || 'Not provided'}</div>
-                                            </div>
-                                            
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
-                                                    letterSpacing: '0.05em',
-                                                    display: 'block',
-                                                    marginBottom: '5px'
-                                                }}>Emergency Number</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
-                                                    color: selectedUser.emergencyContactNumber ? 'var(--text-color)' : 'var(--secondary-text)',
-                                                    fontSize: '0.95rem'
-                                                }}>{selectedUser.emergencyContactNumber || 'Not provided'}</div>
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                                                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                                </svg>
+                                                Emergency Contact
+                                            </h3>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                                                <div className="profile-data-card">
+                                                    <label style={{
+                                                        fontSize: '0.7rem',
+                                                        color: 'var(--secondary-text)',
+                                                        textTransform: 'uppercase',
+                                                        letterSpacing: '0.05em',
+                                                        display: 'block',
+                                                        marginBottom: '5px'
+                                                    }}>Contact Person</label>
+                                                    <div style={{
+                                                        fontWeight: '600',
+                                                        color: selectedUser.emergencyContactPerson ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                        fontSize: '0.95rem'
+                                                    }}>{selectedUser.emergencyContactPerson || 'Not provided'}</div>
+                                                </div>
+
+                                                <div className="profile-data-card">
+                                                    <label style={{
+                                                        fontSize: '0.7rem',
+                                                        color: 'var(--secondary-text)',
+                                                        textTransform: 'uppercase',
+                                                        letterSpacing: '0.05em',
+                                                        display: 'block',
+                                                        marginBottom: '5px'
+                                                    }}>Emergency Number</label>
+                                                    <div style={{
+                                                        fontWeight: '600',
+                                                        color: selectedUser.emergencyContactNumber ? 'var(--text-color)' : 'var(--secondary-text)',
+                                                        fontSize: '0.95rem'
+                                                    }}>{selectedUser.emergencyContactNumber || 'Not provided'}</div>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
+                                    )}
 
                                     {/* Work Information */}
                                     <div>
@@ -1757,42 +1762,32 @@ const UserManagement = () => {
                                             gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
                                             gap: '15px'
                                         }}>
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
+                                            <div className="profile-data-card">
+                                                <label style={{
+                                                    fontSize: '0.7rem',
+                                                    color: 'var(--secondary-text)',
+                                                    textTransform: 'uppercase',
                                                     letterSpacing: '0.05em',
                                                     display: 'block',
                                                     marginBottom: '5px'
                                                 }}>Branch Office</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
+                                                <div style={{
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     fontSize: '0.95rem'
                                                 }}>{formatBranchName(selectedUser.branch)}</div>
                                             </div>
-                                            <div style={{
-                                                background: 'var(--card-bg)',
-                                                padding: '14px',
-                                                borderRadius: '12px',
-                                                border: '1px solid var(--border-color)'
-                                            }}>
-                                                <label style={{ 
-                                                    fontSize: '0.7rem', 
-                                                    color: 'var(--secondary-text)', 
-                                                    textTransform: 'uppercase', 
+                                            <div className="profile-data-card">
+                                                <label style={{
+                                                    fontSize: '0.7rem',
+                                                    color: 'var(--secondary-text)',
+                                                    textTransform: 'uppercase',
                                                     letterSpacing: '0.05em',
                                                     display: 'block',
                                                     marginBottom: '5px'
                                                 }}>Last Activity</label>
-                                                <div style={{ 
-                                                    fontWeight: '600', 
+                                                <div style={{
+                                                    fontWeight: '600',
                                                     color: 'var(--text-color)',
                                                     fontSize: '0.95rem'
                                                 }}>{selectedUser.lastLogin}</div>
@@ -1801,18 +1796,18 @@ const UserManagement = () => {
                                     </div>
                                 </div>
                             </div>
-                            
-                            <div className="modal-footer" style={{ 
-                                borderTop: '1px solid var(--border-color)', 
-                                padding: '20px 30px', 
-                                display: 'flex', 
+
+                            <div className="modal-footer" style={{
+                                borderTop: '1px solid var(--border-color)',
+                                padding: '20px 30px',
+                                display: 'flex',
                                 gap: '12px',
                                 background: 'var(--card-bg)',
                                 flexWrap: 'wrap'
                             }}>
-                                <button 
-                                    className="prev-btn" 
-                                    style={{ 
+                                <button
+                                    className="prev-btn"
+                                    style={{
                                         flex: '1 1 150px',
                                         padding: '12px 24px',
                                         borderRadius: '10px',
@@ -1822,12 +1817,12 @@ const UserManagement = () => {
                                         fontSize: '0.9rem',
                                         fontWeight: '600',
                                         cursor: 'pointer'
-                                    }} 
+                                    }}
                                     onClick={() => setShowViewModal(false)}
                                 >Close View</button>
-                                <button 
-                                    className="confirm-btn" 
-                                    style={{ 
+                                <button
+                                    className="confirm-btn"
+                                    style={{
                                         flex: '1 1 150px',
                                         padding: '12px 24px',
                                         borderRadius: '10px',
@@ -1852,7 +1847,7 @@ const UserManagement = () => {
                 {showPasswordModal && passwordResetUser && (
                     <div className="modal-overlay">
                         <div className="modal-container" style={{ maxWidth: '500px', width: '90%' }}>
-                            <div className="modal-header" style={{ 
+                            <div className="modal-header" style={{
                                 background: 'var(--card-bg)',
                                 color: 'var(--text-color)',
                                 padding: '24px 30px',
@@ -1866,8 +1861,8 @@ const UserManagement = () => {
                                         Reset password for {passwordResetUser.firstName} {passwordResetUser.lastName}
                                     </p>
                                 </div>
-                                <button 
-                                    className="close-modal" 
+                                <button
+                                    className="close-modal"
                                     onClick={handleClosePasswordModal}
                                     style={{
                                         background: 'var(--card-bg)',
@@ -1888,7 +1883,7 @@ const UserManagement = () => {
                                     </svg>
                                 </button>
                             </div>
-                            
+
                             <form onSubmit={handlePasswordSubmit}>
                                 <div className="modal-content" style={{ padding: '30px' }}>
                                     {passwordError && (
@@ -1906,9 +1901,9 @@ const UserManagement = () => {
                                     )}
 
                                     <div className="form-group">
-                                        <label style={{ 
-                                            fontSize: '0.85rem', 
-                                            fontWeight: '600', 
+                                        <label style={{
+                                            fontSize: '0.85rem',
+                                            fontWeight: '600',
                                             color: 'var(--text-color)',
                                             marginBottom: '8px',
                                             display: 'block'
@@ -1932,9 +1927,9 @@ const UserManagement = () => {
                                                 transition: 'all 0.2s'
                                             }}
                                         />
-                                        <p style={{ 
-                                            fontSize: '0.75rem', 
-                                            color: 'var(--secondary-text)', 
+                                        <p style={{
+                                            fontSize: '0.75rem',
+                                            color: 'var(--secondary-text)',
                                             marginTop: '6px',
                                             marginBottom: 0
                                         }}>
@@ -1943,17 +1938,17 @@ const UserManagement = () => {
                                     </div>
                                 </div>
 
-                                <div className="modal-footer" style={{ 
-                                    borderTop: '1px solid var(--border-color)', 
-                                    padding: '20px 30px', 
-                                    display: 'flex', 
+                                <div className="modal-footer" style={{
+                                    borderTop: '1px solid var(--border-color)',
+                                    padding: '20px 30px',
+                                    display: 'flex',
                                     gap: '12px',
                                     background: 'var(--card-bg)'
                                 }}>
-                                    <button 
+                                    <button
                                         type="button"
-                                        className="prev-btn" 
-                                        style={{ 
+                                        className="prev-btn"
+                                        style={{
                                             flex: 1,
                                             padding: '12px 24px',
                                             borderRadius: '10px',
@@ -1963,13 +1958,13 @@ const UserManagement = () => {
                                             fontSize: '0.9rem',
                                             fontWeight: '600',
                                             cursor: 'pointer'
-                                        }} 
+                                        }}
                                         onClick={handleClosePasswordModal}
                                     >Cancel</button>
-                                    <button 
+                                    <button
                                         type="submit"
-                                        className="confirm-btn" 
-                                        style={{ 
+                                        className="confirm-btn"
+                                        style={{
                                             flex: 1,
                                             padding: '12px 24px',
                                             borderRadius: '10px',

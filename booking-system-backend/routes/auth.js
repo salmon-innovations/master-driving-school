@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const { 
-  register, 
+const {
+  register,
+  guestCheckout,
   login,
   logout,
-  getProfile, 
-  verifyEmail, 
+  getProfile,
+  verifyEmail,
   resendVerificationCode,
   forgotPassword,
   verifyResetOTP,
@@ -15,6 +16,7 @@ const { authenticateToken } = require('../middleware/auth');
 
 // Public routes
 router.post('/register', register);
+router.post('/guest-checkout', guestCheckout);
 router.post('/login', login);
 router.post('/verify-email', verifyEmail);
 router.post('/resend-code', resendVerificationCode);

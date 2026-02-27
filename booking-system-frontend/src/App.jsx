@@ -16,6 +16,7 @@ import PrivacyPolicy from './pages/PrivacyPolicy'
 import TermsAndConditions from './pages/TermsAndConditions'
 import SignIn from './pages/SignIn'
 import SignUp from './pages/SignUp'
+import GuestEnrollment from './pages/GuestEnrollment'
 import VerifyEmail from './pages/VerifyEmail'
 import ForgotPassword from './pages/ForgotPassword'
 import LockAccount from './pages/LockAccount'
@@ -23,6 +24,8 @@ import Profile from './pages/Profile'
 import Payment from './pages/Payment'
 import Schedule from './pages/Schedule'
 import Admin from './admin/Admin'
+import HRDashboard from './admin/hr/HRDashboard'
+import StaffDashboard from './admin/staff/StaffDashboard'
 import { ThemeProvider } from './context/ThemeContext'
 import { NotificationProvider } from './context/NotificationContext'
 import './App.css'
@@ -30,16 +33,38 @@ import './App.css'
 function App() {
   const [currentPage, setCurrentPage] = useState(localStorage.getItem('currentPage') || 'home')
   const [cart, setCart] = useState(() => {
-    const savedCart = localStorage.getItem('cart')
-    return savedCart ? JSON.parse(savedCart) : []
+    try {
+      const savedCart = localStorage.getItem('cart')
+      return savedCart && savedCart !== 'undefined' ? JSON.parse(savedCart) : []
+    } catch { return [] }
   })
   const [showCart, setShowCart] = useState(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState(sessionStorage.getItem('pendingEmail') || '')
   const [lockedAccountEmail, setLockedAccountEmail] = useState(sessionStorage.getItem('lockedEmail') || '')
-  const [preSelectedBranch, setPreSelectedBranch] = useState(null)
-  const [selectedCourseForSchedule, setSelectedCourseForSchedule] = useState(null)
-  const [scheduleSelection, setScheduleSelection] = useState(null)
+  const [preSelectedBranch, setPreSelectedBranch] = useState(() => {
+    try {
+      const saved = localStorage.getItem('preSelectedBranch')
+      return saved && saved !== 'undefined' ? JSON.parse(saved) : null
+    } catch { return null }
+  })
+  const [selectedCourseForSchedule, setSelectedCourseForSchedule] = useState(() => {
+    try {
+      const saved = localStorage.getItem('selectedCourseForSchedule')
+      return saved && saved !== 'undefined' ? JSON.parse(saved) : null
+    } catch { return null }
+  })
+  const [scheduleSelection, setScheduleSelection] = useState(() => {
+    try {
+      const saved = localStorage.getItem('scheduleSelection')
+      if (saved && saved !== 'undefined') {
+        const parsed = JSON.parse(saved)
+        if (parsed && parsed.date) parsed.date = new Date(parsed.date)
+        return parsed
+      }
+    } catch { /* ignore parse errors */ }
+    return null
+  })
 
   useEffect(() => {
     AOS.init({
@@ -58,8 +83,44 @@ function App() {
   }, [currentPage])
 
   useEffect(() => {
-    localStorage.setItem('cart', JSON.stringify(cart))
+    try {
+      localStorage.setItem('cart', JSON.stringify(cart))
+    } catch (e) {
+      console.warn('Cart could not be saved to localStorage:', e)
+    }
   }, [cart])
+
+  useEffect(() => {
+    if (preSelectedBranch) {
+      localStorage.setItem('preSelectedBranch', JSON.stringify(preSelectedBranch))
+    } else {
+      localStorage.removeItem('preSelectedBranch')
+    }
+  }, [preSelectedBranch])
+
+  useEffect(() => {
+    try {
+      if (selectedCourseForSchedule) {
+        localStorage.setItem('selectedCourseForSchedule', JSON.stringify(selectedCourseForSchedule))
+      } else {
+        localStorage.removeItem('selectedCourseForSchedule')
+      }
+    } catch (e) {
+      console.warn('selectedCourseForSchedule could not be saved to localStorage:', e)
+    }
+  }, [selectedCourseForSchedule])
+
+  useEffect(() => {
+    try {
+      if (scheduleSelection) {
+        localStorage.setItem('scheduleSelection', JSON.stringify(scheduleSelection))
+      } else {
+        localStorage.removeItem('scheduleSelection')
+      }
+    } catch (e) {
+      console.warn('scheduleSelection could not be saved to localStorage:', e)
+    }
+  }, [scheduleSelection])
 
   useEffect(() => {
     sessionStorage.setItem('pendingEmail', pendingVerificationEmail)
@@ -75,6 +136,16 @@ function App() {
     setIsLoggedIn(!!userToken)
   }, [])
 
+  // Clear guest cart when navigating away from checkout flow
+  useEffect(() => {
+    if (!isLoggedIn) {
+      const checkoutPages = ['schedule', 'guest-enrollment', 'payment']
+      if (!checkoutPages.includes(currentPage)) {
+        setCart([])
+      }
+    }
+  }, [currentPage, isLoggedIn])
+
   const getTotalItems = () => {
     return cart.reduce((total, item) => total + item.quantity, 0)
   }
@@ -84,6 +155,7 @@ function App() {
       await authAPI.logout()
       setIsLoggedIn(false)
       setCurrentPage('home')
+      setCart([])
     } catch (error) {
       console.error('Logout error:', error)
       // Still logout on client side even if server call fails
@@ -91,6 +163,7 @@ function App() {
       localStorage.removeItem('user')
       setIsLoggedIn(false)
       setCurrentPage('home')
+      setCart([])
     }
   }
 
@@ -99,59 +172,62 @@ function App() {
   }
 
   const renderPage = () => {
-    switch(currentPage) {
+    switch (currentPage) {
       case 'home': return <Home onNavigate={setCurrentPage} isLoggedIn={isLoggedIn} />
       case 'courses': return <Courses onNavigate={setCurrentPage} cart={cart} setCart={setCart} isLoggedIn={isLoggedIn} preSelectedBranch={preSelectedBranch} setSelectedCourseForSchedule={setSelectedCourseForSchedule} />
       case 'about': return <About />
       case 'contact': return <Contact />
       case 'branches': return <Branches setCurrentPage={setCurrentPage} isLoggedIn={isLoggedIn} setPreSelectedBranch={setPreSelectedBranch} />
-      case 'schedule': return <Schedule onNavigate={setCurrentPage} selectedCourse={selectedCourseForSchedule} preSelectedBranch={preSelectedBranch} setScheduleSelection={setScheduleSelection} cart={cart} setCart={setCart} />
+      case 'schedule': return <Schedule onNavigate={setCurrentPage} selectedCourse={selectedCourseForSchedule} preSelectedBranch={preSelectedBranch} setScheduleSelection={setScheduleSelection} cart={cart} setCart={setCart} isLoggedIn={isLoggedIn} />
       case 'news': return <NewsAndEvents />
       case 'terms': return <TermsOfUse />
       case 'privacy': return <PrivacyPolicy />
       case 'conditions': return <TermsAndConditions />
       case 'signin': return <SignIn onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} setPendingVerificationEmail={setPendingVerificationEmail} setLockedAccountEmail={setLockedAccountEmail} />
       case 'signup': return <SignUp onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} setPendingVerificationEmail={setPendingVerificationEmail} />
+      case 'guest-enrollment': return <GuestEnrollment onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
       case 'verify-email': return <VerifyEmail onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} userEmail={pendingVerificationEmail} />
       case 'forgot-password': return <ForgotPassword onNavigate={setCurrentPage} />
       case 'lock-account': return <LockAccount onNavigate={setCurrentPage} lockedEmail={lockedAccountEmail} />
       case 'profile': return <Profile onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
       case 'payment': return <Payment cart={cart} setCart={setCart} onNavigate={setCurrentPage} isLoggedIn={isLoggedIn} preSelectedBranch={preSelectedBranch} scheduleSelection={scheduleSelection} />
       case 'admin': return <Admin onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
+      case 'hr-dashboard': return <HRDashboard onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
+      case 'staff-dashboard': return <StaffDashboard onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
       default: return <Home onNavigate={setCurrentPage} />
     }
   }
 
-  const isAuthPage = ['signin', 'signup', 'verify-email', 'forgot-password', 'lock-account', 'admin'].includes(currentPage)
+  const isAuthPage = ['signin', 'signup', 'guest-enrollment', 'verify-email', 'forgot-password', 'lock-account', 'admin', 'hr-dashboard', 'staff-dashboard'].includes(currentPage)
 
   return (
     <ThemeProvider>
       <NotificationProvider>
         <div className="min-h-screen flex flex-col bg-white">
-        {!isAuthPage && (
-          <Header 
-            currentPage={currentPage} 
-            onNavigate={setCurrentPage} 
-            cartItemCount={getTotalItems()}
-            onCartClick={handleCartClick}
+          {!isAuthPage && (
+            <Header
+              currentPage={currentPage}
+              onNavigate={setCurrentPage}
+              cartItemCount={getTotalItems()}
+              onCartClick={handleCartClick}
+              isLoggedIn={isLoggedIn}
+              onLogout={handleLogout}
+            />
+          )}
+          <main className={`${!isAuthPage ? 'flex-grow pt-[84px] sm:pt-[108px] md:pt-[124px]' : 'flex-grow'}`}>
+            {renderPage()}
+          </main>
+          {!isAuthPage && <Footer onNavigate={setCurrentPage} />}
+          <Cart
+            cart={cart}
+            setCart={setCart}
+            showCart={showCart}
+            setShowCart={setShowCart}
+            onNavigate={setCurrentPage}
             isLoggedIn={isLoggedIn}
-            onLogout={handleLogout}
+            preSelectedBranch={preSelectedBranch}
+            setSelectedCourseForSchedule={setSelectedCourseForSchedule}
           />
-        )}
-        <main className={`${!isAuthPage ? 'flex-grow pt-[84px] sm:pt-[108px] md:pt-[124px]' : 'flex-grow'}`}>
-          {renderPage()}
-        </main>
-        {!isAuthPage && <Footer onNavigate={setCurrentPage} />}
-        <Cart 
-          cart={cart} 
-          setCart={setCart} 
-          showCart={showCart} 
-          setShowCart={setShowCart}
-          onNavigate={setCurrentPage}
-          isLoggedIn={isLoggedIn}
-          preSelectedBranch={preSelectedBranch}
-          setSelectedCourseForSchedule={setSelectedCourseForSchedule}
-        />
         </div>
       </NotificationProvider>
     </ThemeProvider>

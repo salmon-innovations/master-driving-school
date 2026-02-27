@@ -3,7 +3,7 @@ const pool = require('../config/db');
 // Get all branches
 const getAllBranches = async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM branches ORDER BY name ASC');
+    const result = await pool.query('SELECT * FROM branches ORDER BY id ASC');
 
     res.json({
       success: true,

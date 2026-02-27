@@ -1,5 +1,9 @@
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 require('dotenv').config();
+
+// Force DATE (OID 1082) columns to verify returned as strings 'YYYY-MM-DD'
+// prevent automatic timezone conversion to local midnight -> UTC shift
+types.setTypeParser(1082, (str) => str);
 
 const pool = new Pool({
   host: process.env.DB_HOST,

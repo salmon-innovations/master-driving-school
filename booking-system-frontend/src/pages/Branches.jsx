@@ -10,14 +10,14 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
   // Format branch name - remove company prefixes
   const formatBranchName = (name) => {
     if (!name) return name;
-    
+
     const prefixes = [
       'Master Driving School ',
       'Master Prime Driving School ',
       'Masters Prime Holdings Corp. ',
       'Master Prime Holdings Corp. '
     ];
-    
+
     let formattedName = name;
     for (const prefix of prefixes) {
       if (formattedName.startsWith(prefix)) {
@@ -25,7 +25,7 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
         break;
       }
     }
-    
+
     return formattedName;
   };
 
@@ -35,14 +35,20 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
         const response = await branchesAPI.getAll()
         if (response.success) {
           // Format branches to match current UI and constraints
-          const formattedBranches = response.branches.map(branch => ({
-            ...branch,
-            phone: branch.contact_number, // map contact_number to phone
-            hours: '8:00 AM - 5:00 PM', // maintain fixed hours
-            isMain: branch.name.toLowerCase().includes('main branch'),
-            // Construct embedUrl from address
-            embedUrl: `https://www.google.com/maps?q=${encodeURIComponent(branch.address)}&output=embed`
-          }))
+          const formattedBranches = response.branches.map(branch => {
+            // Priority: The exact coordinate-based map URL we stored in branch.embed_url.
+            // Fallback: A generically generated search string based on Branch Address.
+            const addressQuery = encodeURIComponent(branch.address);
+            const fallbackEmbedUrl = `https://www.google.com/maps?q=${addressQuery}&output=embed`;
+
+            return {
+              ...branch,
+              phone: branch.contact_number, // map contact_number to phone
+              hours: '8:00 AM - 5:00 PM', // maintain fixed hours
+              isMain: branch.name.toLowerCase().includes('main branch'),
+              embedUrl: branch.embed_url || fallbackEmbedUrl
+            };
+          }).sort((a, b) => a.id - b.id);
           setBranches(formattedBranches)
         }
       } catch (error) {
@@ -56,10 +62,6 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
   }, [])
 
   const handleEnrollNow = (branch) => {
-    if (!isLoggedIn) {
-      setCurrentPage('signin')
-      return
-    }
     setPreSelectedBranch(branch)
     setCurrentPage('courses')
   }
@@ -75,14 +77,14 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
     <div className="py-12 sm:py-16 lg:py-20 bg-gray-50 min-h-[calc(100vh-4rem)] w-full">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-8 sm:mb-12">
-          <h1 
+          <h1
             className="text-3xl sm:text-4xl lg:text-5xl font-bold text-[#2157da] mb-3 sm:mb-4"
             data-aos="fade-up"
             data-aos-duration="400"
           >
             Our Branches
           </h1>
-          <p 
+          <p
             className="text-sm sm:text-base text-gray-600 max-w-2xl mx-auto px-4"
             data-aos="fade-up"
             data-aos-duration="500"
@@ -101,9 +103,8 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
             branches.map((branch, index) => (
               <div
                 key={index}
-                className={`bg-white rounded-2xl shadow-lg hover:shadow-xl transition-all p-6 sm:p-8 flex flex-col h-full ${
-                  selectedBranch === index ? 'ring-2 sm:ring-4 ring-[#F3B74C]' : ''
-                }`}
+                className={`bg-white rounded-2xl shadow-lg hover:shadow-xl transition-all p-6 sm:p-8 flex flex-col h-full ${selectedBranch === index ? 'ring-2 sm:ring-4 ring-[#F3B74C]' : ''
+                  }`}
                 data-aos="fade-up"
                 data-aos-duration="400"
               >
@@ -147,7 +148,7 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
                   >
                     Get Directions
                   </button>
-                  <button 
+                  <button
                     onClick={() => handleEnrollNow(branch)}
                     className="flex-1 py-2.5 sm:py-3 bg-[#2157da] text-white rounded-full font-semibold hover:bg-[#1a3a8a] transition-colors text-sm sm:text-base"
                   >

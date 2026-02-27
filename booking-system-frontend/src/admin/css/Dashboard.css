@@ -844,6 +844,36 @@
     margin-top: 2px;
 }
 
+/* Branch Badge for Role Dashboards */
+.branch-badge {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 14px;
+    background: linear-gradient(135deg, rgba(26, 79, 186, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%);
+    border: 1px solid rgba(26, 79, 186, 0.2);
+    border-radius: 12px;
+    color: var(--primary-color);
+    font-size: 0.82rem;
+    font-weight: 600;
+    white-space: nowrap;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+}
+
+.branch-badge svg {
+    flex-shrink: 0;
+    opacity: 0.9;
+}
+
+.branch-badge span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .profile-section {
     display: flex;
     align-items: center;
@@ -2131,7 +2161,9 @@ input:checked+.slider:before {
     .courses-grid {
         grid-template-columns: 1fr;
     }
-}/* Notifications Page Styles */
+}
+
+/* Notifications Page Styles */
 .notifications-page {
     padding: 24px;
     max-width: 1000px;

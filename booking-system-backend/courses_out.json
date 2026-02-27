@@ -1,0 +1,52 @@
+[
+  {
+    "id": 5,
+    "name": "Practical Driving Course(PDC) - (V1 - TRICYCLE)",
+    "category": "PDC",
+    "pricing_data": null,
+    "course_type": "V1-Tricycle"
+  },
+  {
+    "id": 4,
+    "name": "Practical Driving Course(PDC) - (CAR)",
+    "category": "PDC",
+    "pricing_data": [
+      {
+        "type": "Automatic",
+        "price": 3800
+      }
+    ],
+    "course_type": "Manual"
+  },
+  {
+    "id": 3,
+    "name": "Practical Driving Course(PDC) - (MOTORCYCLE)",
+    "category": "PDC",
+    "pricing_data": [
+      {
+        "type": "Manual",
+        "price": 2150
+      }
+    ],
+    "course_type": "Automatic"
+  },
+  {
+    "id": 2,
+    "name": "THEORETICAL DRIVING COURSE (TDC)",
+    "category": "TDC",
+    "pricing_data": [
+      {
+        "type": "Online",
+        "price": 900
+      }
+    ],
+    "course_type": "F2F"
+  },
+  {
+    "id": 6,
+    "name": "Practical Driving Course(PDC) - (B1 - VAN/B2 - L300)",
+    "category": "PDC",
+    "pricing_data": null,
+    "course_type": "B1-Van/B2 - L300"
+  }
+]

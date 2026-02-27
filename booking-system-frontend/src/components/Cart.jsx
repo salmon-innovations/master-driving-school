@@ -26,12 +26,6 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
   }
 
   const handleCheckout = () => {
-    if (!isLoggedIn) {
-      showNotification("Please sign in to checkout", "error")
-      setShowCart(false)
-      onNavigate('signin')
-      return
-    }
     if (!preSelectedBranch) {
       showNotification("Please select a branch first from the Branches page", "error")
       setShowCart(false)
@@ -39,21 +33,24 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
       return
     }
     if (cart.length > 0) {
-      // Check if cart contains TDC course (id: 1)
-      const tdcCourse = cart.find(item => item.id === 1)
-      
-      if (tdcCourse) {
-        // If TDC course is in cart, go to schedule page with the selected type
-        setSelectedCourseForSchedule({ ...tdcCourse, selectedType: tdcCourse.type || 'online' })
-        setShowCart(false)
-        onNavigate('schedule')
-        window.scrollTo({ top: 0, behavior: 'smooth' })
-      } else {
-        // For other courses, proceed to payment
-        setShowCart(false)
-        onNavigate('payment')
-        window.scrollTo({ top: 0, behavior: 'smooth' })
-      }
+      // All courses now require a schedule selection before payment
+      // Default the calendar view to the first course in the cart
+      const primaryCourse = cart[0];
+      // Only carry lightweight fields — cart items no longer contain images so this is already lean
+      setSelectedCourseForSchedule({
+        id: primaryCourse.id,
+        name: primaryCourse.name,
+        shortName: primaryCourse.shortName,
+        duration: primaryCourse.duration,
+        price: primaryCourse.price,
+        category: primaryCourse.category,
+        typeOptions: primaryCourse.typeOptions,
+        hasTypeOption: primaryCourse.hasTypeOption,
+        selectedType: primaryCourse.type || 'standard',
+      });
+      setShowCart(false);
+      onNavigate('schedule');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }
 
@@ -62,7 +59,7 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
       {/* Cart Sidebar (opened via navbar/cart trigger) */}
       {showCart && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 animate-fadeIn" onClick={() => setShowCart(false)}>
-          <div 
+          <div
             className="fixed right-0 top-0 h-full w-full sm:w-96 bg-white shadow-2xl overflow-y-auto animate-slideInRight"
             onClick={(e) => e.stopPropagation()}
           >
@@ -91,13 +88,12 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                             {item.type && (
                               <p className="text-xs text-[#2157da] font-medium mt-1 uppercase">{item.type}</p>
                             )}
-                            {item.id === 1 && (
-                              <div className="flex items-center gap-1 mt-2">
-                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">
-                                  📅 Schedule Required
-                                </span>
-                              </div>
-                            )}
+                            {/* All courses require a schedule, removing conditional TDC badge */}
+                            <div className="flex items-center gap-1 mt-2">
+                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">
+                                📅 Schedule Required
+                              </span>
+                            </div>
                           </div>
                           <button
                             onClick={() => removeFromCart(item.id)}
@@ -159,17 +155,14 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                   <button
                     onClick={handleCheckout}
                     disabled={!preSelectedBranch}
-                    className={`w-full py-3 rounded-full font-bold transition-all ${
-                      preSelectedBranch
-                        ? 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b] cursor-pointer'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    }`}
+                    className={`w-full py-3 rounded-full font-bold transition-all ${preSelectedBranch
+                      ? 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b] cursor-pointer'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      }`}
                   >
-                    {!preSelectedBranch 
-                      ? 'Select Branch First' 
-                      : cart.some(item => item.id === 1)
-                      ? '📅 Select Schedule'
-                      : 'Proceed to Booking'
+                    {!preSelectedBranch
+                      ? 'Select Branch First'
+                      : '📅 Select Schedule'
                     }
                   </button>
                 </>

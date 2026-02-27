@@ -42,23 +42,63 @@ const Booking = () => {
                     if (booking.payment_type === 'Full Payment' && status === 'Collectable') {
                         status = 'Paid';
                     }
-                    
+
                     // Shorten branch name (remove "Master Driving School" only, keep "Branch")
                     let branchName = booking.branch_name || 'N/A';
                     if (branchName !== 'N/A') {
                         branchName = branchName
                             .replace('Master Driving School ', '')
+                            .replace('Master Prime Driving School ', '')
+                            .replace('Masters Prime Holdings Corp. ', '')
+                            .replace('Master Prime Holdings Corp. ', '')
                             .trim()
                             .toUpperCase();
                     }
-                    
+
+                    // Build schedule date display (supports multi-day courses)
+                    const formatD = (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                    let scheduleDateDisplay = booking.booking_date ? formatD(booking.booking_date) : 'N/A';
+                    let scheduleDay2 = null;
+
+                    const details = booking.schedule_details || booking.schedule_dates;
+                    if (details && details.length > 0) {
+                        try {
+                            const firstDetail = details[0];
+                            if (typeof firstDetail === 'string') {
+                                // Legacy fallback
+                                const sortedDates = [...new Set(details.map(d => new Date(d).toISOString().split('T')[0]))].sort();
+                                scheduleDateDisplay = formatD(sortedDates[0]);
+                                if (sortedDates.length > 1) scheduleDay2 = formatD(sortedDates[1]);
+                            } else if (firstDetail && typeof firstDetail === 'object') {
+                                // New objects with date and end_date
+                                const type = booking.course_name?.includes('TDC') ? 'TDC' : 'PDC';
+
+                                if (type === 'PDC' && details.length > 1) {
+                                    // PDC has multiple distinct slots
+                                    const sortedDates = [...new Set(details.map(d => new Date(d.date).toISOString().split('T')[0]))].sort();
+                                    scheduleDateDisplay = formatD(sortedDates[0]);
+                                    if (sortedDates.length > 1) scheduleDay2 = formatD(sortedDates[1]);
+                                } else {
+                                    // TDC has one slot but may span across end_date
+                                    scheduleDateDisplay = formatD(firstDetail.date);
+                                    if (firstDetail.end_date && new Date(firstDetail.end_date).toISOString().split('T')[0] !== new Date(firstDetail.date).toISOString().split('T')[0]) {
+                                        scheduleDay2 = formatD(firstDetail.end_date);
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Error parsing schedule dates:', e);
+                        }
+                    }
+
                     return {
                         id: `BK-${String(booking.id).padStart(3, '0')}`,
                         student: booking.student_name || 'N/A',
                         type: booking.course_name?.includes('TDC') ? 'TDC' : booking.course_name?.includes('PDC') ? 'PDC' : 'Course',
                         branch: branchName,
-                        date: booking.booking_date ? new Date(booking.booking_date).toLocaleDateString() : 'N/A',
-                        time: booking.booking_time || 'N/A',
+                        date: scheduleDateDisplay,
+                        date2: scheduleDay2,
+                        time: booking.booking_time || '',
                         status: status,
                         amount: `₱ ${Number(booking.total_amount || 0).toLocaleString()}`,
                         paymentType: booking.payment_type || 'Full Payment',
@@ -91,7 +131,7 @@ const Booking = () => {
             // Find the booking to get the raw database ID
             const booking = bookings.find(b => b.id === id);
             const dbId = booking?.rawId || id;
-            
+
             await adminAPI.updateBookingStatus(dbId, newStatus.toLowerCase());
             setBookings(bookings.map(b => b.id === id ? { ...b, status: newStatus } : b));
             showNotification(`Booking status updated to ${newStatus} successfully!`, 'success');
@@ -291,18 +331,38 @@ const Booking = () => {
 
                                 {/* Schedule Information */}
                                 <div className="bk-modal-card">
-                                    <div className="bk-modal-card-label">
+                                    <div className="bk-modal-card-label" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', marginBottom: '16px' }}>
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2">
                                             <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
                                             <line x1="16" y1="2" x2="16" y2="6"></line>
                                             <line x1="8" y1="2" x2="8" y2="6"></line>
                                             <line x1="3" y1="10" x2="21" y2="10"></line>
                                         </svg>
-                                        <label>Schedule</label>
+                                        <label>Schedule Details</label>
                                     </div>
-                                    <div className="bk-modal-schedule-content">
-                                        <div className="bk-modal-card-value">{selectedBooking.date}</div>
-                                        <div className="bk-modal-card-sub">{selectedBooking.time}</div>
+                                    <div className="bk-modal-schedule-content" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                        {selectedBooking.date2 ? (
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                                <div style={{ background: 'var(--card-bg)', padding: '16px 12px', borderRadius: '12px', border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', fontWeight: 700, marginBottom: '6px', letterSpacing: '0.5px' }}>DAY 1</div>
+                                                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-color)' }}>{selectedBooking.date}</div>
+                                                </div>
+                                                <div style={{ background: 'var(--primary-light)', padding: '16px 12px', borderRadius: '12px', border: '1px solid rgba(33, 87, 218, 0.2)', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '0.75rem', color: 'var(--primary-color)', fontWeight: 700, marginBottom: '6px', letterSpacing: '0.5px' }}>DAY 2</div>
+                                                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--primary-color)' }}>{selectedBooking.date2}</div>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div style={{ background: 'var(--card-bg)', padding: '16px 12px', borderRadius: '12px', border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                                                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-color)' }}>{selectedBooking.date}</div>
+                                            </div>
+                                        )}
+                                        {selectedBooking.time && (
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--secondary-text)', background: 'var(--bg-color)', padding: '12px', borderRadius: '12px', marginTop: '4px' }}>
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                                <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>{selectedBooking.time}</span>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -453,8 +513,28 @@ const Booking = () => {
                                     <td className="bk-branch">{booking.branch}</td>
                                     <td>
                                         <div className="schedule-info">
-                                            <span className="date">{booking.date}</span>
-                                            <span className="time">{booking.time}</span>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                {booking.date2 ? (
+                                                    <>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <span style={{ fontSize: '0.65rem', padding: '2px 6px', background: 'var(--primary-light)', color: 'var(--primary-color)', borderRadius: '4px', fontWeight: '800', letterSpacing: '0.5px' }}>D1</span>
+                                                            <span className="date" style={{ fontSize: '0.85rem' }}>{booking.date}</span>
+                                                        </div>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <span style={{ fontSize: '0.65rem', padding: '2px 6px', background: 'var(--primary-light)', color: 'var(--primary-color)', borderRadius: '4px', fontWeight: '800', letterSpacing: '0.5px' }}>D2</span>
+                                                            <span className="date" style={{ fontSize: '0.85rem' }}>{booking.date2}</span>
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <span className="date" style={{ fontSize: '0.85rem' }}>{booking.date}</span>
+                                                )}
+                                                {booking.time && (
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--secondary-text)" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                                        <span className="time">{booking.time}</span>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     </td>
                                     <td className="bk-payment">

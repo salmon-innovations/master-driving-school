@@ -56,6 +56,14 @@ export const authAPI = {
     });
   },
 
+  // Process Guest Checkout (User creation, booking, schedule, and email)
+  guestCheckout: async (checkoutData) => {
+    return await apiRequest('/auth/guest-checkout', {
+      method: 'POST',
+      body: JSON.stringify(checkoutData),
+    });
+  },
+
   // Login user
   login: async (credentials) => {
     return await apiRequest('/auth/login', {
@@ -392,11 +400,12 @@ export const schedulesAPI = {
     });
   },
 
-  // Get slots for a specific date
-  getSlotsByDate: async (date, branchId = null) => {
+  // Get slots for a specific date or upcoming slots
+  getSlotsByDate: async (date = null, branchId = null, type = null) => {
     const params = new URLSearchParams();
-    params.append('date', date);
+    if (date) params.append('date', date);
     if (branchId) params.append('branch_id', branchId);
+    if (type) params.append('type', type);
     return await apiRequest(`/schedules/slots?${params.toString()}`);
   },
 
@@ -444,11 +453,23 @@ export const schedulesAPI = {
     });
   },
 
+  // Mark student as No-Show & Trigger Reschedule Fee Email
+  markNoShow: async (enrollmentId) => {
+    return await apiRequest(`/schedules/enrollments/${enrollmentId}/no-show`, {
+      method: 'POST',
+    });
+  },
+
   // Cancel enrollment
   cancelEnrollment: async (enrollmentId) => {
     return await apiRequest(`/schedules/enrollments/${enrollmentId}`, {
       method: 'DELETE',
     });
+  },
+
+  // Get enrollments for the currently logged-in student (Course History)
+  getMyEnrollments: async () => {
+    return await apiRequest('/schedules/my-enrollments');
   },
 };
 

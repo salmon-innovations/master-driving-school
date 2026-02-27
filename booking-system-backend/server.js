@@ -4,6 +4,16 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const pool = require('./config/db'); // Import database connection
+
+// Test database connection
+pool.query('SELECT NOW()', (err, res) => {
+  if (err) {
+    console.error('❌ Database connection failed:', err);
+  } else {
+    console.log('✅ Database connected successfully');
+  }
+});
 
 // Middleware
 app.use(cors({

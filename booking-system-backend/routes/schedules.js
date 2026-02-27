@@ -10,10 +10,15 @@ const {
   enrollStudent,
   updateEnrollmentStatus,
   cancelEnrollment,
+  getMyEnrollments,
+  processNoShow,
 } = require('../controllers/scheduleController');
 
+// Get my enrollments (logged-in student)
+router.get('/my-enrollments', authenticateToken, getMyEnrollments);
+
 // Get slots by date
-router.get('/slots', authenticateToken, getSlotsByDate);
+router.get('/slots', getSlotsByDate);
 
 // Create new slot
 router.post('/slots', authenticateToken, createSlot);
@@ -35,5 +40,8 @@ router.patch('/enrollments/:enrollmentId/status', authenticateToken, updateEnrol
 
 // Cancel enrollment
 router.delete('/enrollments/:enrollmentId', authenticateToken, cancelEnrollment);
+
+// Process No-Show with fee notification
+router.post('/enrollments/:enrollmentId/no-show', authenticateToken, processNoShow);
 
 module.exports = router;

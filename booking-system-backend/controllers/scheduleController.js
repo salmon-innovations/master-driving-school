@@ -1,17 +1,35 @@
 const pool = require('../config/db');
+const { sendNoShowEmail } = require('../utils/emailService');
 
-// Get slots for a specific date
+// Get slots (either by specific date, or all upcoming if date is omitted)
 const getSlotsByDate = async (req, res) => {
   try {
-    const { date, branch_id } = req.query;
-
-    if (!date) {
-      return res.status(400).json({ error: 'Date parameter is required' });
-    }
+    const { date, branch_id, type } = req.query;
 
     let query = `
       SELECT 
-        ss.*,
+        ss.id,
+        to_char(ss.date, 'YYYY-MM-DD') as date,
+        to_char(ss.end_date, 'YYYY-MM-DD') as end_date,
+        ss.type,
+        ss.session,
+        ss.time_range,
+        ss.total_capacity,
+        CASE
+          WHEN (ss.course_type ILIKE '%B1%' OR ss.course_type ILIKE '%B2%') AND EXISTS (
+            SELECT 1 FROM schedule_slots other
+            WHERE other.date = ss.date
+              AND (other.course_type ILIKE '%B1%' OR other.course_type ILIKE '%B2%')
+              AND other.branch_id IS NOT DISTINCT FROM ss.branch_id
+              AND other.available_slots < other.total_capacity
+          ) THEN 0
+          ELSE ss.available_slots
+        END as available_slots,
+        ss.branch_id,
+        ss.course_type,
+        ss.transmission,
+        ss.created_at,
+        ss.updated_at,
         json_agg(
           json_build_object(
             'id', se.id,
@@ -26,23 +44,40 @@ const getSlotsByDate = async (req, res) => {
       FROM schedule_slots ss
       LEFT JOIN schedule_enrollments se ON ss.id = se.slot_id
       LEFT JOIN users u ON se.student_id = u.id
-      WHERE ss.date = $1
+      WHERE 1=1
     `;
-    
-    const params = [date];
 
-    if (branch_id) {
-      query += ' AND ss.branch_id = $2';
-      params.push(branch_id);
+    const params = [];
+    let paramCount = 1;
+
+    if (date) {
+      query += ` AND $${paramCount} BETWEEN ss.date AND ss.end_date`;
+      params.push(date);
+      paramCount++;
+    } else {
+      query += ` AND ss.date >= CURRENT_DATE`;
     }
 
-    query += ' GROUP BY ss.id ORDER BY ss.time_range';
+    if (branch_id) {
+      // Strict match — only return slots for the specified branch
+      query += ` AND ss.branch_id = $${paramCount}`;
+      params.push(branch_id);
+      paramCount++;
+    }
+
+    if (type) {
+      query += ` AND LOWER(ss.type) = LOWER($${paramCount})`;
+      params.push(type);
+      paramCount++;
+    }
+
+    query += ' GROUP BY ss.id ORDER BY ss.date, ss.time_range';
 
     const result = await pool.query(query, params);
 
     res.json(result.rows);
   } catch (error) {
-    console.error('Get slots by date error:', error);
+    console.error('Get slots error:', error);
     res.status(500).json({ error: 'Server error while fetching slots' });
   }
 };
@@ -50,17 +85,56 @@ const getSlotsByDate = async (req, res) => {
 // Create new slot
 const createSlot = async (req, res) => {
   try {
-    const { date, type, session, time_range, total_capacity, available_slots, branch_id } = req.body;
+    const { date, type, session, time_range, total_capacity, available_slots, branch_id, course_type, transmission } = req.body;
 
     if (!date || !type || !session || !time_range || !total_capacity) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    // Auto-resolve branch_id: use the one from request body, or look up from logged-in user
+    let resolvedBranchId = branch_id || null;
+    if (!resolvedBranchId && req.user) {
+      const userRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [req.user.id]);
+      resolvedBranchId = userRow.rows[0]?.branch_id || null;
+    }
+
+    // Determine end_date based on type and session logic
+    console.log(`Creating slot: Date=${date}, Type=${type}, Session=${session}, Branch=${resolvedBranchId}`);
+
+    // Use string manipulation to avoid timezone shifts: date is expected as 'YYYY-MM-DD'
+    const addDays = (dateStr, days) => {
+      const d = new Date(dateStr);
+      // Set specific time to noon to avoid DST/timezone midnight issues
+      d.setHours(12, 0, 0, 0);
+
+      // Add days iteratively, skipping Sundays
+      let count = 0;
+      while (count < days) {
+        d.setDate(d.getDate() + 1);
+        if (d.getDay() === 0) { // If Sunday, skip and add another day
+          d.setDate(d.getDate() + 1);
+        }
+        count++;
+      }
+      return d.toISOString().split('T')[0];
+    };
+
+    let formattedEndDate = date;
+    const cleanType = type.trim().toLowerCase();
+
+    // TDC is always 2 days (15 hours) — one booking covers both days
+    if (cleanType === 'tdc') {
+      formattedEndDate = addDays(date, 1);
+    }
+    // PDC Morning/Afternoon: each day is its own single-day record.
+
+    console.log(`Calculated End Date: ${formattedEndDate}`);
+
     const result = await pool.query(
-      `INSERT INTO schedule_slots (date, type, session, time_range, total_capacity, available_slots, branch_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO schedule_slots (date, end_date, type, session, time_range, total_capacity, available_slots, branch_id, course_type, transmission)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [date, type, session, time_range, total_capacity, available_slots || total_capacity, branch_id || null]
+      [date, formattedEndDate, type, session, time_range, total_capacity, available_slots || total_capacity, resolvedBranchId, course_type || null, transmission || null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -74,33 +148,31 @@ const createSlot = async (req, res) => {
 const updateSlot = async (req, res) => {
   try {
     const { id } = req.params;
-    const { type, session, time_range, total_capacity, available_slots } = req.body;
+    const { type, session, time_range, total_capacity, available_slots, branch_id, course_type, transmission } = req.body;
 
-    // Log received data for debugging
-    console.log('Update slot request:', {
-      id,
-      type,
-      session,
-      time_range,
-      total_capacity,
-      available_slots,
-      body: req.body
-    });
+    console.log('Update slot request:', { id, type, session, time_range, total_capacity, available_slots, course_type, transmission });
 
-    // Validate required fields
     if (!type || !session || !time_range || total_capacity === undefined || available_slots === undefined) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Missing required fields',
         received: { type, session, time_range, total_capacity, available_slots }
       });
     }
 
+    // Auto-resolve branch_id from logged-in user if not provided
+    let resolvedBranchId = branch_id || null;
+    if (!resolvedBranchId && req.user) {
+      const userRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [req.user.id]);
+      resolvedBranchId = userRow.rows[0]?.branch_id || null;
+    }
+
     const result = await pool.query(
       `UPDATE schedule_slots 
-       SET type = $1, session = $2, time_range = $3, total_capacity = $4, available_slots = $5, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $6
+       SET type = $1, session = $2, time_range = $3, total_capacity = $4, available_slots = $5,
+           branch_id = COALESCE($6, branch_id), updated_at = CURRENT_TIMESTAMP, course_type = $8, transmission = $9
+       WHERE id = $7
        RETURNING *`,
-      [type, session, time_range, total_capacity, available_slots, id]
+      [type, session, time_range, total_capacity, available_slots, resolvedBranchId, id, course_type || null, transmission || null]
     );
 
     if (result.rows.length === 0) {
@@ -110,10 +182,6 @@ const updateSlot = async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Update slot error:', error);
-    console.error('Error details:', {
-      message: error.message,
-      stack: error.stack
-    });
     res.status(500).json({ error: 'Server error while updating slot' });
   }
 };
@@ -176,14 +244,35 @@ const enrollStudent = async (req, res) => {
     }
 
     // Check if slot has available capacity
-    const slotCheck = await pool.query('SELECT available_slots FROM schedule_slots WHERE id = $1', [slotId]);
-    
+    const slotCheck = await pool.query('SELECT date, course_type, available_slots FROM schedule_slots WHERE id = $1', [slotId]);
+
     if (slotCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Slot not found' });
     }
 
-    if (slotCheck.rows[0].available_slots <= 0) {
+    const { date, course_type, available_slots } = slotCheck.rows[0];
+
+    if (available_slots <= 0) {
       return res.status(400).json({ error: 'No available slots' });
+    }
+
+    // B1/B2 Per-Branch Capacity Check
+    // Each branch manages its own B1/B2 slots independently.
+    if (course_type && (course_type.toLowerCase().includes('b1') || course_type.toLowerCase().includes('b2'))) {
+      const slotBranchRow = await pool.query('SELECT branch_id FROM schedule_slots WHERE id = $1', [slotId]);
+      const slotBranchId = slotBranchRow.rows[0]?.branch_id || null;
+
+      const b1b2Check = await pool.query(`
+        SELECT 1 FROM schedule_slots 
+        WHERE date = $1 
+          AND (course_type ILIKE '%B1%' OR course_type ILIKE '%B2%')
+          AND branch_id IS NOT DISTINCT FROM $2
+          AND available_slots < total_capacity
+      `, [date, slotBranchId]);
+
+      if (b1b2Check.rows.length > 0) {
+        return res.status(400).json({ error: 'The B1/B2 Van/L300 unit is already fully booked for this date at this branch.' });
+      }
     }
 
     // Create enrollment
@@ -239,7 +328,7 @@ const cancelEnrollment = async (req, res) => {
 
     // Get slot_id before deleting
     const enrollment = await pool.query('SELECT slot_id FROM schedule_enrollments WHERE id = $1', [enrollmentId]);
-    
+
     if (enrollment.rows.length === 0) {
       return res.status(404).json({ error: 'Enrollment not found' });
     }
@@ -262,6 +351,113 @@ const cancelEnrollment = async (req, res) => {
   }
 };
 
+// Get all enrollments for the currently logged-in student
+const getMyEnrollments = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+
+    const result = await pool.query(
+      `SELECT
+          se.id                       AS enrollment_id,
+          se.enrollment_status,
+          se.created_at               AS enrolled_at,
+          ss.date                     AS schedule_date,
+          ss.end_date                 AS schedule_end_date,
+          ss.session,
+          ss.time_range,
+          ss.type                     AS slot_type,
+          b.name                      AS course_name,
+          b.branch_id,
+          br.name                     AS branch_name,
+          b.payment_status,
+          b.payment_method,
+          b.course_type,
+          b.course_id,
+          c.name                      AS course_full_name,
+          c.category                  AS course_category,
+          c.duration                  AS course_duration
+        FROM schedule_enrollments se
+        JOIN schedule_slots ss ON se.slot_id = ss.id
+        LEFT JOIN bookings b ON b.student_id = se.student_id
+                             AND b.schedule_slot_id = se.slot_id
+        LEFT JOIN branches br ON ss.branch_id = br.id
+        LEFT JOIN courses c ON b.course_id = c.id
+        WHERE se.student_id = $1
+        ORDER BY se.created_at DESC`,
+      [studentId]
+    );
+
+    res.json({ success: true, enrollments: result.rows });
+  } catch (error) {
+    console.error('Get my enrollments error:', error);
+    res.status(500).json({ error: 'Server error while fetching enrollments' });
+  }
+};
+
+// Process No-Show & Send Rescheduling Fee Email
+const processNoShow = async (req, res) => {
+  try {
+    const { enrollmentId } = req.params;
+
+    // 1. Mark as no-show and retrieve details in one query
+    const updateResult = await pool.query(
+      `UPDATE schedule_enrollments 
+       SET enrollment_status = 'no-show', updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING slot_id, student_id`,
+      [enrollmentId]
+    );
+
+    if (updateResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Enrollment not found' });
+    }
+
+    const { slot_id, student_id } = updateResult.rows[0];
+
+    // 2. Increase available_slots in schedule_slots (free up the seat)
+    await pool.query(
+      'UPDATE schedule_slots SET available_slots = available_slots + 1 WHERE id = $1',
+      [slot_id]
+    );
+
+    // 3. Fetch comprehensive details to send the email
+    const detailsResult = await pool.query(
+      `SELECT 
+         u.first_name, u.last_name, u.email,
+         ss.date, ss.session, ss.time_range,
+         b.course_id, c.name as course_name
+       FROM users u
+       JOIN schedule_slots ss ON ss.id = $1
+       LEFT JOIN bookings b ON b.student_id = u.id AND b.schedule_slot_id = $1
+       LEFT JOIN courses c ON b.course_id = c.id
+       WHERE u.id = $2`,
+      [slot_id, student_id]
+    );
+
+    if (detailsResult.rows.length > 0) {
+      const details = detailsResult.rows[0];
+
+      const enrollmentDetails = {
+        courseName: details.course_name || 'Driving Course Session',
+        scheduleDate: details.date,
+        scheduleSession: details.session
+      };
+
+      // 4. Send the 1000 PHP Fee No-Show Email
+      try {
+        await sendNoShowEmail(details.email, details.first_name, details.last_name, enrollmentDetails);
+      } catch (e) {
+        console.error('Email failed (proceeding):', e);
+      }
+    }
+
+    res.json({ success: true, message: 'Student marked as No-Show and notification sent.' });
+  } catch (error) {
+    console.error('Process No-Show error:', error);
+    res.status(500).json({ error: 'Server error while processing No-Show' });
+  }
+};
+
 module.exports = {
   getSlotsByDate,
   createSlot,
@@ -271,4 +467,6 @@ module.exports = {
   enrollStudent,
   updateEnrollmentStatus,
   cancelEnrollment,
+  getMyEnrollments,
+  processNoShow,
 };

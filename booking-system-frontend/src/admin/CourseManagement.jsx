@@ -49,10 +49,10 @@ const CourseManagement = () => {
                         parsedImages = [course.image_url];
                     }
                 }
-                
+
                 // Filter out blob URLs as they won't work
                 parsedImages = parsedImages.filter(img => img && !img.startsWith('blob:'));
-                
+
                 // Parse pricing_data
                 let parsedPricingData = [];
                 if (course.pricing_data) {
@@ -66,7 +66,7 @@ const CourseManagement = () => {
                         parsedPricingData = course.pricing_data;
                     }
                 }
-                
+
                 return {
                     ...course,
                     images: parsedImages,
@@ -88,7 +88,7 @@ const CourseManagement = () => {
 
     const handleInputChange = (e) => {
         const { name, value } = e.target;
-        
+
         // Validate price field
         if (name === 'price') {
             // Only allow positive numbers (no letters, no negative, no zero)
@@ -97,7 +97,7 @@ const CourseManagement = () => {
             }
             return;
         }
-        
+
         // Validate duration field
         if (name === 'duration') {
             // Only allow positive numbers (no letters, no negative, no zero)
@@ -106,7 +106,7 @@ const CourseManagement = () => {
             }
             return;
         }
-        
+
         setCourseData({ ...courseData, [name]: value });
     };
 
@@ -120,7 +120,7 @@ const CourseManagement = () => {
 
     const handlePricingVariationChange = (index, field, value) => {
         const updated = [...pricingVariations];
-        
+
         // Validate price field in variations
         if (field === 'price') {
             // Only allow positive numbers (no letters, no negative, no zero)
@@ -130,7 +130,7 @@ const CourseManagement = () => {
             }
             return;
         }
-        
+
         updated[index][field] = value;
         setPricingVariations(updated);
     };
@@ -164,7 +164,7 @@ const CourseManagement = () => {
 
         // Take only the number of files we can add
         const filesToAdd = files.slice(0, remainingSlots);
-        
+
         // Convert files to base64
         const base64Images = await Promise.all(
             filesToAdd.map(file => {
@@ -176,7 +176,7 @@ const CourseManagement = () => {
                 });
             })
         );
-        
+
         setCourseData({
             ...courseData,
             images: [...courseData.images, ...base64Images]
@@ -219,11 +219,11 @@ const CourseManagement = () => {
 
         try {
             // Process pricing variations to ensure prices are numbers
-            const processedPricingData = pricingVariations.length > 0 
+            const processedPricingData = pricingVariations.length > 0
                 ? pricingVariations.map(v => ({
                     type: v.type,
                     price: parseFloat(v.price)
-                })) 
+                }))
                 : null;
 
             const coursePayload = {
@@ -311,7 +311,7 @@ const CourseManagement = () => {
 
     return (
         <div className="user-management-container">
-            <div className="management-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            <div className="course-management-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
                 <div className="search-box" style={{ flex: '1', minWidth: '250px', maxWidth: '500px' }}>
                     <svg className="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <circle cx="11" cy="11" r="8"></circle>
@@ -402,10 +402,10 @@ const CourseManagement = () => {
                                 position: 'relative'
                             }}>
                                 {course.images && course.images.length > 0 && course.images[0] ? (
-                                    <img 
-                                        src={course.images[0]} 
+                                    <img
+                                        src={course.images[0]}
                                         alt={course.name}
-                                        onClick={() => setViewingImage(course.images[0])}
+                                        onClick={() => setViewingImage({ current: course.images[0], all: course.images })}
                                         style={{
                                             width: '100%',
                                             height: '100%',
@@ -448,10 +448,10 @@ const CourseManagement = () => {
                                     </span>
                                 </div>
 
-                                <p style={{ 
-                                    fontSize: '0.85rem', 
-                                    color: 'var(--secondary-text)', 
-                                    marginBottom: '16px', 
+                                <p style={{
+                                    fontSize: '0.85rem',
+                                    color: 'var(--secondary-text)',
+                                    marginBottom: '16px',
                                     lineHeight: '1.5',
                                     minHeight: '60px',
                                     overflow: 'hidden',
@@ -494,9 +494,9 @@ const CourseManagement = () => {
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                                 {/* Main course type and price */}
                                                 {course.course_type && (
-                                                    <div style={{ 
-                                                        display: 'flex', 
-                                                        justifyContent: 'space-between', 
+                                                    <div style={{
+                                                        display: 'flex',
+                                                        justifyContent: 'space-between',
                                                         alignItems: 'center',
                                                         padding: '8px 12px',
                                                         background: 'var(--bg-color)',
@@ -513,9 +513,9 @@ const CourseManagement = () => {
                                                 )}
                                                 {/* Additional pricing variations */}
                                                 {course.pricing_data && course.pricing_data.map((variation, idx) => (
-                                                    <div key={idx} style={{ 
-                                                        display: 'flex', 
-                                                        justifyContent: 'space-between', 
+                                                    <div key={idx} style={{
+                                                        display: 'flex',
+                                                        justifyContent: 'space-between',
                                                         alignItems: 'center',
                                                         padding: '8px 12px',
                                                         background: 'var(--bg-color)',
@@ -539,7 +539,7 @@ const CourseManagement = () => {
                                             </span>
                                         </div>
                                     )}
-                                    
+
                                     {/* Action Buttons */}
                                     <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                                         <button
@@ -584,7 +584,7 @@ const CourseManagement = () => {
 
             {/* Image Viewer Modal */}
             {viewingImage && (
-                <div 
+                <div
                     onClick={() => setViewingImage(null)}
                     style={{
                         position: 'fixed',
@@ -595,13 +595,14 @@ const CourseManagement = () => {
                         background: 'rgba(0, 0, 0, 0.9)',
                         zIndex: 9999,
                         display: 'flex',
+                        flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
                         padding: '20px',
                         cursor: 'pointer'
                     }}
                 >
-                    <div style={{ position: 'relative', maxWidth: '90%', maxHeight: '90%' }}>
+                    <div style={{ position: 'relative', maxWidth: '90%', maxHeight: '80vh', display: 'flex', justifyContent: 'center' }}>
                         <button
                             onClick={() => setViewingImage(null)}
                             style={{
@@ -624,19 +625,52 @@ const CourseManagement = () => {
                         >
                             ×
                         </button>
-                        <img 
-                            src={viewingImage} 
+                        <img
+                            src={typeof viewingImage === 'string' ? viewingImage : viewingImage.current}
                             alt="Full size"
                             onClick={(e) => e.stopPropagation()}
                             style={{
                                 maxWidth: '100%',
-                                maxHeight: '90vh',
+                                maxHeight: '75vh',
                                 objectFit: 'contain',
                                 borderRadius: '8px',
                                 boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
                             }}
                         />
                     </div>
+                    {typeof viewingImage === 'object' && viewingImage.all && viewingImage.all.length > 1 && (
+                        <div
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                                display: 'flex',
+                                gap: '15px',
+                                marginTop: '20px',
+                                maxWidth: '90%',
+                                overflowX: 'auto',
+                                padding: '10px'
+                            }}
+                        >
+                            {viewingImage.all.map((img, idx) => (
+                                <img
+                                    key={idx}
+                                    src={img}
+                                    onClick={() => setViewingImage({ ...viewingImage, current: img })}
+                                    style={{
+                                        width: '80px',
+                                        height: '80px',
+                                        objectFit: 'cover',
+                                        borderRadius: '8px',
+                                        cursor: 'pointer',
+                                        border: (viewingImage.current || viewingImage) === img ? '3px solid #3b82f6' : '3px solid transparent',
+                                        transition: 'all 0.2s',
+                                        opacity: (viewingImage.current || viewingImage) === img ? 1 : 0.6
+                                    }}
+                                    onMouseEnter={(e) => e.target.style.opacity = 1}
+                                    onMouseLeave={(e) => e.target.style.opacity = (viewingImage.current || viewingImage) === img ? 1 : 0.6}
+                                />
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -644,7 +678,7 @@ const CourseManagement = () => {
             {showModal && (
                 <div className="modal-overlay">
                     <div className="modal-container user-modal" style={{ maxWidth: '650px', width: '95%' }}>
-                        <div className="modal-header" style={{ 
+                        <div className="modal-header" style={{
                             background: 'var(--card-bg)',
                             color: 'var(--text-color)',
                             padding: '24px 30px',
@@ -658,8 +692,8 @@ const CourseManagement = () => {
                                     {editingCourse ? 'Update course information' : 'Fill in the details to add a new course'}
                                 </p>
                             </div>
-                            <button 
-                                className="close-modal" 
+                            <button
+                                className="close-modal"
                                 onClick={handleCloseModal}
                                 style={{
                                     background: 'var(--card-bg)',
@@ -669,8 +703,8 @@ const CourseManagement = () => {
                             >&times;</button>
                         </div>
                         <form onSubmit={handleAddCourse}>
-                            <div className="modal-body" style={{ 
-                                maxHeight: '500px', 
+                            <div className="modal-body" style={{
+                                maxHeight: '500px',
                                 overflowY: 'auto',
                                 padding: '30px',
                                 background: 'var(--bg-color)'
@@ -858,8 +892,7 @@ const CourseManagement = () => {
                                                     <option value="Automatic">Automatic</option>
                                                     <option value="Manual">Manual</option>
                                                     <option value="V1-Tricycle">V1-Tricycle</option>
-                                                    <option value="B1-Van">B1 - Van</option>
-                                                    <option value="B2-L300">B2 - L300</option>
+                                                    <option value="B1-Van/B2 - L300">B1 - Van/B2 - L300</option>
                                                 </>
                                             )}
                                         </select>
@@ -995,7 +1028,7 @@ const CourseManagement = () => {
                                     <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-color)' }}>
                                         Course Images <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>({courseData.images.length}/4 images)</span>
                                     </label>
-                                    
+
                                     {/* Image Upload Button */}
                                     {courseData.images.length < 4 && (
                                         <div style={{ marginBottom: '12px' }}>
@@ -1082,7 +1115,7 @@ const CourseManagement = () => {
                                     )}
                                 </div>
                             </div>
-                            <div className="modal-footer" style={{ 
+                            <div className="modal-footer" style={{
                                 padding: '20px 30px',
                                 borderTop: '1px solid var(--border-color)',
                                 background: 'var(--card-bg)',
@@ -1090,8 +1123,8 @@ const CourseManagement = () => {
                                 justifyContent: 'flex-end',
                                 gap: '12px'
                             }}>
-                                <button 
-                                    type="button" 
+                                <button
+                                    type="button"
                                     onClick={handleCloseModal}
                                     style={{
                                         padding: '12px 24px',
@@ -1106,7 +1139,7 @@ const CourseManagement = () => {
                                 >
                                     Cancel
                                 </button>
-                                <button 
+                                <button
                                     type="submit"
                                     style={{
                                         padding: '12px 24px',

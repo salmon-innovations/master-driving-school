@@ -8,6 +8,7 @@ const NewsEvents = () => {
     const [newsSearchTerm, setNewsSearchTerm] = useState('');
     const [activeNewsCategory, setActiveNewsCategory] = useState('All');
     const [showNewsModal, setShowNewsModal] = useState(false);
+    const [playingVideo, setPlayingVideo] = useState(null);
     const [editingNews, setEditingNews] = useState(null);
     const [newsFormData, setNewsFormData] = useState({
         title: '',
@@ -21,7 +22,6 @@ const NewsEvents = () => {
     const [fileType, setFileType] = useState(null);
 
     const [newsData, setNewsData] = useState([]);
-    const [videos, setVideos] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -31,21 +31,17 @@ const NewsEvents = () => {
     const fetchInitialData = async () => {
         setLoading(true);
         try {
-            const [newsRes, videoRes] = await Promise.all([
-                newsAPI.getAll(),
-                newsAPI.getVideos()
-            ]);
+            const newsRes = await newsAPI.getAll();
 
             if (newsRes.success) {
                 const formattedNews = newsRes.news.map(n => ({
                     ...n,
                     date: new Date(n.published_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
-                    tagColor: getTagColor(n.tag)
+                    tagColor: getTagColor(n.tag),
+                    image_url: n.media_url || n.image_url
                 }));
                 setNewsData(formattedNews);
             }
-
-            if (videoRes.success) setVideos(videoRes.videos);
 
         } catch (error) {
             console.error('Fetch error:', error);
@@ -136,7 +132,7 @@ const NewsEvents = () => {
     const stats = [
         { label: 'Published News', value: newsData.length, icon: '📰', color: '#eff6ff' },
         { label: 'Upcoming Events', value: newsData.filter(n => n.tag === 'EVENT').length, icon: '📅', color: '#f0fdf4' },
-        { label: 'Promotional Videos', value: videos.length, icon: '🎥', color: '#fff7ed' },
+        { label: 'Promotional Videos', value: newsData.filter(n => n.type === 'Promotional Video').length, icon: '🎥', color: '#fff7ed' },
         { label: 'Total Engagement', value: '4.5k', icon: '🔥', color: '#fef2f2' },
     ];
 
@@ -205,8 +201,8 @@ const NewsEvents = () => {
                             <div className="loading-spinner-prime"></div>
                             <p style={{ marginTop: '1rem', color: '#94a3b8' }}>Synchronizing with database...</p>
                         </div>
-                    ) : filteredNews.length > 0 ? (
-                        filteredNews.map((news) => (
+                    ) : filteredNews.filter(n => n.type !== 'Promotional Video').length > 0 ? (
+                        filteredNews.filter(n => n.type !== 'Promotional Video').map((news) => (
                             <div key={news.id} className="news-card-prime">
                                 <div className="card-actions-top">
                                     <div className="tag-badge" style={{
@@ -243,30 +239,50 @@ const NewsEvents = () => {
                     </div>
 
                     <div className="videos-grid-prime">
-                        {videos.length > 0 ? (
-                            videos.map((video) => (
-                                <div key={video.id} className="video-card-prime">
-                                    <div className="thumb-area" style={{ background: video.thumbnail_url || 'linear-gradient(135deg, #1e293b 0%, #334155 100%)' }}>
-                                        {video.media_url?.startsWith('data:video') ? (
-                                            <video src={video.media_url} className="preview-media-full" />
-                                        ) : video.media_url ? (
-                                            <img src={video.media_url} alt="Thumbnail" className="preview-media-full" />
-                                        ) : null}
-                                        <div className="play-trigger"></div>
-                                        <span className="duration-pill">{video.duration || '0:00'}</span>
+                        {filteredNews.filter(n => n.type === 'Promotional Video').length > 0 ? (
+                            filteredNews.filter(n => n.type === 'Promotional Video').map((video) => (
+                                <div key={video.id} className="video-card-prime" style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <div className="card-actions-top" style={{ position: 'absolute', top: 10, right: 10, zIndex: 10 }}>
+                                        <button className="delete-mini-btn" onClick={() => handleDeleteNews(video.id)} title="Delete Video">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                        </button>
                                     </div>
-                                    <div className="v-info">
-                                        <div className="v-category" style={{ color: video.category_color }}>
-                                            {video.category}
+                                    <div className="thumb-area" style={{ background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)', cursor: 'pointer', overflow: 'hidden' }} onClick={() => setPlayingVideo(video)}>
+                                        {video.image_url?.startsWith('data:video') || video.image_url?.match(/\.(mp4|webm|ogg)$/i) ? (
+                                            <video
+                                                src={video.image_url}
+                                                muted
+                                                playsInline
+                                                className="preview-media-full"
+                                                style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }}
+                                            />
+                                        ) : video.image_url ? (
+                                            <img
+                                                src={video.image_url}
+                                                alt="Thumbnail"
+                                                className="preview-media-full"
+                                                style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }}
+                                            />
+                                        ) : null}
+                                        <div className="play-trigger" style={{ position: 'relative', zIndex: 10 }}></div>
+                                        {video.duration && <span className="duration-pill" style={{ zIndex: 10 }}>{video.duration}</span>}
+                                    </div>
+                                    <div className="v-info" style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                                        <div className="v-category" style={{ color: video.tagColor?.color || '#2563eb' }}>
+                                            {video.tag}
                                         </div>
                                         <h3>{video.title}</h3>
                                         <p>{video.description}</p>
+                                        <div className="card-footer-prime" style={{ marginTop: 'auto', paddingTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #f1f5f9' }}>
+                                            <span className="date-meta">{new Date(video.published_at).toLocaleDateString()} • {video.interactions || '0 views'}</span>
+                                            <span className="edit-link" onClick={() => handleOpenModal(video)}>Modify</span>
+                                        </div>
                                     </div>
                                 </div>
                             ))
                         ) : (
                             <div className="no-results" style={{ gridColumn: '1/-1', textAlign: 'center', padding: '4rem', color: '#94a3b8' }}>
-                                No tutorials available yet.
+                                No promotional videos available yet.
                             </div>
                         )}
                     </div>
@@ -284,6 +300,38 @@ const NewsEvents = () => {
                     filePreview={filePreview}
                     setFilePreview={setFilePreview}
                 />
+            )}
+
+            {/* Video Player Modal */}
+            {playingVideo && (
+                <div className="news-modal-overlay" style={{ zIndex: 100000, background: 'rgba(0,0,0,0.9)' }} onClick={() => setPlayingVideo(null)}>
+                    <button
+                        onClick={() => setPlayingVideo(null)}
+                        style={{ position: 'absolute', top: '20px', right: '30px', background: 'white', border: 'none', borderRadius: '50%', width: '40px', height: '40px', fontSize: '24px', cursor: 'pointer', zIndex: 100001, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                        &times;
+                    </button>
+                    <div className="video-player-container" style={{ width: '90%', maxWidth: '1000px', maxHeight: '80vh', position: 'relative' }} onClick={e => e.stopPropagation()}>
+                        {playingVideo.image_url?.startsWith('data:video') || playingVideo.image_url?.match(/\.(mp4|webm|ogg)$/i) ? (
+                            <video
+                                src={playingVideo.image_url}
+                                controls
+                                autoPlay
+                                style={{ width: '100%', height: '100%', maxHeight: '80vh', borderRadius: '16px', backgroundColor: 'black' }}
+                            />
+                        ) : (
+                            <img
+                                src={playingVideo.image_url}
+                                alt="Full View"
+                                style={{ width: '100%', height: '100%', maxHeight: '80vh', objectFit: 'contain', borderRadius: '16px' }}
+                            />
+                        )}
+                        <div style={{ marginTop: '1rem', color: 'white' }}>
+                            <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{playingVideo.title}</h2>
+                            <p style={{ color: '#ccc', marginTop: '5px' }}>{playingVideo.description}</p>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

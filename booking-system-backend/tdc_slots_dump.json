@@ -1,0 +1,18 @@
+[
+  {
+    "id": 2,
+    "branch_id": null,
+    "type": "tdc",
+    "date": "2026-02-22T16:00:00.000Z",
+    "end_date": "2026-02-23T16:00:00.000Z",
+    "available_slots": 15
+  },
+  {
+    "id": 3,
+    "branch_id": null,
+    "type": "tdc",
+    "date": "2026-02-24T16:00:00.000Z",
+    "end_date": "2026-02-25T16:00:00.000Z",
+    "available_slots": 15
+  }
+]

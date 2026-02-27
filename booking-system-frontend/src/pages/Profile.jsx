@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { authAPI } from '../services/api'
+import { authAPI, schedulesAPI } from '../services/api'
 import { useNotification } from '../context/NotificationContext'
 
 // Helper component for detail items
@@ -57,13 +57,12 @@ function Profile({ onNavigate, setIsLoggedIn }) {
   const fetchUserData = async () => {
     try {
       setLoading(true)
-      
-      // Try to get data from API first for the most complete profile
+
+      // Fetch user profile
       try {
         const response = await authAPI.getProfile()
         if (response.success) {
           setUser(response.user)
-          // Update localStorage with complete data
           localStorage.setItem('user', JSON.stringify(response.user))
         }
       } catch (apiError) {
@@ -71,39 +70,17 @@ function Profile({ onNavigate, setIsLoggedIn }) {
         const userData = JSON.parse(localStorage.getItem('user') || '{}')
         setUser(userData)
       }
-      
-      // Fetch course history from API
-      // For now, we'll use mock data until the backend endpoint is created
-      const mockHistory = [
-        {
-          id: 1,
-          courseName: 'Theoretical Driving Course',
-          status: 'Completed',
-          date: '2025-12-15',
-          progress: 100,
-          instructor: 'John Smith',
-          branch: 'Caloocan Branch'
-        },
-        {
-          id: 2,
-          courseName: 'Practical Driving Course',
-          status: 'In Progress',
-          date: '2026-01-10',
-          progress: 60,
-          instructor: 'Maria Garcia',
-          branch: 'Manila Branch'
-        },
-        {
-          id: 3,
-          courseName: 'Defensive Driving Course',
-          status: 'Upcoming',
-          date: '2026-03-01',
-          progress: 0,
-          instructor: 'TBD',
-          branch: 'Quezon City Branch'
+
+      // Fetch real course history from database
+      try {
+        const historyResponse = await schedulesAPI.getMyEnrollments()
+        if (historyResponse.success) {
+          setCourseHistory(historyResponse.enrollments)
         }
-      ]
-      setCourseHistory(mockHistory)
+      } catch (histErr) {
+        console.warn('Could not fetch course history:', histErr)
+        setCourseHistory([])
+      }
     } catch (error) {
       console.error('Error fetching user data:', error)
     } finally {
@@ -127,16 +104,34 @@ function Profile({ onNavigate, setIsLoggedIn }) {
   }
 
   const getStatusColor = (status) => {
-    switch (status) {
-      case 'Completed':
-        return 'bg-green-100 text-green-800'
-      case 'In Progress':
-        return 'bg-blue-100 text-blue-800'
-      case 'Upcoming':
-        return 'bg-yellow-100 text-yellow-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
+    switch ((status || '').toLowerCase()) {
+      case 'completed': return 'bg-green-100 text-green-800 border border-green-200'
+      case 'enrolled': return 'bg-blue-100 text-blue-800 border border-blue-200'
+      case 'in progress': return 'bg-blue-100 text-blue-800 border border-blue-200'
+      case 'no-show': return 'bg-red-100 text-red-800 border border-red-200'
+      case 'cancelled': return 'bg-gray-100 text-gray-600 border border-gray-200'
+      case 'upcoming': return 'bg-yellow-100 text-yellow-800 border border-yellow-200'
+      case 'pending': return 'bg-yellow-100 text-yellow-800 border border-yellow-200'
+      case 'confirmed': return 'bg-green-100 text-green-800 border border-green-200'
+      case 'rejected': return 'bg-red-100 text-red-800 border border-red-200'
+      default: return 'bg-gray-100 text-gray-800 border border-gray-200'
     }
+  }
+
+  const getPaymentColor = (status) => {
+    switch ((status || '').toLowerCase()) {
+      case 'full payment': return 'bg-green-50 text-green-700'
+      case 'partial payment': return 'bg-yellow-50 text-yellow-700'
+      case 'no payment': return 'bg-red-50 text-red-700'
+      default: return 'bg-gray-50 text-gray-600'
+    }
+  }
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return null
+    return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric'
+    })
   }
 
   if (loading) {
@@ -212,21 +207,19 @@ function Profile({ onNavigate, setIsLoggedIn }) {
           <div className="flex border-b">
             <button
               onClick={() => setActiveTab('personal')}
-              className={`flex-1 px-6 py-4 font-semibold transition-colors ${
-                activeTab === 'personal'
-                  ? 'bg-[#2157da] text-white'
-                  : 'text-gray-600 hover:bg-gray-50'
-              }`}
+              className={`flex-1 px-6 py-4 font-semibold transition-colors ${activeTab === 'personal'
+                ? 'bg-[#2157da] text-white'
+                : 'text-gray-600 hover:bg-gray-50'
+                }`}
             >
               Personal Information
             </button>
             <button
               onClick={() => setActiveTab('history')}
-              className={`flex-1 px-6 py-4 font-semibold transition-colors ${
-                activeTab === 'history'
-                  ? 'bg-[#2157da] text-white'
-                  : 'text-gray-600 hover:bg-gray-50'
-              }`}
+              className={`flex-1 px-6 py-4 font-semibold transition-colors ${activeTab === 'history'
+                ? 'bg-[#2157da] text-white'
+                : 'text-gray-600 hover:bg-gray-50'
+                }`}
             >
               Course History
             </button>
@@ -246,7 +239,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                     </div>
                     <h2 className="text-xl font-bold text-gray-800">Basic Information</h2>
                   </div>
-                  
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
                     <DetailItem label="First Name" value={user?.firstName} />
                     <DetailItem label="Middle Name" value={user?.middleName} />
@@ -271,7 +264,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                     </div>
                     <h2 className="text-xl font-bold text-gray-800">Address & Contact</h2>
                   </div>
-                  
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
                     <div className="sm:col-span-2">
                       <DetailItem label="Full Address" value={user?.address} />
@@ -292,7 +285,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                     </div>
                     <h2 className="text-xl font-bold text-gray-800">Emergency Contact</h2>
                   </div>
-                  
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
                     <DetailItem label="Contact Person" value={user?.emergencyContactPerson} />
                     <DetailItem label="Emergency Number" value={user?.emergencyContactNumber} />
@@ -325,85 +318,114 @@ function Profile({ onNavigate, setIsLoggedIn }) {
             {/* Course History Tab */}
             {activeTab === 'history' && (
               <div data-aos="fade-in">
-                <h2 className="text-2xl font-bold text-gray-800 mb-6">My Courses</h2>
-                
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-bold text-gray-800">My Course History</h2>
+                  <span className="text-sm text-gray-500">{courseHistory.length} enrollment{courseHistory.length !== 1 ? 's' : ''}</span>
+                </div>
+
                 {courseHistory.length === 0 ? (
-                  <div className="text-center py-12">
-                    <svg className="w-24 h-24 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <p className="text-gray-500 text-lg mb-4">No courses enrolled yet</p>
+                  <div className="text-center py-16">
+                    <div className="w-24 h-24 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                      <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    </div>
+                    <p className="text-gray-500 text-lg font-semibold mb-2">No enrollments yet</p>
+                    <p className="text-gray-400 text-sm mb-6">Your course history will appear here once you enroll in a course.</p>
                     <button
                       onClick={() => onNavigate('courses')}
-                      className="px-6 py-2 bg-[#2157da] text-white rounded-lg hover:bg-[#1a3a8a] transition-colors"
+                      className="px-6 py-2.5 bg-[#2157da] text-white rounded-xl font-bold hover:bg-[#1a3a8a] transition-colors shadow-md"
                     >
                       Browse Courses
                     </button>
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {courseHistory.map((course) => (
-                      <div
-                        key={course.id}
-                        className="border border-gray-200 rounded-lg p-6 hover:border-[#2157da] transition-colors"
-                      >
-                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-                          <div>
-                            <h3 className="text-xl font-bold text-gray-800 mb-2">{course.courseName}</h3>
-                            <div className="flex flex-wrap gap-2 text-sm text-gray-600">
-                              <span className="flex items-center gap-1">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                                {course.date}
+                    {courseHistory.map((enrollment) => {
+                      const courseName = enrollment.course_full_name || enrollment.slot_type?.toUpperCase() + ' Course'
+                      const schedDate = formatDate(enrollment.schedule_date)
+                      const schedEndDate = enrollment.schedule_end_date && enrollment.schedule_end_date !== enrollment.schedule_date
+                        ? formatDate(enrollment.schedule_end_date)
+                        : null
+                      const statusLabel = enrollment.enrollment_status
+                        ? enrollment.enrollment_status.charAt(0).toUpperCase() + enrollment.enrollment_status.slice(1)
+                        : 'Enrolled'
+
+                      return (
+                        <div
+                          key={enrollment.enrollment_id}
+                          className="border border-gray-200 rounded-2xl p-6 hover:border-[#2157da] hover:shadow-md transition-all"
+                        >
+                          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-4">
+                            <div className="flex-1">
+                              {/* Course type badge + name */}
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-blue-100 text-[#2157da]">
+                                  {enrollment.course_category || enrollment.slot_type?.toUpperCase()}
+                                </span>
+                                {enrollment.course_type && (
+                                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-gray-100 text-gray-600">
+                                    {enrollment.course_type}
+                                  </span>
+                                )}
+                              </div>
+                              <h3 className="text-lg font-bold text-gray-900 mb-3">{courseName}</h3>
+
+                              {/* Meta info row */}
+                              <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-gray-600">
+                                {/* Date */}
+                                {schedDate && (
+                                  <span className="flex items-center gap-1.5">
+                                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                    {schedDate}{schedEndDate ? ` – ${schedEndDate}` : ''}
+                                  </span>
+                                )}
+
+                                {/* Session & Time */}
+                                {enrollment.session && (
+                                  <span className="flex items-center gap-1.5">
+                                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    {enrollment.session} · {enrollment.time_range}
+                                  </span>
+                                )}
+
+                                {/* Branch */}
+                                {enrollment.branch_name && (
+                                  <span className="flex items-center gap-1.5">
+                                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                    {enrollment.branch_name}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Status badges */}
+                            <div className="flex flex-col items-end gap-2 shrink-0">
+                              <span className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${getStatusColor(enrollment.enrollment_status)}`}>
+                                {statusLabel}
                               </span>
-                              <span className="flex items-center gap-1">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                                </svg>
-                                {course.branch}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                </svg>
-                                {course.instructor}
-                              </span>
+                              {enrollment.payment_status && (
+                                <span className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${getPaymentColor(enrollment.payment_status)}`}>
+                                  {enrollment.payment_status}
+                                </span>
+                              )}
                             </div>
                           </div>
-                          <span className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap ${getStatusColor(course.status)}`}>
-                            {course.status}
-                          </span>
-                        </div>
 
-                        {/* Progress Bar */}
-                        <div className="mb-4">
-                          <div className="flex justify-between text-sm text-gray-600 mb-2">
-                            <span>Progress</span>
-                            <span className="font-semibold">{course.progress}%</span>
-                          </div>
-                          <div className="w-full bg-gray-200 rounded-full h-2">
-                            <div
-                              className="bg-gradient-to-r from-[#2157da] to-[#1a3a8a] h-2 rounded-full transition-all duration-500"
-                              style={{ width: `${course.progress}%` }}
-                            ></div>
-                          </div>
+                          {/* Enrolled date */}
+                          <p className="text-[11px] text-gray-400 mt-2">
+                            Enrolled on {new Date(enrollment.enrolled_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                          </p>
                         </div>
-
-                        {/* Action Buttons */}
-                        <div className="flex gap-2">
-                          {course.status === 'In Progress' && (
-                            <button className="px-4 py-2 bg-[#2157da] text-white rounded-lg hover:bg-[#1a3a8a] transition-colors text-sm">
-                              Continue Course
-                            </button>
-                          )}
-                          <button className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm">
-                            View Details
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </div>

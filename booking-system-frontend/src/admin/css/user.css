@@ -370,6 +370,7 @@
     from {
         opacity: 0;
     }
+
     to {
         opacity: 1;
     }
@@ -388,6 +389,7 @@
         opacity: 0;
         transform: translateY(30px) scale(0.95);
     }
+
     to {
         opacity: 1;
         transform: translateY(0) scale(1);
@@ -525,28 +527,28 @@
         width: 100%;
         flex: 1 1 100% !important;
     }
-    
+
     .user-header {
         flex-direction: column;
         align-items: flex-start;
         gap: 15px;
     }
-    
+
     .add-user-btn {
         width: 100%;
         justify-content: center;
     }
-    
-    .management-header {
+
+    .course-management-header {
         flex-direction: column;
         gap: 15px;
     }
-    
+
     .search-filter-section {
         flex-direction: column !important;
         width: 100%;
     }
-    
+
     .search-box {
         min-width: 100% !important;
     }
@@ -556,30 +558,121 @@
     .user-header h2 {
         font-size: 1.4rem;
     }
-    
+
     .modal-header h2 {
         font-size: 1.2rem;
     }
-    
+
     .profile-modal .modal-body {
         max-height: 500px !important;
     }
-    
+
     .table-container {
         overflow-x: auto;
     }
-    
+
     table {
         font-size: 0.85rem;
     }
-    
-    th, td {
+
+    th,
+    td {
         padding: 10px 8px !important;
     }
 }
 
 /* Loading Animation */
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+/* ========================================
+   Modern UI Details Modal
+   ======================================== */
+.profile-modal .modal-header {
+    background: linear-gradient(135deg, var(--card-bg) 0%, var(--bg-color) 100%) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+.profile-modal .profile-body {
+    background: var(--bg-color) !important;
+}
+
+.profile-modal .profile-body>div:first-child {
+    background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%) !important;
+    position: relative;
+    overflow: hidden;
+}
+
+.profile-modal .profile-body>div:first-child::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.15) 0%, transparent 60%);
+}
+
+.profile-modal .profile-body img {
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.profile-modal .profile-body img:hover {
+    transform: scale(1.08);
+}
+
+.profile-info-card {
+    background: rgba(255, 255, 255, 0.03) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important;
+    position: relative;
+    z-index: 10;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.profile-info-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15) !important;
+}
+
+.profile-data-card {
+    background: var(--card-bg);
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+.profile-data-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+.profile-data-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 3px;
+    height: 100%;
+    background: linear-gradient(to bottom, #3b82f6, #8b5cf6);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.profile-data-card:hover::before {
+    opacity: 1;
 }

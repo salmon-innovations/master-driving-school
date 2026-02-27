@@ -3,7 +3,13 @@ const pool = require('../config/db');
 // Get all courses
 const getAllCourses = async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM courses ORDER BY created_at DESC');
+    const result = await pool.query(`
+      SELECT c.*, CAST(COUNT(b.id) AS INTEGER) as enrolled
+      FROM courses c
+      LEFT JOIN bookings b ON c.id = b.course_id AND b.status IN ('paid', 'completed')
+      GROUP BY c.id
+      ORDER BY c.created_at DESC
+    `);
 
     res.json({
       success: true,
@@ -72,9 +78,9 @@ const createCourse = async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
        RETURNING *`,
       [
-        name, 
-        description || null, 
-        parseFloat(price), 
+        name,
+        description || null,
+        parseFloat(price),
         duration || null,
         status || 'active',
         imageData,
@@ -94,9 +100,9 @@ const createCourse = async (req, res) => {
   } catch (error) {
     console.error('Create course error:', error.message);
     console.error('Stack:', error.stack);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Server error while creating course',
-      details: error.message 
+      details: error.message
     });
   }
 };
@@ -150,9 +156,9 @@ const updateCourse = async (req, res) => {
        WHERE id = $10 
        RETURNING *`,
       [
-        name, 
-        description || null, 
-        parseFloat(price), 
+        name,
+        description || null,
+        parseFloat(price),
         duration || null,
         status || 'active',
         imageData,
@@ -173,9 +179,9 @@ const updateCourse = async (req, res) => {
   } catch (error) {
     console.error('Update course error:', error.message);
     console.error('Stack:', error.stack);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Server error while updating course',
-      details: error.message 
+      details: error.message
     });
   }
 };
