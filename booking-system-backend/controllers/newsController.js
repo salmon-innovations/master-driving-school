@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { sendNewsPromoEmail } = require('../utils/emailService');
 
 // Get all items (News, Events, etc.)
 const getAllNews = async (req, res) => {
@@ -97,10 +98,83 @@ const getAllVideos = async (req, res) => {
     }
 };
 
+// Broadcast news/promo to all active students
+const broadcastNews = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Fetch the news
+        const newsResult = await pool.query('SELECT * FROM news_events WHERE id = $1', [id]);
+        if (newsResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Item not found' });
+        }
+        const news = newsResult.rows[0];
+
+        // Fetch all active students/guests/walk-ins who have emails
+        const usersResult = await pool.query(`
+            SELECT email, first_name 
+            FROM users 
+            WHERE role IN ('student', 'walkin_student', 'guest') 
+            AND email IS NOT NULL 
+            AND status = 'active'
+        `);
+
+        if (usersResult.rows.length === 0) {
+            return res.status(400).json({ error: 'No active student emails found to broadcast.' });
+        }
+
+        // Send email to all asynchronously
+        // For larger userbases, you would typically use a message queue
+        let sentCount = 0;
+        for (const user of usersResult.rows) {
+            try {
+                await sendNewsPromoEmail(
+                    user.email,
+                    user.first_name,
+                    news.title,
+                    news.description || news.content,
+                    news.type,
+                    news.tag
+                );
+                sentCount++;
+            } catch (err) {
+                console.error(`Failed to broadcast to ${user.email}:`, err.message);
+            }
+        }
+
+        res.json({ success: true, message: `Successfully broadcasted to ${sentCount} students.`, sentCount });
+    } catch (error) {
+        console.error('Broadcast error:', error);
+        res.status(500).json({ error: 'Server error while broadcasting' });
+    }
+};
+
+// Increment views/interactions
+const incrementInteraction = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query(
+            'UPDATE news_events SET interactions = COALESCE(CAST(interactions AS INTEGER), 0) + 1 WHERE id = $1 RETURNING interactions',
+            [id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Item not found' });
+        }
+
+        res.json({ success: true, interactions: result.rows[0].interactions });
+    } catch (error) {
+        console.error('Increment error:', error);
+        res.status(500).json({ error: 'Server error while incrementing interaction' });
+    }
+};
+
 module.exports = {
     getAllNews,
     createNews,
     updateNews,
     deleteNews,
-    getAllVideos
+    getAllVideos,
+    broadcastNews,
+    incrementInteraction
 };

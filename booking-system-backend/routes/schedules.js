@@ -10,12 +10,23 @@ const {
   enrollStudent,
   updateEnrollmentStatus,
   cancelEnrollment,
+  markFeePaid,
   getMyEnrollments,
   processNoShow,
+  rescheduleEnrollment,
+  getUnassignedPdcStudents,
+  payRemainingBalance,
+  getNoShowStudents,
 } = require('../controllers/scheduleController');
 
 // Get my enrollments (logged-in student)
 router.get('/my-enrollments', authenticateToken, getMyEnrollments);
+
+// Student pays remaining balance online
+router.patch('/pay-balance/:bookingId', authenticateToken, payRemainingBalance);
+
+// Get unassigned PDC students
+router.get('/unassigned-pdc', authenticateToken, getUnassignedPdcStudents);
 
 // Get slots by date
 router.get('/slots', getSlotsByDate);
@@ -43,5 +54,13 @@ router.delete('/enrollments/:enrollmentId', authenticateToken, cancelEnrollment)
 
 // Process No-Show with fee notification
 router.post('/enrollments/:enrollmentId/no-show', authenticateToken, processNoShow);
+
+// Reschedule student to a different slot
+router.post('/enrollments/:enrollmentId/reschedule', authenticateToken, rescheduleEnrollment);
+
+// Mark no-show rescheduling fee as paid
+router.patch('/enrollments/:enrollmentId/mark-fee-paid', authenticateToken, markFeePaid);
+
+router.get('/no-show-students', authenticateToken, getNoShowStudents);
 
 module.exports = router;

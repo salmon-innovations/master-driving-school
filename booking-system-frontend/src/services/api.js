@@ -30,8 +30,9 @@ const apiRequest = async (endpoint, options = {}) => {
 
     if (!response.ok) {
       // Create error with additional data from response
-      const error = new Error(data.error || 'Something went wrong');
+      const error = new Error(data.message || data.error || 'Something went wrong');
       error.statusCode = response.status;
+      error.waitMinutes = data.waitMinutes;
       error.needsVerification = data.needsVerification;
       error.accountLocked = data.accountLocked;
       error.email = data.email;
@@ -169,6 +170,19 @@ export const coursesAPI = {
       method: 'DELETE',
     });
   },
+
+  // Get course type config (categories, tdcTypes, pdcTypes, bundleTypes)
+  getConfig: async () => {
+    return await apiRequest('/courses/config');
+  },
+
+  // Update course type config (Admin only)
+  updateConfig: async (config) => {
+    return await apiRequest('/courses/config', {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    });
+  },
 };
 
 // Branches API
@@ -205,6 +219,22 @@ export const branchesAPI = {
       method: 'DELETE',
     });
   },
+};
+
+// StarPay API
+export const starpayAPI = {
+  createPayment: async (data) => await apiRequest('/starpay/create-payment', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  createGuestPayment: async (data) => await apiRequest('/starpay/guest-create-payment', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  checkStatus: async (msgId) => await apiRequest(`/starpay/status/${msgId}`),
+  payRescheduleFee: async (enrollmentId) => await apiRequest(`/starpay/reschedule-fee/${enrollmentId}`, {
+    method: 'POST',
+  }),
 };
 
 // Bookings API
@@ -311,6 +341,20 @@ export const adminAPI = {
     return await apiRequest('/admin/analytics/branch-performance');
   },
 
+  // Get students with active schedule for a given date/branch
+  getTodayStudents: async ({ date, branchId } = {}) => {
+    const params = new URLSearchParams();
+    if (date) params.append('date', date);
+    if (branchId) params.append('branch_id', branchId);
+    const qs = params.toString();
+    return await apiRequest(`/admin/today-students${qs ? '?' + qs : ''}`);
+  },
+
+  // Get full student detail (personal info + bookings/payment)
+  getStudentDetail: async (studentId) => {
+    return await apiRequest(`/admin/student-detail/${studentId}`);
+  },
+
   // Create new user (Admin/Staff only)
   createUser: async (userData) => {
     return await apiRequest('/admin/users', {
@@ -358,6 +402,21 @@ export const adminAPI = {
   // Get all unpaid bookings (No Pay Users)
   getUnpaidBookings: async (limit = 100) => {
     return await apiRequest(`/admin/unpaid-bookings?limit=${limit}`);
+  },
+
+  // Mark a downpayment booking as fully paid (collects remaining balance)
+  markAsPaid: async (id, paymentMethod) => {
+    return await apiRequest(`/admin/bookings/${id}/mark-paid`, {
+      method: 'PATCH',
+      body: JSON.stringify({ payment_method: paymentMethod }),
+    });
+  },
+
+  // Send payment receipt email to student for a booking
+  sendReceipt: async (id) => {
+    return await apiRequest(`/admin/bookings/${id}/send-receipt`, {
+      method: 'POST',
+    });
   },
 };
 
@@ -460,6 +519,28 @@ export const schedulesAPI = {
     });
   },
 
+  // Reschedule student to a different slot
+  rescheduleEnrollment: async (enrollmentId, newSlotId) => {
+    return await apiRequest(`/schedules/enrollments/${enrollmentId}/reschedule`, {
+      method: 'POST',
+      body: JSON.stringify({ new_slot_id: newSlotId }),
+    });
+  },
+
+  // Mark no-show rescheduling fee (₱1000) as paid
+  markFeePaid: async (enrollmentId) => {
+    return await apiRequest(`/schedules/enrollments/${enrollmentId}/mark-fee-paid`, {
+      method: 'PATCH',
+    });
+  },
+
+  // Get all no-show students (admin/staff)
+  getNoShowStudents: async ({ branchId } = {}) => {
+    const params = new URLSearchParams();
+    if (branchId) params.append('branchId', branchId);
+    return await apiRequest(`/schedules/no-show-students${params.toString() ? '?' + params.toString() : ''}`);
+  },
+
   // Cancel enrollment
   cancelEnrollment: async (enrollmentId) => {
     return await apiRequest(`/schedules/enrollments/${enrollmentId}`, {
@@ -471,6 +552,19 @@ export const schedulesAPI = {
   getMyEnrollments: async () => {
     return await apiRequest('/schedules/my-enrollments');
   },
+
+  // Student pays their remaining balance online
+  payRemainingBalance: async (bookingId, paymentMethod) => {
+    return await apiRequest(`/schedules/pay-balance/${bookingId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ payment_method: paymentMethod }),
+    });
+  },
+
+  // Get unassigned PDC students (optional ?course_type=... query string)
+  getUnassignedPdcStudents: async (queryString = '') => {
+    return await apiRequest(`/schedules/unassigned-pdc${queryString}`);
+  }
 };
 
 // CRM API
@@ -531,6 +625,15 @@ export const rolesAPI = {
   delete: async (id) => await apiRequest(`/roles/${id}`, { method: 'DELETE' })
 };
 
+// Email Content Configuration API
+export const emailContentAPI = {
+  get: async () => await apiRequest('/admin/email-content'),
+  update: async (content) => await apiRequest('/admin/email-content', {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  }),
+};
+
 // News & Announcements API
 export const newsAPI = {
   getAll: async () => await apiRequest('/news'),
@@ -545,7 +648,18 @@ export const newsAPI = {
   delete: async (id) => await apiRequest(`/news/${id}`, {
     method: 'DELETE'
   }),
-  getVideos: async () => await apiRequest('/news/videos')
+  getVideos: async () => await apiRequest('/news/videos'),
+  broadcast: async (id) => await apiRequest(`/news/${id}/broadcast`, {
+    method: 'POST'
+  }),
+  incrementInteraction: async (id) => await apiRequest(`/news/${id}/increment`, {
+    method: 'PATCH'
+  })
+};
+
+// Notifications API
+export const notificationsAPI = {
+  getAll: async () => await apiRequest('/admin/notifications'),
 };
 
 // Export helper functions

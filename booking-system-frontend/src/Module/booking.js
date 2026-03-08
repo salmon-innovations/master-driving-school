@@ -11,8 +11,8 @@ const Booking = () => {
     // Mock data for bookings
     const [bookings, setBookings] = useState([
         { id: 'BK-001', student: 'Juan Dela Cruz', type: 'TDC', branch: 'Lipa Branch', date: '2024-03-20', time: '08:00 AM - 12:00 PM', status: 'Pending', amount: 'P 2,500', paymentType: 'Full Payment', paymentMethod: 'GCash' },
-        { id: 'BK-002', student: 'Maria Santos', type: 'PDC', branch: 'Batangas Branch', date: '2024-03-21', time: '01:00 PM - 03:00 PM', status: 'Confirmed', amount: 'P 5,000', paymentType: 'Down Payment', paymentMethod: 'StarPay' },
-        { id: 'BK-003', student: 'Jose Rizal', type: 'TDC', branch: 'Tanauan Branch', date: '2024-03-22', time: '08:00 AM - 12:00 PM', status: 'Pending', amount: 'P 2,500', paymentType: 'Full Payment', paymentMethod: 'StarPay' },
+        { id: 'BK-002', student: 'Maria Santos', type: 'PDC', branch: 'Batangas Branch', date: '2024-03-21', time: '01:00 PM - 03:00 PM', status: 'Confirmed', amount: 'P 5,000', paymentType: 'Down Payment', paymentMethod: 'GCash' },
+        { id: 'BK-003', student: 'Jose Rizal', type: 'TDC', branch: 'Tanauan Branch', date: '2024-03-22', time: '08:00 AM - 12:00 PM', status: 'Pending', amount: 'P 2,500', paymentType: 'Full Payment', paymentMethod: 'GCash' },
         { id: 'BK-004', student: 'Andres Bonifacio', type: 'PDC', branch: 'Lipa Branch', date: '2024-03-23', time: '10:00 AM - 12:00 PM', status: 'Cancelled', amount: 'P 4,500', paymentType: 'Full Payment', paymentMethod: 'GCash' },
         { id: 'BK-005', student: 'Emilio Aguinaldo', type: 'TDC', branch: 'Lipa Branch', date: '2024-03-24', time: '01:00 PM - 05:00 PM', status: 'Confirmed', amount: 'P 2,500', paymentType: 'Down Payment', paymentMethod: 'GCash' },
     ]);

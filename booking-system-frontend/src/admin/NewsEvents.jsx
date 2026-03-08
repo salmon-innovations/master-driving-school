@@ -2,12 +2,17 @@ import React, { useState, useMemo, useEffect } from 'react';
 import './css/news.css';
 import { newsAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
+import Pagination from './components/Pagination';
+
+const NEWS_PAGE_SIZE = 10;
 
 const NewsEvents = () => {
     const { showNotification } = useNotification();
     const [newsSearchTerm, setNewsSearchTerm] = useState('');
     const [activeNewsCategory, setActiveNewsCategory] = useState('All');
     const [showNewsModal, setShowNewsModal] = useState(false);
+    const [newsPage, setNewsPage] = useState(1);
+    const [videosPage, setVideosPage] = useState(1);
     const [playingVideo, setPlayingVideo] = useState(null);
     const [editingNews, setEditingNews] = useState(null);
     const [newsFormData, setNewsFormData] = useState({
@@ -112,6 +117,20 @@ const NewsEvents = () => {
         }
     };
 
+    const handleBroadcast = async (id) => {
+        if (!window.confirm('Are you sure you want to email this to ALL students? This cannot be undone.')) return;
+        try {
+            showNotification('Sending emails... Please wait', 'info');
+            const res = await newsAPI.broadcast(id);
+            if (res.success) {
+                showNotification(`Successfully broadcasted to ${res.sentCount} students.`, 'success');
+            }
+        } catch (error) {
+            showNotification('Failed to send broadcast emails', 'error');
+            console.error(error);
+        }
+    };
+
     const getTagColor = (tag) => {
         switch (tag) {
             case 'EVENT': return { background: 'rgba(22, 163, 74, 0.1)', color: '#16a34a' };
@@ -121,6 +140,8 @@ const NewsEvents = () => {
     };
 
     const filteredNews = useMemo(() => {
+        setNewsPage(1);
+        setVideosPage(1);
         return newsData.filter(item => {
             const matchesSearch = item.title.toLowerCase().includes(newsSearchTerm.toLowerCase()) ||
                 item.description.toLowerCase().includes(newsSearchTerm.toLowerCase());
@@ -194,7 +215,12 @@ const NewsEvents = () => {
             </div>
 
             {/* News Grid */}
-            {(activeNewsCategory === 'All' || activeNewsCategory === 'News & Event') && (
+            {(activeNewsCategory === 'All' || activeNewsCategory === 'News & Event') && (() => {
+                const newsItems = filteredNews.filter(n => n.type !== 'Promotional Video');
+                const newsTotalPages = Math.ceil(newsItems.length / NEWS_PAGE_SIZE);
+                const pagedNews = newsItems.slice((newsPage - 1) * NEWS_PAGE_SIZE, newsPage * NEWS_PAGE_SIZE);
+                return (
+                <div>
                 <div className="news-grid-prime">
                     {loading ? (
                         <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '4rem' }}>
@@ -202,7 +228,7 @@ const NewsEvents = () => {
                             <p style={{ marginTop: '1rem', color: '#94a3b8' }}>Synchronizing with database...</p>
                         </div>
                     ) : filteredNews.filter(n => n.type !== 'Promotional Video').length > 0 ? (
-                        filteredNews.filter(n => n.type !== 'Promotional Video').map((news) => (
+                        pagedNews.map((news) => (
                             <div key={news.id} className="news-card-prime">
                                 <div className="card-actions-top">
                                     <div className="tag-badge" style={{
@@ -219,7 +245,10 @@ const NewsEvents = () => {
                                 <p>{news.description}</p>
                                 <div className="card-footer-prime">
                                     <span className="date-meta">{new Date(news.published_at).toLocaleDateString()} • {news.interactions || '0 views'}</span>
-                                    <span className="edit-link" onClick={() => handleOpenModal(news)}>Modify</span>
+                                    <div style={{ display: 'flex', gap: '15px' }}>
+                                        <span className="edit-link" onClick={() => handleBroadcast(news.id)} style={{ color: '#10b981' }}>Email All</span>
+                                        <span className="edit-link" onClick={() => handleOpenModal(news)}>Modify</span>
+                                    </div>
                                 </div>
                             </div>
                         ))
@@ -229,18 +258,31 @@ const NewsEvents = () => {
                         </div>
                     )}
                 </div>
-            )}
+                <Pagination
+                    currentPage={newsPage}
+                    totalPages={newsTotalPages}
+                    onPageChange={setNewsPage}
+                    totalItems={newsItems.length}
+                    pageSize={NEWS_PAGE_SIZE}
+                />
+                </div>
+                );
+            })()}
 
             {/* Combined Videos Section */}
-            {(activeNewsCategory === 'All' || activeNewsCategory === 'Promotional Video') && (
+            {(activeNewsCategory === 'All' || activeNewsCategory === 'Promotional Video') && (() => {
+                const videoItems = filteredNews.filter(n => n.type === 'Promotional Video');
+                const videoTotalPages = Math.ceil(videoItems.length / NEWS_PAGE_SIZE);
+                const pagedVideos = videoItems.slice((videosPage - 1) * NEWS_PAGE_SIZE, videosPage * NEWS_PAGE_SIZE);
+                return (
                 <>
                     <div className="section-header-prime" style={{ marginTop: activeNewsCategory === 'Promotional Video' ? '0' : '4rem' }}>
                         <h2>Promotional Video</h2>
                     </div>
 
                     <div className="videos-grid-prime">
-                        {filteredNews.filter(n => n.type === 'Promotional Video').length > 0 ? (
-                            filteredNews.filter(n => n.type === 'Promotional Video').map((video) => (
+                        {videoItems.length > 0 ? (
+                            pagedVideos.map((video) => (
                                 <div key={video.id} className="video-card-prime" style={{ display: 'flex', flexDirection: 'column' }}>
                                     <div className="card-actions-top" style={{ position: 'absolute', top: 10, right: 10, zIndex: 10 }}>
                                         <button className="delete-mini-btn" onClick={() => handleDeleteNews(video.id)} title="Delete Video">
@@ -273,9 +315,12 @@ const NewsEvents = () => {
                                         </div>
                                         <h3>{video.title}</h3>
                                         <p>{video.description}</p>
-                                        <div className="card-footer-prime" style={{ marginTop: 'auto', paddingTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #f1f5f9' }}>
+                                        <div className="card-footer-prime" style={{ marginTop: 'auto', paddingTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                             <span className="date-meta">{new Date(video.published_at).toLocaleDateString()} • {video.interactions || '0 views'}</span>
-                                            <span className="edit-link" onClick={() => handleOpenModal(video)}>Modify</span>
+                                            <div style={{ display: 'flex', gap: '15px' }}>
+                                                <span className="edit-link" onClick={() => handleBroadcast(video.id)} style={{ color: '#10b981' }}>Email All</span>
+                                                <span className="edit-link" onClick={() => handleOpenModal(video)}>Modify</span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -286,8 +331,16 @@ const NewsEvents = () => {
                             </div>
                         )}
                     </div>
+                    <Pagination
+                        currentPage={videosPage}
+                        totalPages={videoTotalPages}
+                        onPageChange={setVideosPage}
+                        totalItems={videoItems.length}
+                        pageSize={NEWS_PAGE_SIZE}
+                    />
                 </>
-            )}
+                );
+            })()}
 
             {showNewsModal && (
                 <NewsModal
@@ -356,8 +409,19 @@ const NewsModal = ({ isOpen, onClose, onSubmit, formData, setFormData, isEditing
         <div className="news-modal-overlay">
             <div className="news-modal-container animate-slide-up">
                 <div className="news-modal-header">
-                    <h2>{isEditing ? 'Edit Post' : 'Post New Announcement'}</h2>
-                    <button className="close-btn" onClick={onClose}>&times;</button>
+                    <div className="modal-header-left">
+                        <div className="modal-header-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path><line x1="6" y1="1" x2="6" y2="4"></line><line x1="10" y1="1" x2="10" y2="4"></line><line x1="14" y1="1" x2="14" y2="4"></line></svg>
+                        </div>
+                        <div>
+                            <h2>{isEditing ? 'Edit Post' : 'Post New Announcement'}</h2>
+                        </div>
+                    </div>
+                    <div className="modal-header-right">
+                        <button className="close-btn" onClick={onClose}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                    </div>
                 </div>
                 <form onSubmit={onSubmit}>
                     <div className="news-modal-body">

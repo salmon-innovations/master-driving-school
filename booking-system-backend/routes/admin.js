@@ -19,12 +19,19 @@ const {
   getFunnelData,
   getCourseDistribution,
   getBranchPerformance,
+  getNotifications,
+  markBookingAsPaid,
+  sendReceiptEmail,
+  getEmailContent,
+  updateEmailContent,
+  getTodayStudents,
+  getStudentDetail,
 } = require('../controllers/adminController');
 const { authenticateToken } = require('../middleware/auth');
 
 // Middleware to check if user is admin
 const isAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hrm' && req.user.role !== 'staff') {
+  if (req.user.role !== 'admin' && req.user.role !== 'staff') {
     return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
   }
   next();
@@ -58,6 +65,9 @@ router.get('/enrollments', getEnrollmentData);
 // Get best selling courses
 router.get('/best-selling-courses', getBestSellingCourses);
 
+// Get notifications
+router.get('/notifications', getNotifications);
+
 // User management routes
 router.post('/users', createUser);
 router.put('/users/:id', updateUser);
@@ -73,9 +83,25 @@ router.get('/transactions', getAllTransactions);
 // Unpaid bookings
 router.get('/unpaid-bookings', getUnpaidBookings);
 
+// Mark booking as fully paid (collect remaining balance)
+router.patch('/bookings/:id/mark-paid', markBookingAsPaid);
+
+// Send payment receipt email
+router.post('/bookings/:id/send-receipt', sendReceiptEmail);
+
 // Analytics Routes
 router.get('/analytics/funnel', getFunnelData);
 router.get('/analytics/course-distribution', getCourseDistribution);
 router.get('/analytics/branch-performance', getBranchPerformance);
+
+// Email content configuration (admin only)
+router.get('/email-content', getEmailContent);
+router.put('/email-content', updateEmailContent);
+
+// Today's students with active schedule
+router.get('/today-students', getTodayStudents);
+
+// Full student detail (personal info + bookings/payment)
+router.get('/student-detail/:studentId', getStudentDetail);
 
 module.exports = router;

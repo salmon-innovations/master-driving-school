@@ -175,12 +175,6 @@ const guestCheckout = async (req, res) => {
       return res.status(400).json({ error: 'Please provide all required fields.' });
     }
 
-    const isMotorcyclePDC = courseCategory?.toLowerCase().includes('motorcycle') || courseType?.toLowerCase().includes('motorcycle');
-
-    if (!isMotorcyclePDC && (!scheduleSlotId || !scheduleDate)) {
-      return res.status(400).json({ error: 'Please select a schedule.' });
-    }
-
     const parsedBranchId = branchId ? parseInt(branchId, 10) : null;
 
     await client.query('BEGIN');
@@ -246,20 +240,20 @@ const guestCheckout = async (req, res) => {
          WHERE id = $1 AND available_slots > 0`,
         [scheduleSlotId]
       );
+    }
 
-      // 6. Day 2 schedule if applicable
-      if (scheduleSlotId2 && scheduleDate2) {
-        await client.query(
-          `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
-           VALUES ($1, $2, 'enrolled')`,
-          [scheduleSlotId2, newUser.id]
-        );
-        await client.query(
-          `UPDATE schedule_slots SET available_slots = available_slots - 1, updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1 AND available_slots > 0`,
-          [scheduleSlotId2]
-        );
-      }
+    // 6. Day 2 schedule if applicable
+    if (scheduleSlotId2 && scheduleDate2) {
+      await client.query(
+        `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
+         VALUES ($1, $2, 'enrolled')`,
+        [scheduleSlotId2, newUser.id]
+      );
+      await client.query(
+        `UPDATE schedule_slots SET available_slots = available_slots - 1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND available_slots > 0`,
+        [scheduleSlotId2]
+      );
     }
 
     await client.query('COMMIT');
@@ -267,11 +261,7 @@ const guestCheckout = async (req, res) => {
     // 7. Send Guest email WITHOUT login details
     const courseResult = await pool.query('SELECT name, category FROM courses WHERE id = $1', [courseId]);
     const branchResult = await pool.query('SELECT name, address FROM branches WHERE id = $1', [parsedBranchId]);
-
-    let slotResult = { rows: [] };
-    if (scheduleSlotId) {
-      slotResult = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [scheduleSlotId]);
-    }
+    const slotResult = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [scheduleSlotId]);
 
     let scheduleSession2Email = null, scheduleTime2Email = null, scheduleDate2Email = null;
     if (scheduleSlotId2) {
@@ -288,9 +278,9 @@ const guestCheckout = async (req, res) => {
         courseType,
         branchName: branchResult.rows[0]?.name || 'N/A',
         branchAddress: branchResult.rows[0]?.address || '',
-        scheduleDate: isMotorcyclePDC ? 'Admin Assigned' : scheduleDate,
-        scheduleSession: isMotorcyclePDC ? 'TBA' : (slotResult.rows[0]?.session || 'N/A'),
-        scheduleTime: isMotorcyclePDC ? 'TBA' : (slotResult.rows[0]?.time_range || 'N/A'),
+        scheduleDate,
+        scheduleSession: slotResult.rows[0]?.session || 'N/A',
+        scheduleTime: slotResult.rows[0]?.time_range || 'N/A',
         scheduleDate2: scheduleDate2Email,
         scheduleSession2: scheduleSession2Email,
         scheduleTime2: scheduleTime2Email,

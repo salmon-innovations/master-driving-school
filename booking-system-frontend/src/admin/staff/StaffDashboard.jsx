@@ -9,7 +9,7 @@ import NewsEvents from '../NewsEvents';
 import CRMManagement from '../CRM';
 import { useTheme } from '../../context/ThemeContext';
 import { useNotification } from '../../context/NotificationContext';
-import { authAPI, adminAPI } from '../../services/api';
+import { authAPI, adminAPI, notificationsAPI } from '../../services/api';
 import {
     AreaChart,
     Area,
@@ -118,27 +118,77 @@ const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
     });
 
     // Notifications State
-    const [notifications, setNotifications] = useState([
-        { id: 1, title: 'New Enrollment', message: 'Juan Dela Cruz signed up for TDC Course', time: '5 mins ago', type: 'info', read: false },
-        { id: 2, title: 'Payment Received', message: 'Maria Santos paid ₱2,500.00 for PDC', time: '12 mins ago', type: 'success', read: false },
-        { id: 3, title: 'System Alert', message: 'Scheduled maintenance this Sunday at 2 AM', time: '1 hour ago', type: 'warning', read: true },
-        { id: 4, title: 'New Lead', message: 'New inquiry from Quezon City branch', time: '3 hours ago', type: 'info', read: false }
-    ]);
+    const NOTIF_READ_KEY  = 'admin_notif_read';
+    const NOTIF_HIDE_KEY  = 'admin_notif_hidden';
+
+    const getReadIds    = () => JSON.parse(localStorage.getItem(NOTIF_READ_KEY)  || '[]');
+    const getHiddenIds  = () => JSON.parse(localStorage.getItem(NOTIF_HIDE_KEY) || '[]');
+
+    const [rawNotifications, setRawNotifications] = useState([]);
+    const [readIds,   setReadIds]   = useState(getReadIds);
+    const [hiddenIds, setHiddenIds] = useState(getHiddenIds);
+    const [notifLoading, setNotifLoading] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
 
+    const notifications = rawNotifications
+        .filter(n => !hiddenIds.includes(n.id))
+        .map(n => ({ ...n, read: readIds.includes(n.id) }));
+
+    const formatRelativeTime = (date) => {
+        if (!date || isNaN(date)) return 'just now';
+        const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+        if (diff < 60)       return `${diff}s ago`;
+        if (diff < 3600)     return `${Math.floor(diff / 60)} min ago`;
+        if (diff < 86400)    return `${Math.floor(diff / 3600)} hour${Math.floor(diff / 3600) > 1 ? 's' : ''} ago`;
+        return `${Math.floor(diff / 86400)}d ago`;
+    };
+
+    const fetchNotifications = async () => {
+        try {
+            setNotifLoading(true);
+            const res = await notificationsAPI.getAll();
+            if (res.success) {
+                setRawNotifications(
+                    res.notifications.map(n => ({
+                        ...n,
+                        time: formatRelativeTime(new Date(n.time)),
+                    }))
+                );
+            }
+        } catch (err) {
+            console.error('Failed to load notifications:', err);
+        } finally {
+            setNotifLoading(false);
+        }
+    };
+
     const markAsRead = (id) => {
-        setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+        const updated = [...new Set([...readIds, id])];
+        setReadIds(updated);
+        localStorage.setItem(NOTIF_READ_KEY, JSON.stringify(updated));
     };
 
     const deleteNotification = (id) => {
-        setNotifications(prev => prev.filter(n => n.id !== id));
+        const updated = [...new Set([...hiddenIds, id])];
+        setHiddenIds(updated);
+        localStorage.setItem(NOTIF_HIDE_KEY, JSON.stringify(updated));
     };
 
     const clearAllNotifications = () => {
-        setNotifications([]);
+        const allIds = rawNotifications.map(n => n.id);
+        const updatedHidden = [...new Set([...hiddenIds, ...allIds])];
+        setHiddenIds(updatedHidden);
+        localStorage.setItem(NOTIF_HIDE_KEY, JSON.stringify(updatedHidden));
     };
 
     const unreadCount = notifications.filter(n => !n.read).length;
+
+    // Fetch notifications on mount and auto-refresh every 60s
+    useEffect(() => {
+        fetchNotifications();
+        const interval = setInterval(fetchNotifications, 60000);
+        return () => clearInterval(interval);
+    }, []);
 
     // Fetch admin profile on mount
     useEffect(() => {
@@ -154,8 +204,7 @@ const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
                         branch: user.branchName || 'Main Office',
                         branchId: user.branchId || null,
                         role: user.role === 'admin' ? 'Super Admin' :
-                            user.role === 'hrm' ? 'HR Manager' :
-                                user.role === 'staff' ? 'Staff' : 'User',
+                            user.role === 'staff' ? 'Staff' : 'User',
                         rawRole: user.role || 'staff',
                         avatar: null
                     });
@@ -469,13 +518,35 @@ const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
                                     <div className="dropdown-overlay" onClick={() => setShowNotifications(false)}></div>
                                     <div className="notification-dropdown animate-dropdown">
                                         <div className="dropdown-header">
-                                            <h3>Notifications</h3>
-                                            {notifications.length > 0 && (
-                                                <button className="clear-all-btn" onClick={clearAllNotifications}>Clear All</button>
-                                            )}
+                                            <h3>
+                                                Notifications
+                                                {unreadCount > 0 && (
+                                                    <span style={{ marginLeft: 8, background: '#6366f1', color: '#fff', borderRadius: 99, fontSize: '0.65rem', fontWeight: 700, padding: '2px 7px' }}>
+                                                        {unreadCount}
+                                                    </span>
+                                                )}
+                                            </h3>
+                                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                <button
+                                                    className="clear-all-btn"
+                                                    title="Refresh"
+                                                    onClick={fetchNotifications}
+                                                    style={{ padding: '2px 6px', fontSize: '0.75rem' }}
+                                                >
+                                                    {notifLoading ? '…' : '↻'}
+                                                </button>
+                                                {notifications.length > 0 && (
+                                                    <button className="clear-all-btn" onClick={clearAllNotifications}>Clear All</button>
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="notifications-list">
-                                            {notifications.length > 0 ? (
+                                            {notifLoading && notifications.length === 0 ? (
+                                                <div className="no-notifications">
+                                                    <div className="empty-icon" style={{ fontSize: '1.5rem' }}>⟳</div>
+                                                    <p>Loading notifications…</p>
+                                                </div>
+                                            ) : notifications.length > 0 ? (
                                                 notifications.map(n => (
                                                     <div key={n.id} className={`notification-item ${n.read ? 'read' : 'unread'}`} onClick={() => markAsRead(n.id)}>
                                                         <div className={`status-dot ${n.type}`}></div>
@@ -500,7 +571,7 @@ const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
                                             ) : (
                                                 <div className="no-notifications">
                                                     <div className="empty-icon">🔔</div>
-                                                    <p>Inbox is empty</p>
+                                                    <p>No recent activity</p>
                                                 </div>
                                             )}
                                         </div>

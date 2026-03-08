@@ -1,4 +1,90 @@
 const pool = require('../config/db');
+const fs = require('fs');
+const path = require('path');
+
+// ─── Course Config (categories & types) ─────────────────────────────────────
+const CONFIG_FILE = path.join(__dirname, '../config/course_config.json');
+
+const DEFAULT_COURSE_CONFIG = {
+  categories: ['Basic', 'TDC', 'PDC', 'Promo'],
+  tdcTypes: [
+    { value: 'F2F', label: 'F2F (Face-to-Face)' },
+    { value: 'Online', label: 'Online' },
+  ],
+  pdcTypes: [
+    { value: 'Automatic', label: 'Automatic' },
+    { value: 'Manual', label: 'Manual' },
+    { value: 'V1-Tricycle', label: 'V1-Tricycle' },
+    { value: 'B1-Van/B2 - L300', label: 'B1 - Van/B2 - L300' },
+  ],
+  bundleTypes: [
+    { value: 'F2F+Motorcycle', label: 'F2F TDC + MOTOR (Motorcycle PDC)' },
+    { value: 'F2F+CarAT', label: 'F2F TDC + CAR AT (Car Automatic PDC)' },
+    { value: 'F2F+CarMT', label: 'F2F TDC + CAR MT (Car Manual PDC)' },
+    { value: 'Online+Motorcycle', label: 'OTDC + MOTOR (Motorcycle PDC)' },
+    { value: 'Online+CarAT', label: 'OTDC + CAR AT (Car Automatic PDC)' },
+    { value: 'Online+CarMT', label: 'OTDC + CAR MT (Car Manual PDC)' },
+  ],
+};
+
+const loadCourseConfig = () => {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const saved = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+      return { ...DEFAULT_COURSE_CONFIG, ...saved };
+    }
+  } catch (e) {
+    console.error('Failed to load course config:', e.message);
+  }
+  return DEFAULT_COURSE_CONFIG;
+};
+
+const saveCourseConfig = (config) => {
+  try {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  } catch (e) {
+    console.error('Failed to save course config:', e.message);
+    throw new Error('Failed to persist course configuration');
+  }
+};
+
+const getCourseConfig = async (req, res) => {
+  try {
+    res.json({ success: true, config: loadCourseConfig() });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to read course configuration' });
+  }
+};
+
+const updateCourseConfig = async (req, res) => {
+  try {
+    const { categories, tdcTypes, pdcTypes, bundleTypes } = req.body;
+    const current = loadCourseConfig();
+
+    const updated = {
+      categories: categories ?? current.categories,
+      tdcTypes: tdcTypes ?? current.tdcTypes,
+      pdcTypes: pdcTypes ?? current.pdcTypes,
+      bundleTypes: bundleTypes ?? current.bundleTypes,
+    };
+
+    // If categories changed, update the DB check constraint
+    const oldSorted = [...current.categories].sort().join(',');
+    const newSorted = [...updated.categories].sort().join(',');
+    if (categories && oldSorted !== newSorted) {
+      const catList = updated.categories.map(c => `'${c.replace(/'/g, "''")}'`).join(', ');
+      await pool.query('ALTER TABLE courses DROP CONSTRAINT IF EXISTS courses_category_check');
+      await pool.query(`ALTER TABLE courses ADD CONSTRAINT courses_category_check CHECK (category IN (${catList}))`);
+    }
+
+    saveCourseConfig(updated);
+    res.json({ success: true, config: updated });
+  } catch (error) {
+    console.error('Update course config error:', error);
+    res.status(500).json({ error: error.message || 'Failed to update course configuration' });
+  }
+};
+// ────────────────────────────────────────────────────────────────────────────
 
 // Get all courses
 const getAllCourses = async (req, res) => {
@@ -214,4 +300,6 @@ module.exports = {
   createCourse,
   updateCourse,
   deleteCourse,
+  getCourseConfig,
+  updateCourseConfig,
 };

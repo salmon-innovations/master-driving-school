@@ -457,6 +457,26 @@
     border-color: #fecaca !important;
 }
 
+.mini-slot-more {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-align: center;
+    color: var(--secondary-text);
+    padding: 4px 6px;
+    margin-top: 2px;
+    background: var(--bg-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px dashed var(--border-color);
+}
+
+.mini-slot-more:hover {
+    color: var(--primary-color);
+    background: rgba(67, 24, 255, 0.05);
+    border-color: rgba(67, 24, 255, 0.2);
+}
+
 /* =============================================
    SLOTS PANEL (right side)
    ============================================= */
@@ -816,46 +836,58 @@
 }
 
 .student-list-modal {
-    width: 680px;
+    width: 900px;
+    max-width: 96%;
 }
 
 .modal-header {
-    padding: 28px;
-    background: var(--bg-color);
-    border-bottom: 1px solid var(--border-color);
+    padding: 20px 28px !important;
+    background: linear-gradient(135deg, #1a4fba 0%, #1e3a8a 100%) !important;
+    border-bottom: none !important;
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
+    flex-shrink: 0;
+    position: relative;
+    border-radius: inherit;
 }
 
 .modal-header h2 {
-    font-size: 1.35rem;
-    font-weight: 800;
-    color: var(--text-color);
-    letter-spacing: -0.025em;
-    margin: 0;
+    font-size: 1.15rem !important;
+    font-weight: 800 !important;
+    color: #ffffff !important;
+    letter-spacing: -0.01em;
+    margin: 0 0 2px !important;
+}
+
+.modal-header p {
+    color: rgba(255, 255, 255, 0.65) !important;
+    font-size: 0.82rem !important;
+    margin: 0 !important;
 }
 
 .close-modal {
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
-    background: #f1f5f9;
-    border: 1px solid var(--border-color);
-    color: #64748b;
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px;
+    border-radius: 10px !important;
+    background: rgba(255, 255, 255, 0.12) !important;
+    border: 1px solid rgba(255, 255, 255, 0.22) !important;
+    color: #fff !important;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.3rem;
+    font-size: 1.25rem;
     cursor: pointer;
     transition: all 0.2s;
     flex-shrink: 0;
+    padding: 0;
 }
 
 .close-modal:hover {
-    background: #ef4444;
-    color: white;
-    border-color: #ef4444;
+    background: rgba(239, 68, 68, 0.75) !important;
+    border-color: transparent !important;
+    color: #fff !important;
     transform: rotate(90deg);
 }
 
@@ -869,12 +901,13 @@
 }
 
 .modal-footer {
-    padding: 20px 28px;
+    padding: 16px 28px;
     display: flex;
     justify-content: flex-end;
     gap: 10px;
     border-top: 1px solid var(--border-color);
     background: var(--bg-color);
+    flex-shrink: 0;
 }
 
 /* Form Controls */
@@ -968,31 +1001,58 @@
     background: #f8fafc;
     border-radius: 16px;
     border: 1px solid var(--border-color);
-    overflow: hidden;
+    overflow-x: auto;
 }
 
 .student-table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
 }
 
 .student-table th {
     text-align: left;
-    padding: 16px 20px;
-    font-size: 0.72rem;
+    padding: 13px 18px;
+    font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.09em;
     font-weight: 800;
     color: #64748b;
     background: #f1f5f9;
     border-bottom: 1px solid #e2e8f0;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 2;
 }
 
 .student-table td {
-    padding: 16px 20px;
-    font-size: 0.88rem;
+    padding: 14px 18px;
+    font-size: 0.87rem;
     color: #1e293b;
     border-bottom: 1px solid #f1f5f9;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.student-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.student-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 700;
+    flex-shrink: 0;
 }
 
 .student-table tr:last-child td {

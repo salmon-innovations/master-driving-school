@@ -24,7 +24,6 @@ import Profile from './pages/Profile'
 import Payment from './pages/Payment'
 import Schedule from './pages/Schedule'
 import Admin from './admin/Admin'
-import HRDashboard from './admin/hr/HRDashboard'
 import StaffDashboard from './admin/staff/StaffDashboard'
 import { ThemeProvider } from './context/ThemeContext'
 import { NotificationProvider } from './context/NotificationContext'
@@ -39,7 +38,7 @@ function App() {
     } catch { return [] }
   })
   const [showCart, setShowCart] = useState(false)
-  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('userToken'))
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState(sessionStorage.getItem('pendingEmail') || '')
   const [lockedAccountEmail, setLockedAccountEmail] = useState(sessionStorage.getItem('lockedEmail') || '')
   const [preSelectedBranch, setPreSelectedBranch] = useState(() => {
@@ -130,12 +129,6 @@ function App() {
     sessionStorage.setItem('lockedEmail', lockedAccountEmail)
   }, [lockedAccountEmail])
 
-  // Check if user is logged in on mount
-  useEffect(() => {
-    const userToken = localStorage.getItem('userToken')
-    setIsLoggedIn(!!userToken)
-  }, [])
-
   // Clear guest cart when navigating away from checkout flow
   useEffect(() => {
     if (!isLoggedIn) {
@@ -192,13 +185,12 @@ function App() {
       case 'profile': return <Profile onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
       case 'payment': return <Payment cart={cart} setCart={setCart} onNavigate={setCurrentPage} isLoggedIn={isLoggedIn} preSelectedBranch={preSelectedBranch} scheduleSelection={scheduleSelection} />
       case 'admin': return <Admin onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
-      case 'hr-dashboard': return <HRDashboard onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
       case 'staff-dashboard': return <StaffDashboard onNavigate={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />
       default: return <Home onNavigate={setCurrentPage} />
     }
   }
 
-  const isAuthPage = ['signin', 'signup', 'guest-enrollment', 'verify-email', 'forgot-password', 'lock-account', 'admin', 'hr-dashboard', 'staff-dashboard'].includes(currentPage)
+  const isAuthPage = ['signin', 'signup', 'guest-enrollment', 'verify-email', 'forgot-password', 'lock-account', 'admin', 'staff-dashboard'].includes(currentPage)
 
   return (
     <ThemeProvider>

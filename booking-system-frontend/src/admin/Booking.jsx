@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import './css/booking.css';
 import { adminAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
+import Pagination from './components/Pagination';
+
+const BK_PAGE_SIZE = 10;
 const logo = '/images/logo.png';
 
 const Booking = () => {
@@ -13,6 +16,7 @@ const Booking = () => {
     const [bookings, setBookings] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [bkPage, setBkPage] = useState(1);
 
     // Fetch bookings from database
     useEffect(() => {
@@ -27,18 +31,19 @@ const Booking = () => {
             if (response.success) {
                 // Transform database fields to match UI expectations
                 const transformedBookings = response.bookings.map(booking => {
-                    // Normalize status - map legacy statuses to current ones
+                    // Normalize status
                     const rawStatus = (booking.status || 'collectable').toLowerCase();
                     let status;
-                    if (rawStatus === 'paid' || rawStatus === 'confirmed' || rawStatus === 'completed') {
+                    if (rawStatus === 'pending') {
+                        status = 'Pending'; // StarPay QR issued but not yet paid
+                    } else if (rawStatus === 'paid' || rawStatus === 'confirmed' || rawStatus === 'completed') {
                         status = 'Paid';
                     } else if (rawStatus === 'cancelled') {
                         status = 'Cancelled';
                     } else {
-                        // pending, collectable, or any other → Collectable
                         status = 'Collectable';
                     }
-                    // Automatically set to Paid if payment type is Full Payment
+                    // Only auto-promote collectable (not pending) to Paid for Full Payment
                     if (booking.payment_type === 'Full Payment' && status === 'Collectable') {
                         status = 'Paid';
                     }
@@ -59,6 +64,7 @@ const Booking = () => {
                     const formatD = (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
                     let scheduleDateDisplay = booking.booking_date ? formatD(booking.booking_date) : 'N/A';
                     let scheduleDay2 = null;
+                    let scheduleTime = booking.booking_time || '';
 
                     const details = booking.schedule_details || booking.schedule_dates;
                     if (details && details.length > 0) {
@@ -70,18 +76,20 @@ const Booking = () => {
                                 scheduleDateDisplay = formatD(sortedDates[0]);
                                 if (sortedDates.length > 1) scheduleDay2 = formatD(sortedDates[1]);
                             } else if (firstDetail && typeof firstDetail === 'object') {
-                                // New objects with date and end_date
                                 const type = booking.course_name?.includes('TDC') ? 'TDC' : 'PDC';
+                                if (firstDetail.time_range) scheduleTime = firstDetail.time_range;
 
                                 if (type === 'PDC' && details.length > 1) {
-                                    // PDC has multiple distinct slots
+                                    // PDC: multiple distinct slots
                                     const sortedDates = [...new Set(details.map(d => new Date(d.date).toISOString().split('T')[0]))].sort();
                                     scheduleDateDisplay = formatD(sortedDates[0]);
                                     if (sortedDates.length > 1) scheduleDay2 = formatD(sortedDates[1]);
                                 } else {
-                                    // TDC has one slot but may span across end_date
+                                    // TDC: single slot spanning date → end_date
                                     scheduleDateDisplay = formatD(firstDetail.date);
-                                    if (firstDetail.end_date && new Date(firstDetail.end_date).toISOString().split('T')[0] !== new Date(firstDetail.date).toISOString().split('T')[0]) {
+                                    if (firstDetail.end_date &&
+                                        new Date(firstDetail.end_date).toISOString().split('T')[0] !==
+                                        new Date(firstDetail.date).toISOString().split('T')[0]) {
                                         scheduleDay2 = formatD(firstDetail.end_date);
                                     }
                                 }
@@ -89,21 +97,59 @@ const Booking = () => {
                         } catch (e) {
                             console.error('Error parsing schedule dates:', e);
                         }
+                    } else {
+                        // No enrollment yet — fall back to notes-based slot data (pending StarPay)
+                        const ns = booking.notes_slot;
+                        const ns2 = booking.notes_slot2;
+                        if (ns) {
+                            scheduleDateDisplay = formatD(ns.date);
+                            if (ns.time_range) scheduleTime = ns.time_range;
+                            if (ns2) {
+                                // PDC 2-day: slot2 has its own date
+                                scheduleDay2 = formatD(ns2.date);
+                            } else if (ns.end_date &&
+                                new Date(ns.end_date).toISOString().split('T')[0] !==
+                                new Date(ns.date).toISOString().split('T')[0]) {
+                                // TDC: single slot with end_date
+                                scheduleDay2 = formatD(ns.end_date);
+                            }
+                        }
                     }
+
+                    let category = booking.course_name?.includes('TDC') ? 'TDC' : booking.course_name?.includes('PDC') ? 'PDC' : 'Course';
+
+                    let specificCategory = category;
+                    if (category === 'PDC' && booking.course_name) {
+                        const nameUpper = booking.course_name.toUpperCase();
+                        if (nameUpper.includes('MOTORCYCLE')) specificCategory = 'PDC Motorcycle';
+                        else if (nameUpper.includes('CAR')) specificCategory = 'PDC Car';
+                        else if (nameUpper.includes('B1') || nameUpper.includes('B2')) specificCategory = 'PDC B1/B2';
+                    }
+
+                    let courseTypeLabel = booking.course_type ? ` - ${booking.course_type.toLowerCase() === 'f2f' ? 'F2F' : booking.course_type.charAt(0).toUpperCase() + booking.course_type.slice(1)}` : '';
+                    let displayType = specificCategory + courseTypeLabel;
 
                     return {
                         id: `BK-${String(booking.id).padStart(3, '0')}`,
                         student: booking.student_name || 'N/A',
-                        type: booking.course_name?.includes('TDC') ? 'TDC' : booking.course_name?.includes('PDC') ? 'PDC' : 'Course',
+                        typeCategory: category,
+                        type: displayType,
+                        fullCourseName: booking.course_name || 'N/A',
                         branch: branchName,
                         date: scheduleDateDisplay,
                         date2: scheduleDay2,
-                        time: booking.booking_time || '',
+                        time: scheduleTime,
                         status: status,
                         amount: `₱ ${Number(booking.total_amount || 0).toLocaleString()}`,
                         paymentType: booking.payment_type || 'Full Payment',
                         paymentMethod: booking.payment_method || 'Online Payment',
-                        rawId: booking.id
+                        rawId: booking.id,
+                        // Extra fields for payment history panel
+                        coursePrice: Number(booking.course_price || 0),
+                        amountPaid: Number(booking.total_amount || 0),
+                        paymentDate: booking.created_at,
+                        transactionId: booking.transaction_id || null,
+                        rawNotes: booking.notes || '',
                     };
                 });
                 setBookings(transformedBookings);
@@ -126,6 +172,12 @@ const Booking = () => {
         return matchesSearch && matchesStatus;
     });
 
+    // Reset to page 1 whenever filters change
+    useEffect(() => { setBkPage(1); }, [searchTerm, statusFilter]);
+
+    const bkTotalPages = Math.ceil(filteredBookings.length / BK_PAGE_SIZE);
+    const pagedBookings = filteredBookings.slice((bkPage - 1) * BK_PAGE_SIZE, bkPage * BK_PAGE_SIZE);
+
     const updateStatus = async (id, newStatus) => {
         try {
             // Find the booking to get the raw database ID
@@ -141,9 +193,26 @@ const Booking = () => {
         }
     };
 
-    const handleViewClick = (booking) => {
+    const handleViewClick = async (booking) => {
         setSelectedBooking(booking);
         setShowViewModal(true);
+        // Re-fetch in background so payment fields are always fresh
+        try {
+            const response = await adminAPI.getAllBookings(null, 100);
+            if (response.success) {
+                const fresh = response.bookings.find(b => b.id === booking.rawId);
+                if (fresh) {
+                    setSelectedBooking(prev => ({
+                        ...prev,
+                        coursePrice: Number(fresh.course_price || 0),
+                        amountPaid: Number(fresh.total_amount || 0),
+                        paymentDate: fresh.created_at,
+                        transactionId: fresh.transaction_id || null,
+                        rawNotes: fresh.notes || '',
+                    }));
+                }
+            }
+        } catch (_) { /* silent */ }
     };
 
     const handleExport = () => {
@@ -251,11 +320,20 @@ const Booking = () => {
                 <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowViewModal(false)}>
                     <div className="bk-modal">
                         <div className="bk-modal-header">
-                            <div>
-                                <h2>Booking Details</h2>
-                                <p>{selectedBooking.id}</p>
+                            <div className="modal-header-left">
+                                <div className="modal-header-icon">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                                </div>
+                                <div>
+                                    <h2>Booking Details</h2>
+                                    <p>{selectedBooking.id}</p>
+                                </div>
                             </div>
-                            <button className="bk-modal-close" onClick={() => setShowViewModal(false)}>&times;</button>
+                            <div className="modal-header-right">
+                                <button className="bk-modal-close" onClick={() => setShowViewModal(false)}>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                            </div>
                         </div>
                         <div className="bk-modal-body">
                             <div className="bk-modal-status-center">
@@ -287,8 +365,8 @@ const Booking = () => {
                                             </svg>
                                             <label>Course</label>
                                         </div>
-                                        <div className="bk-modal-card-value">{selectedBooking.type}</div>
-                                        <div className="bk-modal-card-sub">Training Program</div>
+                                        <div className="bk-modal-card-value bg-gradient-to-r from-blue-600 to-indigo-600 text-transparent bg-clip-text font-black">{selectedBooking.type}</div>
+                                        <div className="bk-modal-card-sub text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded inline-block mt-2 font-medium">{selectedBooking.fullCourseName}</div>
                                     </div>
 
                                     <div className="bk-modal-card">
@@ -303,7 +381,7 @@ const Booking = () => {
                                     </div>
                                 </div>
 
-                                {/* Payment Information */}
+                                {/* Payment History */}
                                 <div className="bk-modal-payment">
                                     <div className="bk-modal-payment-header">
                                         <div className="bk-modal-card-label">
@@ -311,22 +389,90 @@ const Booking = () => {
                                                 <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
                                                 <line x1="1" y1="10" x2="23" y2="10"></line>
                                             </svg>
-                                            <label>Payment Details</label>
+                                            <label>Payment History</label>
                                         </div>
                                         <span className="bk-verified-badge">VERIFIED</span>
                                     </div>
-                                    <div className="bk-modal-payment-row main">
-                                        <span>Amount</span>
-                                        <span className="bk-payment-amount">{selectedBooking.amount}</span>
-                                    </div>
-                                    <div className="bk-modal-payment-row">
-                                        <span>Payment Type</span>
-                                        <span className="bk-payment-value">{selectedBooking.paymentType}</span>
-                                    </div>
-                                    <div className="bk-modal-payment-row">
-                                        <span>Method</span>
-                                        <span className="bk-payment-value">{selectedBooking.paymentMethod}</span>
-                                    </div>
+
+                                    {/* Course price header + table body */}
+                                    {(() => {
+                                        // Fallback: parse the always-present `amount` string (e.g. "₱ 700")
+                                        const amountFallback = parseFloat(
+                                            (selectedBooking.amount || '').replace(/[^0-9.]/g, '')
+                                        ) || 0;
+                                        const coursePrice = Number(selectedBooking.coursePrice) || amountFallback;
+                                        const amountPaid  = Number(selectedBooking.amountPaid)  || amountFallback;
+                                        const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+                                        const isDown = (selectedBooking.paymentType || '').toLowerCase().includes('down');
+                                        const hasRescheduleFee = (selectedBooking.rawNotes || '').toLowerCase().includes('rescheduling fee');
+                                        const balance = coursePrice - amountPaid;
+                                        const paidInFull = amountPaid >= coursePrice && coursePrice > 0;
+
+                                        const rowStyle = { display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 1fr', gap: '6px', padding: '8px 6px', borderBottom: '1px solid var(--border-color)', alignItems: 'center' };
+                                        const valStyle = { fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-color)' };
+                                        const dateStyle = { fontSize: '0.8rem', color: 'var(--secondary-text)', fontWeight: 500 };
+
+                                        return (
+                                            <>
+                                                {/* Course price header */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0 10px', borderBottom: '2px solid var(--border-color)', marginBottom: '6px' }}>
+                                                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Course Total Price</span>
+                                                    <span style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-color)' }}>₱{coursePrice.toLocaleString()}</span>
+                                                </div>
+
+                                                {/* Column headers */}
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 1fr', gap: '6px', padding: '5px 6px', background: 'var(--bg-color)', borderRadius: '6px', marginBottom: '4px' }}>
+                                                    {['Date', 'Type', 'Method', 'Amount'].map(h => (
+                                                        <span key={h} style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{h}</span>
+                                                    ))}
+                                                </div>
+
+                                                {/* Row 1 — initial payment */}
+                                                <div style={rowStyle}>
+                                                    <span style={dateStyle}>{fmtDate(selectedBooking.paymentDate)}</span>
+                                                    <span style={{ ...valStyle, color: isDown ? '#f59e0b' : '#16a34a' }}>{isDown ? 'Downpayment' : 'Full Payment'}</span>
+                                                    <span style={valStyle}>{selectedBooking.paymentMethod}</span>
+                                                    <span style={{ ...valStyle, color: '#16a34a', fontWeight: 800 }}>₱{amountPaid.toLocaleString()}</span>
+                                                </div>
+
+                                                {/* Row 2 — rescheduling fee (if noted) */}
+                                                {hasRescheduleFee && (
+                                                    <div style={rowStyle}>
+                                                        <span style={dateStyle}>—</span>
+                                                        <span style={{ ...valStyle, color: '#ef4444' }}>Reschedule Fee</span>
+                                                        <span style={valStyle}>Cash</span>
+                                                        <span style={{ ...valStyle, color: '#ef4444', fontWeight: 800 }}>₱1,000</span>
+                                                    </div>
+                                                )}
+
+                                                {/* Outstanding balance row */}
+                                                {!paidInFull && balance > 0 && (
+                                                    <div style={{ ...rowStyle, background: '#fff7ed', borderRadius: '6px', border: '1px solid #fed7aa', borderBottom: '1px solid #fed7aa' }}>
+                                                        <span style={{ ...dateStyle, color: '#c2410c' }}>Outstanding</span>
+                                                        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#c2410c' }}>Balance Due</span>
+                                                        <span style={{ fontSize: '0.82rem', color: '#c2410c' }}>—</span>
+                                                        <span style={{ fontSize: '0.88rem', fontWeight: 800, color: '#ea580c' }}>₱{balance.toLocaleString()}</span>
+                                                    </div>
+                                                )}
+
+                                                {/* Total paid summary */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 6px 4px', marginTop: '4px' }}>
+                                                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--secondary-text)' }}>
+                                                        {paidInFull ? '✅ Paid in Full' : 'Total Paid'}
+                                                    </span>
+                                                    <span style={{ fontWeight: 800, fontSize: '1rem', color: paidInFull ? '#16a34a' : '#f59e0b' }}>
+                                                        ₱{(amountPaid + (hasRescheduleFee ? 1000 : 0)).toLocaleString()}
+                                                    </span>
+                                                </div>
+
+                                                {selectedBooking.transactionId && (
+                                                    <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', padding: '4px 6px 0' }}>
+                                                        Transaction ID: <strong>{selectedBooking.transactionId}</strong>
+                                                    </div>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
                                 </div>
 
                                 {/* Schedule Information */}
@@ -406,6 +552,16 @@ const Booking = () => {
                         <span className="label">Paid</span>
                         <span className="value green">{loading ? <span className="bk-skeleton-text">--</span> : bookings.filter(b => b.status === 'Paid').length}</span>
                         <span className="mini-stat-subtitle">Completed payments</span>
+                    </div>
+                </div>
+                <div className="mini-stat">
+                    <div className="mini-stat-icon red">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                    </div>
+                    <div className="mini-stat-content">
+                        <span className="label">Cancelled</span>
+                        <span className="value red">{loading ? <span className="bk-skeleton-text">--</span> : bookings.filter(b => b.status === 'Cancelled').length}</span>
+                        <span className="mini-stat-subtitle">Cancelled bookings</span>
                     </div>
                 </div>
             </div>
@@ -492,7 +648,7 @@ const Booking = () => {
                                         </div>
                                     </td>
                                 </tr>
-                            ) : filteredBookings.map(booking => (
+                            ) : pagedBookings.map(booking => (
                                 <tr key={booking.id} className="bk-table-row">
                                     <td className="bk-id">{booking.id}</td>
                                     <td>
@@ -506,7 +662,7 @@ const Booking = () => {
                                         </div>
                                     </td>
                                     <td>
-                                        <span className={`type-badge ${booking.type.toLowerCase()}`}>
+                                        <span className={`type-badge ${booking.typeCategory.toLowerCase()}`}>
                                             {booking.type}
                                         </span>
                                     </td>
@@ -569,6 +725,13 @@ const Booking = () => {
                             ))}
                         </tbody>
                     </table>
+                    <Pagination
+                        currentPage={bkPage}
+                        totalPages={bkTotalPages}
+                        onPageChange={setBkPage}
+                        totalItems={filteredBookings.length}
+                        pageSize={BK_PAGE_SIZE}
+                    />
                 </div>
             </div>
         </div>

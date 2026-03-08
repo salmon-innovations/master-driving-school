@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import './css/user.css';
 import { adminAPI, branchesAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
+import Pagination from './components/Pagination';
+
+const USER_PAGE_SIZE = 10;
 
 const UserManagement = () => {
     const { showNotification } = useNotification();
@@ -10,6 +13,7 @@ const UserManagement = () => {
     const [users, setUsers] = useState([]);
     const [branches, setBranches] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [userPage, setUserPage] = useState(1);
     const [showModal, setShowModal] = useState(false);
     const [showViewModal, setShowViewModal] = useState(false);
     const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -64,8 +68,6 @@ const UserManagement = () => {
                 if (user.role) {
                     if (user.role === 'walkin_student') {
                         roleDisplay = 'Walkin Student';
-                    } else if (user.role === 'hrm') {
-                        roleDisplay = 'HRM';
                     } else {
                         roleDisplay = user.role.charAt(0).toUpperCase() + user.role.slice(1);
                     }
@@ -76,7 +78,7 @@ const UserManagement = () => {
                     name: `${user.first_name} ${user.middle_name ? user.middle_name + ' ' : ''}${user.last_name}`.trim(),
                     email: user.email,
                     role: roleDisplay,
-                    branch: user.branch_name ? user.branch_name : (roleDisplay === 'Admin' ? 'All Branches' : (['HRM', 'Staff'].includes(roleDisplay) ? 'Not Assigned' : 'Not enrolled')),
+                    branch: user.branch_name ? user.branch_name : (roleDisplay === 'Admin' ? 'All Branches' : (roleDisplay === 'Staff' ? 'Not Assigned' : 'Not enrolled')),
                     branchId: user.branch_id,
                     status: user.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'Active',
                     lastLogin: user.last_login ? formatLastLogin(user.last_login) : 'Never',
@@ -240,8 +242,9 @@ const UserManagement = () => {
             newErrors.gender = 'Gender is required';
         }
 
-        // Branch validation
-        if (!userData.branch) {
+        // Branch validation (not required for non-Admin/non-Staff when editing)
+        const isStudentEdit = editingUser && !['Admin', 'Staff'].includes(editingUser.role);
+        if (!userData.branch && !isStudentEdit) {
             newErrors.branch = 'Branch selection is required';
         }
 
@@ -259,9 +262,9 @@ const UserManagement = () => {
             return;
         }
 
-        // Only allow Admin, HRM, or Staff creation
-        if (userData.role.toLowerCase() !== 'admin' && userData.role.toLowerCase() !== 'hrm' && userData.role.toLowerCase() !== 'staff') {
-            setSubmitError('Only Admin, HRM, or Staff members can be added.');
+        // Only allow Admin or Staff creation (not editing)
+        if (!editingUser && userData.role.toLowerCase() !== 'admin' && userData.role.toLowerCase() !== 'staff') {
+            setSubmitError('Only Admin or Staff members can be added.');
             return;
         }
 
@@ -368,12 +371,6 @@ const UserManagement = () => {
     };
 
     const handleEditClick = (user) => {
-        // Only allow editing Admin, HRM, or Staff
-        if (user.role !== 'Admin' && user.role !== 'HRM' && user.role !== 'Staff') {
-            showNotification('Only Admin, HRM, or Staff accounts can be edited.', 'error');
-            return;
-        }
-
         setEditingUser(user);
         setOriginalEmail(user.email);
         setUserData({
@@ -423,6 +420,12 @@ const UserManagement = () => {
         const matchesRole = roleFilter === 'All' || user.role === roleFilter;
         return matchesSearch && matchesRole;
     });
+
+    // Reset to page 1 whenever filters change
+    useEffect(() => { setUserPage(1); }, [searchTerm, roleFilter]);
+
+    const userTotalPages = Math.ceil(filteredUsers.length / USER_PAGE_SIZE);
+    const pagedUsers = filteredUsers.slice((userPage - 1) * USER_PAGE_SIZE, userPage * USER_PAGE_SIZE);
 
     const toggleStatus = async (id) => {
         try {
@@ -481,7 +484,7 @@ const UserManagement = () => {
             <div className="user-header">
                 <div className="header-left">
                     <h2>User Management</h2>
-                    <p>Manage system access for admins, HR managers, staff members, and students</p>
+                    <p>Manage system access for admins, staff members, and students</p>
                 </div>
                 <div className="header-actions">
                     <button className="add-user-btn" onClick={() => setShowModal(true)}>
@@ -502,7 +505,7 @@ const UserManagement = () => {
                     />
                 </div>
                 <div className="role-filters">
-                    {['All', 'Admin', 'HRM', 'Staff', 'Student', 'Walkin Student'].map(role => (
+                    {['All', 'Admin', 'Staff', 'Student', 'Walkin Student'].map(role => (
                         <button
                             key={role}
                             className={`filter-chip ${roleFilter === role ? 'active' : ''}`}
@@ -542,7 +545,7 @@ const UserManagement = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {filteredUsers.map(user => (
+                                {pagedUsers.map(user => (
                                     <tr key={user.id}>
                                         <td>
                                             <div className="user-profile-cell">
@@ -597,6 +600,13 @@ const UserManagement = () => {
                                 ))}
                             </tbody>
                         </table>
+                        <Pagination
+                            currentPage={userPage}
+                            totalPages={userTotalPages}
+                            onPageChange={setUserPage}
+                            totalItems={filteredUsers.length}
+                            pageSize={USER_PAGE_SIZE}
+                        />
                     </div>
                 )}
                 {!loading && filteredUsers.length === 0 && (
@@ -609,29 +619,21 @@ const UserManagement = () => {
                 {showModal && (
                     <div className="modal-overlay">
                         <div className="modal-container user-modal" style={{ maxWidth: '750px', width: '95%' }}>
-                            <div className="modal-header" style={{
-                                background: 'var(--card-bg)',
-                                color: 'var(--text-color)',
-                                padding: '24px 30px',
-                                borderBottom: '1px solid var(--border-color)'
-                            }}>
-                                <div>
-                                    <h2 style={{ color: 'var(--text-color)', marginBottom: '4px', fontWeight: '700' }}>
-                                        {editingUser ? 'Edit Account' : 'Add New User Account'}
-                                    </h2>
-                                    <p style={{ fontSize: '0.85rem', color: 'var(--secondary-text)', margin: 0 }}>
-                                        {editingUser ? 'Update account information and permissions' : 'Fill in the details to add a new admin, HRM, or staff member'}
-                                    </p>
+                            <div className="modal-header">
+                                <div className="modal-header-left">
+                                    <div className="modal-header-icon">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle><line x1="19" y1="8" x2="19" y2="14"></line><line x1="22" y1="11" x2="16" y2="11"></line></svg>
+                                    </div>
+                                    <div>
+                                        <h2>{editingUser ? 'Edit Account' : 'Add New User Account'}</h2>
+                                        <p>{editingUser ? 'Update account information and permissions' : 'Fill in the details to add a new admin or staff member'}</p>
+                                    </div>
                                 </div>
-                                <button
-                                    className="close-modal"
-                                    onClick={handleCloseModal}
-                                    style={{
-                                        background: 'var(--card-bg)',
-                                        border: '1.5px solid var(--border-color)',
-                                        color: 'var(--text-color)'
-                                    }}
-                                >&times;</button>
+                                <div className="modal-header-right">
+                                    <button className="close-modal" onClick={handleCloseModal}>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                    </button>
+                                </div>
                             </div>
                             <form onSubmit={handleAddUser}>
                                 <div className="modal-body" style={{
@@ -1155,27 +1157,46 @@ const UserManagement = () => {
                                                 }}>
                                                     Role <span style={{ color: '#ef4444' }}>*</span>
                                                 </label>
-                                                <select
-                                                    name="role"
-                                                    value={userData.role}
-                                                    onChange={handleInputChange}
-                                                    required
-                                                    style={{
-                                                        width: '100%',
-                                                        padding: '11px 14px',
-                                                        borderRadius: '10px',
-                                                        border: '1.5px solid var(--border-color)',
-                                                        background: 'var(--card-bg)',
-                                                        fontSize: '0.9rem',
-                                                        color: 'var(--text-color)',
-                                                        cursor: 'pointer',
-                                                        fontWeight: '600'
-                                                    }}
-                                                >
-                                                    <option value="Admin">Admin</option>
-                                                    <option value="HRM">HRM (HR Manager)</option>
-                                                    <option value="Staff">Staff</option>
-                                                </select>
+                                                {editingUser && !['Admin', 'Staff'].includes(editingUser.role) ? (
+                                                    <input
+                                                        type="text"
+                                                        value={userData.role}
+                                                        disabled
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '11px 14px',
+                                                            borderRadius: '10px',
+                                                            border: '1.5px solid var(--border-color)',
+                                                            background: 'var(--input-bg, #f1f5f9)',
+                                                            fontSize: '0.9rem',
+                                                            color: 'var(--secondary-text)',
+                                                            fontWeight: '600',
+                                                            cursor: 'not-allowed',
+                                                            boxSizing: 'border-box'
+                                                        }}
+                                                    />
+                                                ) : (
+                                                    <select
+                                                        name="role"
+                                                        value={userData.role}
+                                                        onChange={handleInputChange}
+                                                        required
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '11px 14px',
+                                                            borderRadius: '10px',
+                                                            border: '1.5px solid var(--border-color)',
+                                                            background: 'var(--card-bg)',
+                                                            fontSize: '0.9rem',
+                                                            color: 'var(--text-color)',
+                                                            cursor: 'pointer',
+                                                            fontWeight: '600'
+                                                        }}
+                                                    >
+                                                        <option value="Admin">Admin</option>
+                                                        <option value="Staff">Staff</option>
+                                                    </select>
+                                                )}
                                             </div>
                                             <div className="form-group" style={{ flex: 1 }}>
                                                 <label style={{
@@ -1185,13 +1206,13 @@ const UserManagement = () => {
                                                     marginBottom: '6px',
                                                     display: 'block'
                                                 }}>
-                                                    Branch <span style={{ color: '#ef4444' }}>*</span>
+                                                    Branch {!(editingUser && !['Admin', 'Staff'].includes(editingUser.role)) && <span style={{ color: '#ef4444' }}>*</span>}
                                                 </label>
                                                 <select
                                                     name="branch"
                                                     value={userData.branch}
                                                     onChange={handleInputChange}
-                                                    required
+                                                    required={!(editingUser && !['Admin', 'Staff'].includes(editingUser.role))}
                                                     style={{
                                                         width: '100%',
                                                         padding: '11px 14px',
@@ -1275,33 +1296,21 @@ const UserManagement = () => {
                             width: '95%',
                             background: 'var(--card-bg)'
                         }}>
-                            <div className="modal-header" style={{
-                                background: 'var(--card-bg)',
-                                borderBottom: '1px solid var(--border-color)',
-                                padding: '24px 30px'
-                            }}>
-                                <div>
-                                    <h2 style={{
-                                        color: 'var(--text-color)',
-                                        marginBottom: '4px',
-                                        fontWeight: '700',
-                                        fontSize: '1.35rem'
-                                    }}>User Profile</h2>
-                                    <p style={{
-                                        fontSize: '0.85rem',
-                                        color: 'var(--secondary-text)',
-                                        margin: 0
-                                    }}>Complete account information and details</p>
+                            <div className="modal-header">
+                                <div className="modal-header-left">
+                                    <div className="modal-header-icon">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                                    </div>
+                                    <div>
+                                        <h2>User Profile</h2>
+                                        <p>Complete account information and details</p>
+                                    </div>
                                 </div>
-                                <button
-                                    className="close-modal"
-                                    onClick={() => setShowViewModal(false)}
-                                    style={{
-                                        background: 'var(--card-bg)',
-                                        border: '1.5px solid var(--border-color)',
-                                        color: 'var(--text-color)'
-                                    }}
-                                >&times;</button>
+                                <div className="modal-header-right">
+                                    <button className="close-modal" onClick={() => setShowViewModal(false)}>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="modal-body profile-body" style={{
@@ -1528,7 +1537,7 @@ const UserManagement = () => {
                                                 }}>{selectedUser.birthday ? new Date(selectedUser.birthday).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not provided'}</div>
                                             </div>
 
-                                            {(!['Admin', 'HRM', 'Staff'].includes(selectedUser.role)) && (
+                                            {(!['Admin', 'Staff'].includes(selectedUser.role)) && (
                                                 <>
                                                     <div className="profile-data-card">
                                                         <label style={{
@@ -1621,7 +1630,7 @@ const UserManagement = () => {
 
                                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
 
-                                                {(!['Admin', 'HRM', 'Staff'].includes(selectedUser.role)) && (
+                                                {(!['Admin', 'Staff'].includes(selectedUser.role)) && (
                                                     <div className="profile-data-card">
                                                         <label style={{
                                                             fontSize: '0.7rem',
@@ -1682,7 +1691,7 @@ const UserManagement = () => {
                                         </div>
                                     </div>
 
-                                    {(!['Admin', 'HRM', 'Staff'].includes(selectedUser.role)) && (
+                                    {(!['Admin', 'Staff'].includes(selectedUser.role)) && (
                                         <div style={{ marginBottom: '25px' }}>
                                             <h3 style={{
                                                 fontSize: '0.85rem',
@@ -1847,41 +1856,21 @@ const UserManagement = () => {
                 {showPasswordModal && passwordResetUser && (
                     <div className="modal-overlay">
                         <div className="modal-container" style={{ maxWidth: '500px', width: '90%' }}>
-                            <div className="modal-header" style={{
-                                background: 'var(--card-bg)',
-                                color: 'var(--text-color)',
-                                padding: '24px 30px',
-                                borderBottom: '1px solid var(--border-color)'
-                            }}>
-                                <div>
-                                    <h2 style={{ color: 'var(--text-color)', marginBottom: '4px', fontWeight: '700' }}>
-                                        Reset Password
-                                    </h2>
-                                    <p style={{ fontSize: '0.85rem', color: 'var(--secondary-text)', margin: 0 }}>
-                                        Reset password for {passwordResetUser.firstName} {passwordResetUser.lastName}
-                                    </p>
+                            <div className="modal-header">
+                                <div className="modal-header-left">
+                                    <div className="modal-header-icon">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                                    </div>
+                                    <div>
+                                        <h2>Reset Password</h2>
+                                        <p>Reset password for {passwordResetUser.firstName} {passwordResetUser.lastName}</p>
+                                    </div>
                                 </div>
-                                <button
-                                    className="close-modal"
-                                    onClick={handleClosePasswordModal}
-                                    style={{
-                                        background: 'var(--card-bg)',
-                                        border: '1.5px solid var(--border-color)',
-                                        color: 'var(--text-color)',
-                                        width: '36px',
-                                        height: '36px',
-                                        borderRadius: '10px',
-                                        cursor: 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center'
-                                    }}
-                                >
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                                    </svg>
-                                </button>
+                                <div className="modal-header-right">
+                                    <button className="close-modal" onClick={handleClosePasswordModal}>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                    </button>
+                                </div>
                             </div>
 
                             <form onSubmit={handlePasswordSubmit}>
@@ -1982,7 +1971,7 @@ const UserManagement = () => {
                     </div>
                 )}
             </div>
-        </div>
+        </div >
     );
 };
 

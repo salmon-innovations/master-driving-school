@@ -219,7 +219,7 @@ function GuestEnrollment({ onNavigate, setIsLoggedIn }) {
                     {errors.firstName && <p className="text-xs text-red-500 mt-1">{errors.firstName}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Middle Name</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Middle Initial</label>
                     <input
                       type="text"
                       name="middleName"

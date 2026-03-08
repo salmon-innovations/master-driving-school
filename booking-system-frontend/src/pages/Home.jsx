@@ -39,6 +39,17 @@ function Home({ onNavigate, isLoggedIn }) {
     setCurrentSlide(index)
   }
 
+  const handleVideoClick = async (video) => {
+    setSelectedVideo(video)
+    try {
+      if (video.id) {
+        await newsAPI.incrementInteraction(video.id)
+      }
+    } catch (error) {
+      console.error('Failed to increment view:', error)
+    }
+  }
+
   const benefits = [
     {
       icon: '✓',
@@ -458,7 +469,7 @@ function Home({ onNavigate, isLoggedIn }) {
                   className="group relative rounded-2xl overflow-hidden cursor-pointer shadow-xl hover:shadow-2xl hover:shadow-[#F3B74C]/20 transition-all duration-300 hover:-translate-y-1"
                   data-aos="fade-up"
                   data-aos-delay={index * 100}
-                  onClick={() => setSelectedVideo(video)}
+                  onClick={() => handleVideoClick(video)}
                 >
                   {/* Thumbnail */}
                   <div className="relative bg-black" style={{ aspectRatio: '9/16' }}>

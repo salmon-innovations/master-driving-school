@@ -4,10 +4,16 @@ const pool = require('./config/db');
 
 const runMigration = async () => {
     try {
-        const sqlPath = path.join(__dirname, 'migrations', 'add_end_date_to_schedule.sql');
+        const migrationFile = process.argv[2];
+        if (!migrationFile) {
+            console.error('Please provide a migration file name as an argument.');
+            process.exit(1);
+        }
+
+        const sqlPath = path.join(__dirname, 'migrations', migrationFile);
         const sql = fs.readFileSync(sqlPath, 'utf8');
 
-        console.log('Running migration...');
+        console.log(`Running migration: ${migrationFile}...`);
         await pool.query(sql);
         console.log('Migration completed successfully.');
     } catch (error) {

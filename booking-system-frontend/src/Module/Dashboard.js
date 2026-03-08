@@ -159,7 +159,7 @@ const Dashboard = ({ onBack }) => {
     // Enrollees Data for Table & Export
     const [enrollees, setEnrollees] = useState([
         { name: 'Juan Dela Cruz', course: 'TDC - Online', branch: 'Main Branch', date: 'Jan 15, 2024', status: 'Full Payment', method: 'GCash' },
-        { name: 'Maria Clara', course: 'PDC - Manual Sedan', branch: 'V. Luna', date: 'Jan 18, 2024 (AM)', status: 'Downpayment', method: 'StarPay' },
+        { name: 'Maria Clara', course: 'PDC - Manual Sedan', branch: 'V. Luna', date: 'Jan 18, 2024 (AM)', status: 'Downpayment', method: 'GCash' },
         { name: 'Pedro Penduko', course: 'PDC - Motorcycle', branch: 'Marikina', date: 'Jan 20, 2024 (PM)', status: 'Pending', method: 'GCash' }
     ]);
 

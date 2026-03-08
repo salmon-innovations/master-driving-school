@@ -1,6 +1,10 @@
 const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
-const { generateRandomPassword, sendPasswordEmail, generateVerificationCode, sendWalkInEnrollmentEmail } = require('../utils/emailService');
+const path = require('path');
+const fs = require('fs');
+const { generateRandomPassword, sendPasswordEmail, generateVerificationCode, sendWalkInEnrollmentEmail, sendPaymentReceiptEmail, reloadEmailContent } = require('../utils/emailService');
+
+const EMAIL_CONTENT_PATH = path.join(__dirname, '../config/emailContent.json');
 
 // Get dashboard statistics
 const getDashboardStats = async (req, res) => {
@@ -100,7 +104,7 @@ const getAllBookings = async (req, res) => {
 
     // Always fetch the actual branch_id from DB — don't rely on JWT payload
     let userBranchId = null;
-    if (userRole === 'staff' || userRole === 'hrm') {
+    if (userRole === 'staff') {
       const userRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [userId]);
       userBranchId = userRow.rows[0]?.branch_id || null;
       console.log(`🔍 [getAllBookings] Role: ${userRole}, branch_id from DB: ${userBranchId}`);
@@ -110,7 +114,7 @@ const getAllBookings = async (req, res) => {
     let paramIndex = 1;
     const whereClauses = [];
 
-    // Branch filter: staff and hrm only see their branch
+    // Branch filter: staff only see their branch
     if (userBranchId) {
       whereClauses.push(`b.branch_id = $${paramIndex++}`);
       queryParams.push(userBranchId);
@@ -127,7 +131,7 @@ const getAllBookings = async (req, res) => {
     const query = `
       SELECT b.id, b.user_id, b.course_id, b.branch_id, b.booking_date, 
              b.booking_time, b.status, b.notes, b.total_amount,
-             b.created_at, b.updated_at,
+             b.created_at, b.updated_at, b.course_type,
              COALESCE(b.payment_type, 'N/A') as payment_type,
              COALESCE(b.payment_method, 'N/A') as payment_method,
              COALESCE(b.enrollment_type, 'online') as enrollment_type,
@@ -140,13 +144,43 @@ const getAllBookings = async (req, res) => {
              br.address as branch_address,
              (
                SELECT json_agg(
-                 json_build_object('date', ss.date, 'end_date', ss.end_date, 'type', ss.type)
+                 json_build_object('date', ss.date, 'end_date', ss.end_date, 'type', ss.type, 'time_range', ss.time_range)
                  ORDER BY ss.date ASC
                )
                FROM schedule_enrollments se
                JOIN schedule_slots ss ON se.slot_id = ss.id
                WHERE se.student_id = b.user_id
-             ) as schedule_details
+             ) as schedule_details,
+             -- Fallback slot 1 from notes JSON (for pending StarPay bookings not yet enrolled)
+             (
+               SELECT json_build_object('date', ss.date, 'end_date', ss.end_date, 'type', ss.type, 'time_range', ss.time_range)
+               FROM schedule_slots ss
+               WHERE ss.id = (
+                 CASE
+                   WHEN b.notes IS NOT NULL
+                     AND b.notes ~ '^\{'
+                     AND (b.notes::jsonb->>'scheduleSlotId') IS NOT NULL
+                     AND (b.notes::jsonb->>'scheduleSlotId') != 'null'
+                   THEN CAST(b.notes::jsonb->>'scheduleSlotId' AS INTEGER)
+                   ELSE NULL
+                 END
+               )
+             ) as notes_slot,
+             -- Fallback slot 2 from notes JSON (for PDC 2-day pending bookings)
+             (
+               SELECT json_build_object('date', ss.date, 'end_date', ss.end_date, 'type', ss.type, 'time_range', ss.time_range)
+               FROM schedule_slots ss
+               WHERE ss.id = (
+                 CASE
+                   WHEN b.notes IS NOT NULL
+                     AND b.notes ~ '^\{'
+                     AND (b.notes::jsonb->>'scheduleSlotId2') IS NOT NULL
+                     AND (b.notes::jsonb->>'scheduleSlotId2') != 'null'
+                   THEN CAST(b.notes::jsonb->>'scheduleSlotId2' AS INTEGER)
+                   ELSE NULL
+                 END
+               )
+             ) as notes_slot2
       FROM bookings b
       LEFT JOIN users u ON b.user_id = u.id
       LEFT JOIN courses c ON b.course_id = c.id
@@ -308,12 +342,14 @@ const getEnrollmentData = async (req, res) => {
     const result = await pool.query(`
       SELECT 
         TO_CHAR(created_at, 'Mon') as name,
-        COUNT(*) as students
+        COUNT(*) as students,
+        COUNT(CASE WHEN enrollment_type = 'walk-in' THEN 1 END) as walkins,
+        COUNT(CASE WHEN enrollment_type != 'walk-in' OR enrollment_type IS NULL THEN 1 END) as online
       FROM (
-        SELECT created_at FROM bookings
+        SELECT created_at, enrollment_type FROM bookings
         WHERE created_at >= DATE_TRUNC('year', CURRENT_DATE)
         UNION ALL
-        SELECT created_at FROM schedule_enrollments
+        SELECT created_at, 'online' as enrollment_type FROM schedule_enrollments
         WHERE created_at >= DATE_TRUNC('year', CURRENT_DATE)
       ) combined
       GROUP BY TO_CHAR(created_at, 'Mon'), EXTRACT(MONTH FROM created_at)
@@ -324,7 +360,7 @@ const getEnrollmentData = async (req, res) => {
     if (result.rows.length === 0) {
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const currentMonth = new Date().getMonth();
-      const placeholderData = months.slice(0, currentMonth + 1).map(name => ({ name, students: 0 }));
+      const placeholderData = months.slice(0, currentMonth + 1).map(name => ({ name, students: 0, walkins: 0, online: 0 }));
       return res.json({ success: true, data: placeholderData });
     }
 
@@ -388,10 +424,10 @@ const createUser = async (req, res) => {
 
     console.log('📋 Extracted values:', { firstName, middleInitial, lastName, email, role, branch, contactNumber });
 
-    // Only allow creating Admin, HRM, or Staff
-    if (role !== 'admin' && role !== 'hrm' && role !== 'staff') {
+    // Only allow creating Admin or Staff
+    if (role !== 'admin' && role !== 'staff') {
       console.log('❌ Invalid role:', role);
-      return res.status(403).json({ error: 'Can only create admin, HRM, or staff accounts' });
+      return res.status(403).json({ error: 'Can only create admin or staff accounts' });
     }
 
     // Check if user already exists
@@ -489,11 +525,6 @@ const updateUser = async (req, res) => {
       emailChanged,
       avatar,
     } = req.body;
-
-    // Only allow updating Admin, HRM, or Staff
-    if (role !== 'admin' && role !== 'hrm' && role !== 'staff') {
-      return res.status(403).json({ error: 'Can only update admin, HRM, or staff accounts' });
-    }
 
     // Get current user email
     const currentUserResult = await pool.query('SELECT email, first_name FROM users WHERE id = $1', [id]);
@@ -724,46 +755,37 @@ const walkInEnrollment = async (req, res) => {
     // Parse branchId to integer (comes as string from frontend select)
     const parsedBranchId = parseInt(branchId, 10);
 
-    const isMotorcyclePDC = courseCategory?.toLowerCase().includes('motorcycle') || courseType?.toLowerCase().includes('motorcycle');
-
     // Validate required fields
-    if (!firstName || !lastName || !email || !courseId || !parsedBranchId) {
+    if (!firstName || !lastName || !email || !courseId || !parsedBranchId || !scheduleSlotId || !scheduleDate) {
       const missing = [];
       if (!firstName) missing.push('firstName');
       if (!lastName) missing.push('lastName');
       if (!email) missing.push('email');
       if (!courseId) missing.push('courseId');
       if (!parsedBranchId) missing.push('branchId');
-      return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
-    }
-
-    if (!isMotorcyclePDC && (!scheduleSlotId || !scheduleDate)) {
-      const missing = [];
       if (!scheduleSlotId) missing.push('scheduleSlotId');
       if (!scheduleDate) missing.push('scheduleDate');
       return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
     }
 
     // Pre-flight check: Slot availability and B1/B2 Global Capacity Rule
-    if (scheduleSlotId) {
-      const slotCheck = await pool.query('SELECT date, course_type, available_slots FROM schedule_slots WHERE id = $1', [scheduleSlotId]);
-      if (slotCheck.rows.length === 0) {
-        return res.status(404).json({ error: 'Selected schedule slot not found' });
-      }
-      const { date: slotDate, course_type: slotCourseType, available_slots: slotAvailable } = slotCheck.rows[0];
-      if (slotAvailable <= 0) {
-        return res.status(400).json({ error: 'The selected slot is fully booked' });
-      }
-      if (slotCourseType && (slotCourseType.toLowerCase().includes('b1') || slotCourseType.toLowerCase().includes('b2'))) {
-        const b1b2Check = await pool.query(`
-          SELECT 1 FROM schedule_slots 
-          WHERE date = $1 
-            AND (course_type ILIKE '%B1%' OR course_type ILIKE '%B2%')
-            AND available_slots < total_capacity
-        `, [slotDate]);
-        if (b1b2Check.rows.length > 0) {
-          return res.status(400).json({ error: 'The B1/B2 Van/L300 unit is already fully booked for this date across all branches.' });
-        }
+    const slotCheck = await pool.query('SELECT date, course_type, available_slots FROM schedule_slots WHERE id = $1', [scheduleSlotId]);
+    if (slotCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Selected schedule slot not found' });
+    }
+    const { date: slotDate, course_type: slotCourseType, available_slots: slotAvailable } = slotCheck.rows[0];
+    if (slotAvailable <= 0) {
+      return res.status(400).json({ error: 'The selected slot is fully booked' });
+    }
+    if (slotCourseType && (slotCourseType.toLowerCase().includes('b1') || slotCourseType.toLowerCase().includes('b2'))) {
+      const b1b2Check = await pool.query(`
+        SELECT 1 FROM schedule_slots 
+        WHERE date = $1 
+          AND (course_type ILIKE '%B1%' OR course_type ILIKE '%B2%')
+          AND available_slots < total_capacity
+      `, [slotDate]);
+      if (b1b2Check.rows.length > 0) {
+        return res.status(400).json({ error: 'The B1/B2 Van/L300 unit is already fully booked for this date across all branches.' });
       }
     }
 
@@ -823,38 +845,36 @@ const walkInEnrollment = async (req, res) => {
     console.log('✅ Booking created:', bookingResult.rows[0].id);
 
     // 5. Enroll student in schedule slot(s)
-    if (scheduleSlotId) {
+    await client.query(
+      `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
+       VALUES ($1, $2, 'enrolled')`,
+      [scheduleSlotId, newUser.id]
+    );
+    console.log('✅ Schedule enrollment created (Day 1)');
+
+    // 6. Decrement available slots
+    await client.query(
+      `UPDATE schedule_slots SET available_slots = available_slots - 1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND available_slots > 0`,
+      [scheduleSlotId]
+    );
+    console.log('✅ Slot capacity decremented (Day 1)');
+
+    // If TDC (2-day course), enroll in second slot too
+    if (scheduleSlotId2 && scheduleDate2) {
       await client.query(
         `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
          VALUES ($1, $2, 'enrolled')`,
-        [scheduleSlotId, newUser.id]
+        [scheduleSlotId2, newUser.id]
       );
-      console.log('✅ Schedule enrollment created (Day 1)');
+      console.log('✅ Schedule enrollment created (Day 2)');
 
-      // 6. Decrement available slots
       await client.query(
         `UPDATE schedule_slots SET available_slots = available_slots - 1, updated_at = CURRENT_TIMESTAMP
          WHERE id = $1 AND available_slots > 0`,
-        [scheduleSlotId]
+        [scheduleSlotId2]
       );
-      console.log('✅ Slot capacity decremented (Day 1)');
-
-      // If TDC (2-day course), enroll in second slot too
-      if (scheduleSlotId2 && scheduleDate2) {
-        await client.query(
-          `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
-           VALUES ($1, $2, 'enrolled')`,
-          [scheduleSlotId2, newUser.id]
-        );
-        console.log('✅ Schedule enrollment created (Day 2)');
-
-        await client.query(
-          `UPDATE schedule_slots SET available_slots = available_slots - 1, updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1 AND available_slots > 0`,
-          [scheduleSlotId2]
-        );
-        console.log('✅ Slot capacity decremented (Day 2)');
-      }
+      console.log('✅ Slot capacity decremented (Day 2)');
     }
 
     await client.query('COMMIT');
@@ -862,18 +882,14 @@ const walkInEnrollment = async (req, res) => {
     // 7. Get course and branch details for email
     const courseResult = await pool.query('SELECT name, category FROM courses WHERE id = $1', [courseId]);
     const branchResult = await pool.query('SELECT name, address FROM branches WHERE id = $1', [parsedBranchId]);
-
-    let slotResult = { rows: [] };
-    if (scheduleSlotId) {
-      slotResult = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [scheduleSlotId]);
-    }
+    const slotResult = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [scheduleSlotId]);
 
     const courseName = courseResult.rows[0]?.name || 'N/A';
     const courseCat = courseCategory || courseResult.rows[0]?.category || 'PDC';
     const branchName = branchResult.rows[0]?.name || 'N/A';
     const branchAddress = branchResult.rows[0]?.address || '';
-    const scheduleSession = isMotorcyclePDC ? 'TBA' : (slotResult.rows[0]?.session || 'N/A');
-    const scheduleTime = isMotorcyclePDC ? 'TBA' : (slotResult.rows[0]?.time_range || 'N/A');
+    const scheduleSession = slotResult.rows[0]?.session || 'N/A';
+    const scheduleTime = slotResult.rows[0]?.time_range || 'N/A';
 
     // Get Day 2 schedule details for TDC
     let scheduleSession2Email = null;
@@ -894,7 +910,7 @@ const walkInEnrollment = async (req, res) => {
         courseType,
         branchName,
         branchAddress,
-        scheduleDate: isMotorcyclePDC ? 'Admin Assigned' : scheduleDate,
+        scheduleDate,
         scheduleSession,
         scheduleTime,
         scheduleDate2: scheduleDate2Email,
@@ -953,21 +969,27 @@ const getAllTransactions = async (req, res) => {
         b.payment_method,
         b.status,
         b.created_at,
+        b.updated_at,
+        b.notes,
+        b.branch_id,
         u.first_name || ' ' || u.last_name AS student_name,
-        c.name AS course_name
+        c.name AS course_name,
+        br.name AS branch_name
       FROM bookings b
       LEFT JOIN users u ON b.user_id = u.id
       LEFT JOIN courses c ON b.course_id = c.id
+      LEFT JOIN branches br ON b.branch_id = br.id
       WHERE b.status IN ('paid', 'collectable')
       ORDER BY b.created_at DESC
       LIMIT $1`,
       [limit]
     );
 
-    const transactions = result.rows.map((row, index) => {
+    const transactions = [];
+    for (const row of result.rows) {
       // Full Payment bookings are always considered paid/Success
       const isPaid = row.status === 'paid' || row.payment_type === 'Full Payment';
-      return {
+      transactions.push({
         transaction_id: `TXN-${new Date(row.created_at).getFullYear()}-${String(row.id).padStart(3, '0')}`,
         booking_id: row.id,
         student_name: row.student_name || 'Unknown',
@@ -976,9 +998,28 @@ const getAllTransactions = async (req, res) => {
         payment_method: row.payment_method || 'Cash',
         payment_type: row.payment_type || 'Full Payment',
         status: isPaid ? 'Success' : 'Collectable',
-        course_name: row.course_name || 'N/A'
-      };
-    });
+        course_name: row.course_name || 'N/A',
+        branch_name: row.branch_name || 'Unknown',
+        branch_id: row.branch_id || null
+      });
+
+      // Emit a separate row for the rescheduling fee if present in notes
+      if (row.notes && row.notes.toLowerCase().includes('rescheduling fee')) {
+        transactions.push({
+          transaction_id: `TXN-${new Date(row.created_at).getFullYear()}-${String(row.id).padStart(3, '0')}-RSF`,
+          booking_id: row.id,
+          student_name: row.student_name || 'Unknown',
+          transaction_date: row.updated_at || row.created_at,
+          amount: 1000,
+          payment_method: 'Cash',
+          payment_type: 'Rescheduling Fee',
+          status: 'Success',
+          course_name: 'Rescheduling Fee',
+          branch_name: row.branch_name || 'Unknown',
+          branch_id: row.branch_id || null
+        });
+      }
+    }
 
     res.json({ success: true, transactions });
   } catch (error) {
@@ -1112,6 +1153,389 @@ const getBranchPerformance = async (req, res) => {
   }
 };
 
+
+const markBookingAsPaid = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { payment_method } = req.body;
+
+    // Fetch booking + course price
+    const bookingResult = await pool.query(
+      `SELECT b.*, c.price AS course_price
+       FROM bookings b
+       LEFT JOIN courses c ON b.course_id = c.id
+       WHERE b.id = $1`,
+      [id]
+    );
+
+    if (bookingResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    const booking = bookingResult.rows[0];
+    const coursePrice = parseFloat(booking.course_price || 0);
+    const previousAmount = parseFloat(booking.total_amount || 0);
+    const remainingBalance = Math.max(0, coursePrice - previousAmount);
+
+    // Mark booking as fully paid — set amount to full course price
+    const result = await pool.query(
+      `UPDATE bookings
+       SET status = 'paid',
+           total_amount = $1,
+           payment_type = 'Full Payment',
+           payment_method = COALESCE($2, payment_method),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3
+       RETURNING *`,
+      [coursePrice, payment_method || null, id]
+    );
+
+    // Auto-enroll in schedule slot(s) if stored in notes (e.g. StarPay guest bookings)
+    try {
+      const meta = JSON.parse(booking.notes || '{}');
+      for (const key of ['scheduleSlotId', 'scheduleSlotId2']) {
+        if (meta[key]) {
+          await pool.query(
+            `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
+             VALUES ($1, $2, 'enrolled')
+             ON CONFLICT (slot_id, student_id) DO NOTHING`,
+            [meta[key], booking.user_id]
+          );
+          await pool.query(
+            `UPDATE schedule_slots SET available_slots = GREATEST(available_slots - 1, 0) WHERE id = $1`,
+            [meta[key]]
+          );
+        }
+      }
+    } catch (enrollErr) {
+      console.error('Auto-enroll on markAsPaid failed (non-fatal):', enrollErr.message);
+    }
+
+    // Auto-send full payment receipt email
+    try {
+      const userResult = await pool.query(
+        `SELECT u.first_name, u.last_name, u.email, c.name AS course_name
+         FROM bookings b
+         JOIN users u ON b.user_id = u.id
+         LEFT JOIN courses c ON b.course_id = c.id
+         WHERE b.id = $1`,
+        [id]
+      );
+      if (userResult.rows.length > 0) {
+        const u = userResult.rows[0];
+        await sendPaymentReceiptEmail(u.email, u.first_name, u.last_name, {
+          bookingId: id,
+          transactionId: `TXN-${new Date().getFullYear()}-${String(id).padStart(3, '0')}`,
+          courseName: u.course_name || 'N/A',
+          amountPaid: coursePrice,
+          coursePrice,
+          paymentMethod: payment_method || 'Cash',
+          paymentDate: new Date(),
+          isFullPayment: true,
+          balanceDue: 0,
+        });
+      }
+    } catch (emailErr) {
+      console.error('Receipt email failed (non-fatal):', emailErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Booking marked as fully paid',
+      booking: result.rows[0],
+      course_price: coursePrice,
+      previous_amount: previousAmount,
+      balance_collected: remainingBalance,
+    });
+  } catch (error) {
+    console.error('Mark as paid error:', error);
+    res.status(500).json({ error: 'Server error while marking booking as paid' });
+  }
+};
+
+// Send payment receipt email on demand (admin action)
+const sendReceiptEmail = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `SELECT b.id, b.total_amount, b.payment_type, b.payment_method, b.status, b.created_at,
+              u.first_name, u.last_name, u.email,
+              c.name AS course_name, c.price AS course_price
+       FROM bookings b
+       JOIN users u ON b.user_id = u.id
+       LEFT JOIN courses c ON b.course_id = c.id
+       WHERE b.id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    const row = result.rows[0];
+    const isFullPayment = row.status === 'paid' || row.payment_type === 'Full Payment';
+    const coursePrice = parseFloat(row.course_price || 0);
+    const amountPaid = parseFloat(row.total_amount || 0);
+    const balanceDue = Math.max(0, coursePrice - amountPaid);
+
+    await sendPaymentReceiptEmail(row.email, row.first_name, row.last_name, {
+      bookingId: row.id,
+      transactionId: `TXN-${new Date(row.created_at).getFullYear()}-${String(row.id).padStart(3, '0')}`,
+      courseName: row.course_name || 'N/A',
+      amountPaid,
+      coursePrice,
+      paymentMethod: row.payment_method || 'Cash',
+      paymentDate: row.created_at,
+      isFullPayment,
+      balanceDue,
+    });
+
+    res.json({ success: true, message: `Receipt sent to ${row.email}` });
+  } catch (error) {
+    console.error('Send receipt email error:', error);
+    res.status(500).json({ error: 'Failed to send receipt email' });
+  }
+};
+
+// Get notifications — payment and enrollment events filtered by branch role
+const getNotifications = async (req, res) => {
+  try {
+    const userRole = req.user.role;
+    const userId = req.user.id;
+
+    // Always resolve branch from DB — not from JWT payload
+    let userBranchId = null;
+    if (userRole === 'staff') {
+      const branchRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [userId]);
+      userBranchId = branchRow.rows[0]?.branch_id || null;
+    }
+
+    // Build branch condition
+    const branchCondition = userBranchId
+      ? `AND b.branch_id = ${parseInt(userBranchId)}`
+      : ''; // admin = no filter
+
+    const query = `
+      SELECT
+        b.id::text AS id,
+        b.total_amount,
+        b.payment_method,
+        b.payment_type,
+        b.status,
+        u.first_name || ' ' || u.last_name AS student_name,
+        c.name AS course_name,
+        br.name AS branch_name,
+        b.created_at AS time,
+
+        -- Determine notification category
+        CASE
+          WHEN b.notes IS NOT NULL AND b.notes ~ '^\\{'
+            AND (b.notes::jsonb->>'rescheduled') = 'true'
+          THEN 'reschedule'
+          WHEN b.payment_type = 'Full Payment'
+            AND b.status IN ('paid', 'confirmed', 'completed')
+          THEN 'payment_full'
+          WHEN b.payment_type = 'Downpayment'
+            OR (b.payment_type IS NOT NULL AND b.payment_type <> 'Full Payment'
+                AND b.status = 'collectable')
+          THEN 'payment_down'
+          ELSE 'enrollment'
+        END AS notif_type,
+
+        -- Dynamic title
+        CASE
+          WHEN b.notes IS NOT NULL AND b.notes ~ '^\\{'
+            AND (b.notes::jsonb->>'rescheduled') = 'true'
+          THEN 'Reschedule Request'
+          WHEN b.payment_type = 'Full Payment'
+            AND b.status IN ('paid', 'confirmed', 'completed')
+          THEN 'Full Payment Received'
+          WHEN b.payment_type = 'Downpayment'
+            OR (b.payment_type IS NOT NULL AND b.payment_type <> 'Full Payment'
+                AND b.status = 'collectable')
+          THEN 'Downpayment Received'
+          ELSE 'New Student Enrollment'
+        END AS title,
+
+        -- Dynamic message
+        CASE
+          WHEN b.notes IS NOT NULL AND b.notes ~ '^\\{'
+            AND (b.notes::jsonb->>'rescheduled') = 'true'
+          THEN u.first_name || ' ' || u.last_name
+            || ' requested a reschedule for '
+            || COALESCE(c.name, 'a course')
+            || ' at ' || COALESCE(br.name, 'branch')
+          WHEN b.payment_type = 'Full Payment'
+            AND b.status IN ('paid', 'confirmed', 'completed')
+          THEN u.first_name || ' ' || u.last_name
+            || ' paid ₱' || TO_CHAR(COALESCE(b.total_amount, 0), 'FM999,999,990.00')
+            || ' in full for ' || COALESCE(c.name, 'a course')
+            || ' at ' || COALESCE(br.name, 'branch')
+            || ' via ' || COALESCE(b.payment_method, 'Online')
+          WHEN b.payment_type = 'Downpayment'
+            OR (b.payment_type IS NOT NULL AND b.payment_type <> 'Full Payment'
+                AND b.status = 'collectable')
+          THEN u.first_name || ' ' || u.last_name
+            || ' made a ₱' || TO_CHAR(COALESCE(b.total_amount, 0), 'FM999,999,990.00')
+            || ' downpayment for ' || COALESCE(c.name, 'a course')
+            || ' at ' || COALESCE(br.name, 'branch')
+          ELSE
+            u.first_name || ' ' || u.last_name
+            || ' enrolled in ' || COALESCE(c.name, 'a course')
+            || ' at ' || COALESCE(br.name, 'branch')
+        END AS message
+
+      FROM bookings b
+      JOIN users u ON b.user_id = u.id
+      LEFT JOIN courses c ON b.course_id = c.id
+      LEFT JOIN branches br ON b.branch_id = br.id
+      WHERE b.status IN ('paid', 'collectable', 'confirmed', 'completed')
+        ${branchCondition}
+      ORDER BY b.created_at DESC
+      LIMIT 50
+    `;
+
+    const result = await pool.query(query);
+
+    const typeMap = {
+      payment_full: 'success',
+      payment_down: 'warning',
+      reschedule:   'info',
+      enrollment:   'info',
+    };
+
+    const notifications = result.rows.map(row => ({
+      id:         row.id,
+      notifType:  row.notif_type,
+      type:       typeMap[row.notif_type] || 'info',
+      title:      row.title,
+      message:    row.message,
+      time:       row.time,
+      branch:     row.branch_name,
+      student:    row.student_name,
+      course:     row.course_name,
+      amount:     row.total_amount,
+      paymentMethod: row.payment_method,
+    }));
+
+    res.json({ success: true, notifications });
+  } catch (error) {
+    console.error('Get notifications error:', error);
+    res.status(500).json({ error: 'Server error while fetching notifications' });
+  }
+};
+
+// ── Email content config endpoints ───────────────────────────────────────────
+const getEmailContent = async (req, res) => {
+  try {
+    const data = JSON.parse(fs.readFileSync(EMAIL_CONTENT_PATH, 'utf8'));
+    res.json({ success: true, content: data });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to load email content' });
+  }
+};
+
+const updateEmailContent = async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content || typeof content !== 'object') {
+      return res.status(400).json({ error: 'Invalid content payload' });
+    }
+    fs.writeFileSync(EMAIL_CONTENT_PATH, JSON.stringify(content, null, 2), 'utf8');
+    reloadEmailContent();
+    res.json({ success: true, message: 'Email content updated successfully' });
+  } catch (e) {
+    console.error('updateEmailContent error:', e);
+    res.status(500).json({ error: 'Failed to save email content' });
+  }
+};
+
+const getTodayStudents = async (req, res) => {
+  try {
+    const dateParam = req.query.date;
+    const today = dateParam || new Date().toISOString().split('T')[0];
+    const branchId = req.query.branch_id ? parseInt(req.query.branch_id, 10) : null;
+    const result = await pool.query(`
+      SELECT
+        ss.id as slot_id,
+        se.id as enrollment_id,
+        se.reschedule_fee_paid,
+        ss.time_range,
+        ss.course_type,
+        ss.type,
+        ss.transmission,
+        ss.session,
+        ss.date as slot_date,
+        ss.end_date as slot_end_date,
+        br.name as branch_name,
+        ss.branch_id,
+        u.id as student_id,
+        u.first_name || ' ' || COALESCE(u.middle_name || ' ', '') || u.last_name as student_name,
+        u.email,
+        u.contact_numbers,
+        se.enrollment_status
+      FROM schedule_slots ss
+      JOIN schedule_enrollments se ON ss.id = se.slot_id
+      JOIN users u ON se.student_id = u.id
+      LEFT JOIN branches br ON ss.branch_id = br.id
+      WHERE $1::date BETWEEN ss.date AND ss.end_date
+        AND se.enrollment_status IN ('enrolled', 'completed')
+        AND ($2::int IS NULL OR ss.branch_id = $2::int)
+      ORDER BY ss.course_type, ss.time_range, u.last_name
+    `, [today, branchId]);
+
+    const grouped = {};
+    result.rows.forEach(row => {
+      const typeLower = (row.type || '').toLowerCase();
+      let label;
+      if (typeLower === 'tdc') {
+        label = `TDC ${row.course_type || ''}`.trim();
+      } else if (typeLower === 'pdc') {
+        label = `PDC${row.transmission ? ' ' + row.transmission : ''}`.trim();
+      } else {
+        label = row.course_type || row.type || 'General';
+      }
+      if (!grouped[label]) grouped[label] = { course_type: label, type: row.type, students: [] };
+      grouped[label].students.push({
+        student_id: row.student_id,
+        enrollment_id: row.enrollment_id,
+        name: row.student_name,
+        email: row.email,
+        contact: row.contact_numbers,
+        status: row.enrollment_status,
+        reschedule_fee_paid: row.reschedule_fee_paid,
+        time_range: row.time_range,
+        session: row.session,
+        slot_date: row.slot_date,
+        slot_end_date: row.slot_end_date,
+        branch_name: row.branch_name,
+        branch_id: row.branch_id,
+        transmission: row.transmission,
+        slot_id: row.slot_id,
+      });
+    });
+
+    // Sort: TDC first, then PDC, then others; alphabetically within each type
+    const sortedData = Object.values(grouped).sort((a, b) => {
+      const order = { tdc: 0, pdc: 1 };
+      const ao = order[a.type] ?? 2;
+      const bo = order[b.type] ?? 2;
+      return ao !== bo ? ao - bo : a.course_type.localeCompare(b.course_type);
+    });
+
+    res.json({
+      success: true,
+      date: today,
+      data: sortedData,
+      total: result.rows.length,
+    });
+  } catch (error) {
+    console.error('Get today students error:', error);
+    res.status(500).json({ error: 'Server error while fetching today students' });
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getAllBookings,
@@ -1131,4 +1555,88 @@ module.exports = {
   getFunnelData,
   getCourseDistribution,
   getBranchPerformance,
+  getNotifications,
+  markBookingAsPaid,
+  sendReceiptEmail,
+  getEmailContent,
+  updateEmailContent,
+  getTodayStudents,
 };
+
+// ─── Student summary detail ────────────────────────────────────────────────
+const getStudentDetail = async (req, res) => {
+  try {
+    const studentId = parseInt(req.params.studentId, 10);
+    if (isNaN(studentId)) return res.status(400).json({ error: 'Invalid student ID' });
+
+    // User personal info
+    const userRes = await pool.query(`
+      SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email,
+        u.contact_numbers, u.address, u.gender, u.age, u.birthday,
+        u.birth_place, u.nationality, u.marital_status, u.zip_code,
+        u.emergency_contact_person, u.emergency_contact_number,
+        b.name as branch_name
+      FROM users u
+      LEFT JOIN branches b ON u.branch_id = b.id
+      WHERE u.id = $1
+    `, [studentId]);
+
+    if (userRes.rows.length === 0) return res.status(404).json({ error: 'Student not found' });
+
+    // Booking + payment info (latest 10)
+    const bookingsRes = await pool.query(`
+      SELECT bk.id, bk.booking_date, bk.status, bk.total_amount,
+        COALESCE(bk.payment_type, 'N/A') as payment_type,
+        COALESCE(bk.payment_method, 'N/A') as payment_method,
+        COALESCE(bk.enrollment_type, 'online') as enrollment_type,
+        bk.course_type, bk.created_at,
+        c.name as course_name,
+        c.price as course_price,
+        br.name as branch_name
+      FROM bookings bk
+      LEFT JOIN courses c ON bk.course_id = c.id
+      LEFT JOIN branches br ON bk.branch_id = br.id
+      WHERE bk.user_id = $1
+      ORDER BY bk.created_at DESC
+      LIMIT 10
+    `, [studentId]);
+
+    res.json({
+      success: true,
+      student: userRes.rows[0],
+      bookings: bookingsRes.rows,
+    });
+  } catch (error) {
+    console.error('Get student detail error:', error);
+    res.status(500).json({ error: 'Server error while fetching student detail' });
+  }
+};
+
+module.exports = {
+  getDashboardStats,
+  getAllBookings,
+  getAllUsers,
+  updateBookingStatus,
+  deleteBooking,
+  getRevenueData,
+  getEnrollmentData,
+  getBestSellingCourses,
+  createUser,
+  updateUser,
+  toggleUserStatus,
+  resetUserPassword,
+  walkInEnrollment,
+  getAllTransactions,
+  getUnpaidBookings,
+  getFunnelData,
+  getCourseDistribution,
+  getBranchPerformance,
+  getNotifications,
+  markBookingAsPaid,
+  sendReceiptEmail,
+  getEmailContent,
+  updateEmailContent,
+  getTodayStudents,
+  getStudentDetail,
+};
+

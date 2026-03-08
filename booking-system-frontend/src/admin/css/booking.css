@@ -134,7 +134,7 @@
 /* ======== Stats Cards ======== */
 .booking-stats {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 20px;
 }
 
@@ -175,6 +175,14 @@
     background: linear-gradient(90deg, #22c55e, #4ade80);
 }
 
+.mini-stat:nth-child(4)::before {
+    background: linear-gradient(90deg, #ef4444, #f87171);
+}
+
+.mini-stat:nth-child(5)::before {
+    background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+}
+
 .mini-stat:hover {
     transform: translateY(-2px);
     box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
@@ -210,6 +218,16 @@
     color: #22c55e;
 }
 
+.mini-stat-icon.red {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+.mini-stat-icon.purple {
+    background: rgba(139, 92, 246, 0.1);
+    color: #8b5cf6;
+}
+
 .mini-stat-content {
     display: flex;
     flex-direction: column;
@@ -238,6 +256,14 @@
 
 .mini-stat .value.green {
     color: #22c55e;
+}
+
+.mini-stat .value.red {
+    color: #ef4444;
+}
+
+.mini-stat .value.purple {
+    color: #8b5cf6;
 }
 
 .mini-stat-subtitle {
@@ -561,6 +587,11 @@
     color: #ef4444;
 }
 
+.status-pill.pending {
+    background: rgba(139, 92, 246, 0.1);
+    color: #8b5cf6;
+}
+
 /* ======== Action Buttons ======== */
 .action-btns {
     display: flex;
@@ -679,41 +710,46 @@
     max-width: 600px;
     width: 95%;
     max-height: 90vh;
-    overflow-y: auto;
-    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 64px rgba(15, 23, 42, 0.18), 0 8px 24px rgba(15, 23, 42, 0.1);
     animation: bkModalSlideIn 0.3s ease-out;
 }
 
 .bk-modal-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    padding: 25px 28px;
-    border-bottom: 2px solid var(--border-color);
+    align-items: center;
+    padding: 20px 28px;
+    background: linear-gradient(135deg, #1a4fba 0%, #1e3a8a 100%);
+    border-bottom: none;
+    flex-shrink: 0;
 }
 
 .bk-modal-header h2 {
-    margin: 0 0 6px;
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: var(--text-color);
+    margin: 0 0 3px;
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: -0.01em;
 }
 
 .bk-modal-header p {
     margin: 0;
-    font-size: 0.88rem;
-    color: var(--secondary-text);
-    font-weight: 600;
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.65);
+    font-weight: 500;
 }
 
 .bk-modal-close {
-    background: var(--bg-color);
-    border: none;
-    color: var(--secondary-text);
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    color: #fff;
     font-size: 22px;
-    width: 40px;
-    height: 40px;
-    min-width: 40px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
     border-radius: 10px;
     cursor: pointer;
     display: flex;
@@ -721,15 +757,19 @@
     justify-content: center;
     transition: all 0.2s ease;
     line-height: 1;
+    padding: 0;
 }
 
 .bk-modal-close:hover {
-    background: var(--border-color);
-    color: var(--text-color);
+    background: rgba(239, 68, 68, 0.75);
+    border-color: transparent;
+    transform: rotate(90deg);
 }
 
 .bk-modal-body {
     padding: 28px;
+    overflow-y: auto;
+    flex: 1;
 }
 
 .bk-modal-status-center {
@@ -865,12 +905,12 @@
 
 /* Modal Footer */
 .bk-modal-footer {
-    border-top: 1px solid var(--border-color);
-    padding: 20px 28px;
+    border-top: 1px solid #eef2f7;
+    padding: 16px 24px;
     display: flex;
-    gap: 12px;
-    background: var(--bg-color);
-    border-radius: 0 0 20px 20px;
+    gap: 10px;
+    background: #f8fafc;
+    flex-shrink: 0;
 }
 
 .bk-modal-btn-close {
@@ -944,7 +984,7 @@
 /* ======== Responsive ======== */
 @media (max-width: 1024px) {
     .booking-stats {
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: 14px;
     }
 
@@ -989,7 +1029,7 @@
     }
 
     .booking-stats {
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(2, 1fr);
         gap: 10px;
     }
 
@@ -1136,7 +1176,7 @@
     }
 
     .booking-stats {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, 1fr);
         gap: 8px;
     }
 

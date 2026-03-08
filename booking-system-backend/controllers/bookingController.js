@@ -7,7 +7,7 @@ const createBooking = async (req, res) => {
     const userId = req.user.id;
 
     // Validate required fields
-    if (!courseId || !branchId || !bookingDate) {
+    if (!courseId || !branchId) {
       return res.status(400).json({ error: 'Please provide all required fields' });
     }
 

@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import './css/user.css';
 import { coursesAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
+import Pagination from './components/Pagination';
+
+const COURSE_PAGE_SIZE = 10;
 
 const CourseManagement = () => {
     const { showNotification } = useNotification();
@@ -10,6 +13,7 @@ const CourseManagement = () => {
     const [loading, setLoading] = useState(false);
     const [showModal, setShowModal] = useState(false);
     const [editingCourse, setEditingCourse] = useState(null);
+    const [coursePage, setCoursePage] = useState(1);
     const [courseData, setCourseData] = useState({
         name: '',
         description: '',
@@ -22,10 +26,12 @@ const CourseManagement = () => {
     });
     const [pricingVariations, setPricingVariations] = useState([]);
     const [viewingImage, setViewingImage] = useState(null);
+    const [courseConfig, setCourseConfig] = useState(null);
 
     // Fetch courses from database
     useEffect(() => {
         fetchCourses();
+        coursesAPI.getConfig().then(r => { if (r.success) setCourseConfig(r.config); }).catch(() => {});
     }, []);
 
     const fetchCourses = async () => {
@@ -309,6 +315,12 @@ const CourseManagement = () => {
         course.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    // Reset to page 1 when search changes
+    useEffect(() => { setCoursePage(1); }, [searchTerm]);
+
+    const courseTotalPages = Math.ceil(filteredCourses.length / COURSE_PAGE_SIZE);
+    const pagedCourses = filteredCourses.slice((coursePage - 1) * COURSE_PAGE_SIZE, coursePage * COURSE_PAGE_SIZE);
+
     return (
         <div className="user-management-container">
             <div className="course-management-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
@@ -375,8 +387,9 @@ const CourseManagement = () => {
                     <p style={{ fontSize: '0.9rem' }}>Try adjusting your search or add a new course</p>
                 </div>
             ) : (
+                <>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
-                    {filteredCourses.map((course) => (
+                    {pagedCourses.map((course) => (
                         <div
                             key={course.id}
                             style={{
@@ -432,6 +445,20 @@ const CourseManagement = () => {
 
                             {/* Course Content */}
                             <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', flex: 1 }}>
+                                {course.category === 'Promo' && (
+                                    <div style={{ marginBottom: '8px' }}>
+                                        <span style={{
+                                            display: 'inline-flex', alignItems: 'center', gap: '4px',
+                                            padding: '3px 8px',
+                                            background: 'linear-gradient(135deg, #fef3c7, #fde68a)',
+                                            color: '#92400e', borderRadius: '6px',
+                                            fontSize: '0.72rem', fontWeight: '800',
+                                            border: '1px solid #f59e0b', letterSpacing: '0.03em'
+                                        }}>
+                                            🏷️ PROMO BUNDLE
+                                        </span>
+                                    </div>
+                                )}
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px' }}>
                                     <h3 style={{ fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-color)', margin: 0, flex: 1 }}>
                                         {course.name}
@@ -504,7 +531,13 @@ const CourseManagement = () => {
                                                         border: '1px solid var(--border-color)'
                                                     }}>
                                                         <span style={{ fontSize: '0.85rem', color: 'var(--text-color)', fontWeight: '500' }}>
-                                                            {course.course_type}
+                                                            {course.category === 'Promo' ? (() => {
+                                                                const labels = {
+                                                                    'F2F+Motorcycle': 'F2F TDC + MOTOR', 'F2F+CarAT': 'F2F TDC + CAR AT', 'F2F+CarMT': 'F2F TDC + CAR MT',
+                                                                    'Online+Motorcycle': 'OTDC + MOTOR', 'Online+CarAT': 'OTDC + CAR AT', 'Online+CarMT': 'OTDC + CAR MT'
+                                                                }
+                                                                return labels[course.course_type] || course.course_type
+                                                            })() : course.course_type}
                                                         </span>
                                                         <span style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--primary-color)' }}>
                                                             ₱{parseFloat(course.price).toLocaleString()}
@@ -580,6 +613,14 @@ const CourseManagement = () => {
                         </div>
                     ))}
                 </div>
+                <Pagination
+                    currentPage={coursePage}
+                    totalPages={courseTotalPages}
+                    onPageChange={setCoursePage}
+                    totalItems={filteredCourses.length}
+                    pageSize={COURSE_PAGE_SIZE}
+                />
+                </>
             )}
 
             {/* Image Viewer Modal */}
@@ -678,29 +719,21 @@ const CourseManagement = () => {
             {showModal && (
                 <div className="modal-overlay">
                     <div className="modal-container user-modal" style={{ maxWidth: '650px', width: '95%' }}>
-                        <div className="modal-header" style={{
-                            background: 'var(--card-bg)',
-                            color: 'var(--text-color)',
-                            padding: '24px 30px',
-                            borderBottom: '1px solid var(--border-color)'
-                        }}>
-                            <div>
-                                <h2 style={{ color: 'var(--text-color)', marginBottom: '4px', fontWeight: '700' }}>
-                                    {editingCourse ? 'Edit Course' : 'Add New Course'}
-                                </h2>
-                                <p style={{ fontSize: '0.85rem', color: 'var(--secondary-text)', margin: 0 }}>
-                                    {editingCourse ? 'Update course information' : 'Fill in the details to add a new course'}
-                                </p>
+                        <div className="modal-header">
+                            <div className="modal-header-left">
+                                <div className="modal-header-icon">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+                                </div>
+                                <div>
+                                    <h2>{editingCourse ? 'Edit Course' : 'Add New Course'}</h2>
+                                    <p>{editingCourse ? 'Update course information' : 'Fill in the details to add a new course'}</p>
+                                </div>
                             </div>
-                            <button
-                                className="close-modal"
-                                onClick={handleCloseModal}
-                                style={{
-                                    background: 'var(--card-bg)',
-                                    border: '1.5px solid var(--border-color)',
-                                    color: 'var(--text-color)'
-                                }}
-                            >&times;</button>
+                            <div className="modal-header-right">
+                                <button className="close-modal" onClick={handleCloseModal}>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                            </div>
                         </div>
                         <form onSubmit={handleAddCourse}>
                             <div className="modal-body" style={{
@@ -829,9 +862,14 @@ const CourseManagement = () => {
                                                 color: 'var(--text-color)'
                                             }}
                                         >
-                                            <option value="Basic">Basic</option>
-                                            <option value="TDC">TDC (Theoretical Driving Course)</option>
-                                            <option value="PDC">PDC (Practical Driving Course)</option>
+                                            {(courseConfig?.categories || ['Basic', 'TDC', 'PDC', 'Promo']).map(cat => (
+                                                <option key={cat} value={cat}>
+                                                    {cat === 'TDC' ? 'TDC (Theoretical Driving Course)'
+                                                        : cat === 'PDC' ? 'PDC (Practical Driving Course)'
+                                                        : cat === 'Promo' ? '🏷️ Promo Bundle (TDC + PDC)'
+                                                        : cat}
+                                                </option>
+                                            ))}
                                         </select>
                                     </div>
                                     <div>
@@ -882,20 +920,53 @@ const CourseManagement = () => {
                                         >
                                             <option value="">Select Type</option>
                                             {courseData.category === 'TDC' && (
-                                                <>
-                                                    <option value="Online">Online</option>
-                                                    <option value="F2F">F2F (Face-to-Face)</option>
-                                                </>
+                                                (courseConfig?.tdcTypes || [{ value: 'Online', label: 'Online' }, { value: 'F2F', label: 'F2F (Face-to-Face)' }])
+                                                    .map(t => <option key={t.value} value={t.value}>{t.label}</option>)
                                             )}
                                             {courseData.category === 'PDC' && (
-                                                <>
-                                                    <option value="Automatic">Automatic</option>
-                                                    <option value="Manual">Manual</option>
-                                                    <option value="V1-Tricycle">V1-Tricycle</option>
-                                                    <option value="B1-Van/B2 - L300">B1 - Van/B2 - L300</option>
-                                                </>
+                                                (courseConfig?.pdcTypes || [{ value: 'Automatic', label: 'Automatic' }, { value: 'Manual', label: 'Manual' }, { value: 'V1-Tricycle', label: 'V1-Tricycle' }, { value: 'B1-Van/B2 - L300', label: 'B1 - Van/B2 - L300' }])
+                                                    .map(t => <option key={t.value} value={t.value}>{t.label}</option>)
                                             )}
                                         </select>
+                                    </div>
+                                )}
+
+                                {/* Promo Bundle Selector */}
+                                {courseData.category === 'Promo' && (
+                                    <div style={{ marginBottom: '20px' }}>
+                                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-color)' }}>
+                                            Bundle Type <span style={{ color: '#ef4444' }}>*</span>
+                                        </label>
+                                        <select
+                                            name="course_type"
+                                            value={courseData.course_type}
+                                            onChange={handleInputChange}
+                                            required
+                                            style={{
+                                                width: '100%',
+                                                padding: '12px',
+                                                border: '1.5px solid #f59e0b',
+                                                borderRadius: '10px',
+                                                fontSize: '0.95rem',
+                                                background: 'var(--card-bg)',
+                                                color: 'var(--text-color)'
+                                            }}
+                                        >
+                                            <option value="">Select Promo Bundle</option>
+                                            {(courseConfig?.bundleTypes || [
+                                                { value: 'F2F+Motorcycle', label: 'F2F TDC + MOTOR (Motorcycle PDC)' },
+                                                { value: 'F2F+CarAT', label: 'F2F TDC + CAR AT (Car Automatic PDC)' },
+                                                { value: 'F2F+CarMT', label: 'F2F TDC + CAR MT (Car Manual PDC)' },
+                                                { value: 'Online+Motorcycle', label: 'OTDC + MOTOR (Motorcycle PDC)' },
+                                                { value: 'Online+CarAT', label: 'OTDC + CAR AT (Car Automatic PDC)' },
+                                                { value: 'Online+CarMT', label: 'OTDC + CAR MT (Car Manual PDC)' },
+                                            ]).map(b => (
+                                                <option key={b.value} value={b.value}>{b.label}</option>
+                                            ))}
+                                        </select>
+                                        <p style={{ marginTop: '6px', fontSize: '0.8rem', color: '#92400e', background: '#fef3c7', padding: '8px 10px', borderRadius: '8px' }}>
+                                            🏷️ Students select a TDC slot first, then a PDC slot when booking this promo.
+                                        </p>
                                     </div>
                                 )}
 

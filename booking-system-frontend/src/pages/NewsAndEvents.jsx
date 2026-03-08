@@ -50,6 +50,17 @@ function NewsAndEvents() {
     return new Date(dateString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
   }
 
+  const handleVideoClick = async (video) => {
+    setSelectedVideo(video)
+    try {
+      if (video.id) {
+        await newsAPI.incrementInteraction(video.id)
+      }
+    } catch (error) {
+      console.error('Failed to increment view:', error)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-white">
       {/* Hero Section */}
@@ -110,7 +121,7 @@ function NewsAndEvents() {
                       className="group relative rounded-2xl overflow-hidden cursor-pointer shadow-xl hover:shadow-2xl hover:shadow-[#F3B74C]/20 transition-all duration-300 hover:-translate-y-1 bg-black"
                       data-aos="fade-up"
                       data-aos-delay={idx * 100}
-                      onClick={() => setSelectedVideo(video)}
+                      onClick={() => handleVideoClick(video)}
                     >
                       {/* Thumbnail Container */}
                       <div className="relative w-full" style={{ aspectRatio: '9/16' }}>

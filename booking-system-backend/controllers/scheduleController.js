@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { sendNoShowEmail } = require('../utils/emailService');
+const { sendNoShowEmail, sendPaymentReceiptEmail } = require('../utils/emailService');
 
 // Get slots (either by specific date, or all upcoming if date is omitted)
 const getSlotsByDate = async (req, res) => {
@@ -275,19 +275,42 @@ const enrollStudent = async (req, res) => {
       }
     }
 
-    // Create enrollment
-    const result = await pool.query(
-      `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [slotId, student_id, enrollment_status || 'enrolled']
+    // Create or reactivate enrollment (handles re-enroll after no-show/cancelled)
+    const existing = await pool.query(
+      'SELECT id, enrollment_status FROM schedule_enrollments WHERE slot_id = $1 AND student_id = $2',
+      [slotId, student_id]
     );
 
-    // Decrease available slots
-    await pool.query(
-      'UPDATE schedule_slots SET available_slots = available_slots - 1 WHERE id = $1',
-      [slotId]
-    );
+    let result;
+    if (existing.rows.length > 0) {
+      // Re-enroll: update existing record without touching available_slots (already counted)
+      const wasActive = !['no-show', 'cancelled'].includes(existing.rows[0].enrollment_status);
+      result = await pool.query(
+        `UPDATE schedule_enrollments
+           SET enrollment_status = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE slot_id = $2 AND student_id = $3
+         RETURNING *`,
+        [enrollment_status || 'enrolled', slotId, student_id]
+      );
+      // Only decrement capacity if the previous status was inactive (no-show / cancelled)
+      if (!wasActive) {
+        await pool.query(
+          'UPDATE schedule_slots SET available_slots = available_slots - 1 WHERE id = $1 AND available_slots > 0',
+          [slotId]
+        );
+      }
+    } else {
+      result = await pool.query(
+        `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
+         VALUES ($1, $2, $3)
+         RETURNING *`,
+        [slotId, student_id, enrollment_status || 'enrolled']
+      );
+      await pool.query(
+        'UPDATE schedule_slots SET available_slots = available_slots - 1 WHERE id = $1 AND available_slots > 0',
+        [slotId]
+      );
+    }
 
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -351,39 +374,86 @@ const cancelEnrollment = async (req, res) => {
   }
 };
 
+// Mark reschedule fee as paid (admin/staff confirms ₱1000 no-show fee collected)
+const markFeePaid = async (req, res) => {
+  try {
+    const { enrollmentId } = req.params;
+    const result = await pool.query(
+      `UPDATE schedule_enrollments
+         SET reschedule_fee_paid = TRUE, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND enrollment_status = 'no-show'
+       RETURNING id, reschedule_fee_paid`,
+      [enrollmentId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No-show enrollment not found' });
+    }
+    res.json({ success: true, reschedule_fee_paid: true });
+  } catch (error) {
+    console.error('Mark fee paid error:', error);
+    res.status(500).json({ error: 'Server error while marking fee paid' });
+  }
+};
+
 // Get all enrollments for the currently logged-in student
 const getMyEnrollments = async (req, res) => {
   try {
     const studentId = req.user.id;
 
+    // Query starts from bookings (every course purchase) so students always see
+    // their history even before admin assigns them to a schedule slot.
+    // A LATERAL subquery attaches the best-matching schedule enrollment (same
+    // course category, most recent) without producing duplicate rows.
     const result = await pool.query(
       `SELECT
-          se.id                       AS enrollment_id,
-          se.enrollment_status,
-          se.created_at               AS enrolled_at,
-          ss.date                     AS schedule_date,
-          ss.end_date                 AS schedule_end_date,
-          ss.session,
-          ss.time_range,
-          ss.type                     AS slot_type,
-          b.name                      AS course_name,
-          b.branch_id,
-          br.name                     AS branch_name,
-          b.payment_status,
+          b.id                        AS booking_id,
+          c.name                      AS course_name,
+          b.total_amount              AS amount_paid,
+          b.payment_type              AS payment_status,
           b.payment_method,
           b.course_type,
           b.course_id,
+          b.branch_id,
+          b.status                    AS booking_status,
+          b.created_at                AS enrolled_at,
           c.name                      AS course_full_name,
           c.category                  AS course_category,
-          c.duration                  AS course_duration
-        FROM schedule_enrollments se
-        JOIN schedule_slots ss ON se.slot_id = ss.id
-        LEFT JOIN bookings b ON b.student_id = se.student_id
-                             AND b.schedule_slot_id = se.slot_id
-        LEFT JOIN branches br ON ss.branch_id = br.id
-        LEFT JOIN courses c ON b.course_id = c.id
-        WHERE se.student_id = $1
-        ORDER BY se.created_at DESC`,
+          c.duration                  AS course_duration,
+          c.price                     AS course_price,
+          br.name                     AS branch_name,
+          sel.enrollment_id,
+          sel.enrollment_status,
+          sel.reschedule_fee_paid,
+          sel.schedule_date,
+          sel.schedule_end_date,
+          sel.session,
+          sel.time_range,
+          sel.slot_type
+        FROM bookings b
+        LEFT JOIN courses c   ON c.id  = b.course_id
+        LEFT JOIN branches br ON br.id = b.branch_id
+        LEFT JOIN LATERAL (
+          SELECT
+              se.id                   AS enrollment_id,
+              se.enrollment_status,
+              se.reschedule_fee_paid,
+              ss.date                 AS schedule_date,
+              ss.end_date             AS schedule_end_date,
+              ss.session,
+              ss.time_range,
+              ss.type                 AS slot_type
+          FROM schedule_enrollments se
+          JOIN schedule_slots ss ON ss.id = se.slot_id
+          WHERE se.student_id = b.user_id
+            AND LOWER(ss.type) = LOWER(COALESCE(c.category, b.course_type, ''))
+          ORDER BY se.created_at DESC
+          LIMIT 1
+        ) sel ON true
+        WHERE b.user_id = $1
+          AND b.status NOT IN ('cancelled')
+          AND (b.payment_type IS NULL OR b.payment_type NOT IN ('Reschedule Fee'))
+          AND (b.notes IS NULL OR (b.notes::jsonb->>'source') IS DISTINCT FROM 'reschedule_fee')
+        ORDER BY b.created_at DESC`,
       [studentId]
     );
 
@@ -391,6 +461,128 @@ const getMyEnrollments = async (req, res) => {
   } catch (error) {
     console.error('Get my enrollments error:', error);
     res.status(500).json({ error: 'Server error while fetching enrollments' });
+  }
+};
+
+// Reschedule a student from one slot to another
+const rescheduleEnrollment = async (req, res) => {
+  const { enrollmentId } = req.params;
+  const { new_slot_id } = req.body;
+
+  if (!new_slot_id) {
+    return res.status(400).json({ error: 'new_slot_id is required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Fetch old enrollment + slot info
+    const enrollRow = await client.query(
+      `SELECT se.id, se.student_id, se.slot_id, se.enrollment_status, ss.type, ss.branch_id
+       FROM schedule_enrollments se
+       JOIN schedule_slots ss ON se.slot_id = ss.id
+       WHERE se.id = $1`,
+      [enrollmentId]
+    );
+
+    if (enrollRow.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Enrollment not found' });
+    }
+
+    const old = enrollRow.rows[0];
+
+    if (parseInt(new_slot_id) === parseInt(old.slot_id)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Student is already in this slot' });
+    }
+
+    // 2. Validate new slot has capacity
+    const newSlotRow = await client.query(
+      `SELECT id, available_slots FROM schedule_slots WHERE id = $1`,
+      [new_slot_id]
+    );
+    if (newSlotRow.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Target slot not found' });
+    }
+    if (newSlotRow.rows[0].available_slots <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Target slot is full' });
+    }
+
+    // 3. Cancel old enrollment and restore its capacity (if it was an active seat)
+    await client.query(
+      `UPDATE schedule_enrollments SET enrollment_status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [enrollmentId]
+    );
+    const wasActive = !['no-show', 'cancelled'].includes(old.enrollment_status);
+    if (wasActive) {
+      await client.query(
+        `UPDATE schedule_slots SET available_slots = available_slots + 1 WHERE id = $1`,
+        [old.slot_id]
+      );
+    }
+
+    // 4. Cancel any companion future enrollments of the same type (e.g. Day-2 TDC slot)
+    if (old.type) {
+      const siblings = await client.query(
+        `UPDATE schedule_enrollments
+           SET enrollment_status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+         WHERE student_id = $1
+           AND id != $2
+           AND enrollment_status NOT IN ('no-show', 'cancelled')
+           AND slot_id IN (
+             SELECT id FROM schedule_slots WHERE type ILIKE $3 AND date >= CURRENT_DATE
+           )
+         RETURNING slot_id`,
+        [old.student_id, enrollmentId, `%${old.type}%`]
+      );
+      for (const row of siblings.rows) {
+        await client.query(
+          `UPDATE schedule_slots SET available_slots = available_slots + 1 WHERE id = $1`,
+          [row.slot_id]
+        );
+      }
+    }
+
+    // 5. Enroll in new slot (re-activate if record already exists)
+    const existingNew = await client.query(
+      `SELECT id, enrollment_status FROM schedule_enrollments WHERE slot_id = $1 AND student_id = $2`,
+      [new_slot_id, old.student_id]
+    );
+    if (existingNew.rows.length > 0) {
+      const prevInactive = ['no-show', 'cancelled'].includes(existingNew.rows[0].enrollment_status);
+      await client.query(
+        `UPDATE schedule_enrollments SET enrollment_status = 'enrolled', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [existingNew.rows[0].id]
+      );
+      if (prevInactive) {
+        await client.query(
+          `UPDATE schedule_slots SET available_slots = available_slots - 1 WHERE id = $1 AND available_slots > 0`,
+          [new_slot_id]
+        );
+      }
+    } else {
+      await client.query(
+        `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status) VALUES ($1, $2, 'enrolled')`,
+        [new_slot_id, old.student_id]
+      );
+      await client.query(
+        `UPDATE schedule_slots SET available_slots = available_slots - 1 WHERE id = $1 AND available_slots > 0`,
+        [new_slot_id]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Student rescheduled successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Reschedule enrollment error:', error);
+    res.status(500).json({ error: 'Server error while rescheduling' });
+  } finally {
+    client.release();
   }
 };
 
@@ -420,16 +612,49 @@ const processNoShow = async (req, res) => {
       [slot_id]
     );
 
+    // 3a. Cancel any other ACTIVE enrollments this student has in FUTURE slots
+    //     of the same type (TDC/PDC) — this clears the companion Day-2 slot so
+    //     the student can be properly rescheduled to a new Day-1 + Day-2 pair.
+    const slotTypeRow = await pool.query('SELECT type FROM schedule_slots WHERE id = $1', [slot_id]);
+    const slotType = slotTypeRow.rows[0]?.type || '';
+    if (slotType) {
+      const cancelledSiblings = await pool.query(
+        `UPDATE schedule_enrollments
+           SET enrollment_status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+         WHERE student_id = $1
+           AND id != $2
+           AND enrollment_status NOT IN ('no-show', 'cancelled')
+           AND slot_id IN (
+             SELECT id FROM schedule_slots
+             WHERE type ILIKE $3 AND date >= CURRENT_DATE
+           )
+         RETURNING slot_id`,
+        [student_id, enrollmentId, `%${slotType}%`]
+      );
+      // Free up capacity for each cancelled sibling slot
+      for (const row of cancelledSiblings.rows) {
+        await pool.query(
+          'UPDATE schedule_slots SET available_slots = available_slots + 1 WHERE id = $1',
+          [row.slot_id]
+        );
+      }
+    }
+
     // 3. Fetch comprehensive details to send the email
+    // Use LATERAL to get the student's most recent booking's course name
     const detailsResult = await pool.query(
       `SELECT 
          u.first_name, u.last_name, u.email,
          ss.date, ss.session, ss.time_range,
-         b.course_id, c.name as course_name
+         c.name as course_name
        FROM users u
        JOIN schedule_slots ss ON ss.id = $1
-       LEFT JOIN bookings b ON b.student_id = u.id AND b.schedule_slot_id = $1
-       LEFT JOIN courses c ON b.course_id = c.id
+       LEFT JOIN LATERAL (
+         SELECT bk.course_id FROM bookings bk
+         WHERE bk.user_id = u.id
+         ORDER BY bk.created_at DESC LIMIT 1
+       ) bk ON TRUE
+       LEFT JOIN courses c ON c.id = bk.course_id
        WHERE u.id = $2`,
       [slot_id, student_id]
     );
@@ -458,6 +683,196 @@ const processNoShow = async (req, res) => {
   }
 };
 
+// Get unassigned students for a slot (supports TDC, PDC, and Promo bundle students)
+const getUnassignedPdcStudents = async (req, res) => {
+  try {
+    const { course_type, slot_type = 'pdc', branch_id } = req.query;
+
+    // $1 — slot_type pattern used for category matching and enrollment check
+    const params = [`%${slot_type}%`];
+
+    // Optional course_type filter: checks the booking's stored type (b.course_type),
+    // the course entity's type (c.course_type), and the course name (c.name).
+    // b.course_type is the most reliable match because it stores the exact type selected
+    // during walk-in enrollment (e.g. 'Motorcycle', 'F2F', 'CarAT').
+    let courseTypeFilter = '';
+    if (course_type) {
+      params.push(`%${course_type}%`);
+      const p = params.length;
+      courseTypeFilter = `AND (b.course_type ILIKE $${p} OR c.course_type ILIKE $${p} OR c.name ILIKE $${p})`;
+    }
+
+    // Branch filter: only return students who enrolled at the same branch as the target slot
+    let branchFilter = '';
+    if (branch_id) {
+      params.push(branch_id);
+      branchFilter = `AND b.branch_id = $${params.length}`;
+    }
+
+    const result = await pool.query(
+      `SELECT 
+        b.id as booking_id, 
+        u.id as student_id, 
+        u.first_name, 
+        u.last_name, 
+        u.contact_numbers as phone,
+        c.name as course_name,
+        c.category as course_category,
+        c.course_type as course_type_label,
+        b.course_type, 
+        b.created_at,
+        (
+          SELECT COUNT(*) 
+          FROM schedule_enrollments se2 
+          JOIN schedule_slots ss2 ON se2.slot_id = ss2.id
+          WHERE se2.student_id = u.id 
+            AND ss2.type ILIKE $1
+            AND se2.enrollment_status = 'no-show'
+        ) as no_show_count
+      FROM bookings b
+      JOIN users u ON b.user_id = u.id
+      JOIN courses c ON b.course_id = c.id
+      WHERE (c.category ILIKE $1 OR c.category ILIKE '%Promo%')
+        AND b.status IN ('paid', 'confirmed', 'collectable')
+        ${courseTypeFilter}
+        ${branchFilter}
+        AND NOT EXISTS (
+           SELECT 1 FROM schedule_enrollments se 
+           JOIN schedule_slots ss ON se.slot_id = ss.id
+           WHERE se.student_id = u.id 
+             AND ss.type ILIKE $1
+             AND se.enrollment_status NOT IN ('no-show', 'cancelled')
+        )
+        AND EXISTS (
+           SELECT 1 FROM schedule_enrollments se3
+           JOIN schedule_slots ss3 ON se3.slot_id = ss3.id
+           WHERE se3.student_id = u.id
+             AND ss3.type ILIKE $1
+             AND se3.enrollment_status = 'no-show'
+        )
+      ORDER BY b.created_at DESC`,
+      params
+    );
+    res.json({ success: true, students: result.rows });
+  } catch (error) {
+    console.error('getUnassignedPdcStudents error:', error);
+    res.status(500).json({ error: 'Server error while fetching unassigned students' });
+  }
+};
+
+// Student pays their own remaining balance online
+const payRemainingBalance = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const { bookingId } = req.params;
+    const { payment_method } = req.body;
+
+    // Verify this booking belongs to the logged-in student
+    const bookingResult = await pool.query(
+      `SELECT b.*, c.price AS course_price, c.name AS course_name,
+              u.first_name, u.last_name, u.email
+       FROM bookings b
+       LEFT JOIN courses c ON b.course_id = c.id
+       JOIN users u ON b.user_id = u.id
+       WHERE b.id = $1 AND b.user_id = $2`,
+      [bookingId, studentId]
+    );
+
+    if (bookingResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Booking not found or not yours' });
+    }
+
+    const booking = bookingResult.rows[0];
+    if (booking.status === 'paid') {
+      return res.status(400).json({ error: 'Booking is already fully paid' });
+    }
+
+    const coursePrice = parseFloat(booking.course_price || 0);
+    const previousAmount = parseFloat(booking.total_amount || 0);
+
+    // Update to full payment
+    await pool.query(
+      `UPDATE bookings
+       SET status = 'paid', total_amount = $1, payment_type = 'Full Payment',
+           payment_method = COALESCE($2, payment_method), updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3`,
+      [coursePrice, payment_method || null, bookingId]
+    );
+
+    // Send full payment receipt email
+    try {
+      await sendPaymentReceiptEmail(booking.email, booking.first_name, booking.last_name, {
+        bookingId: booking.id,
+        transactionId: `TXN-${new Date().getFullYear()}-${String(booking.id).padStart(3, '0')}`,
+        courseName: booking.course_name || 'N/A',
+        amountPaid: coursePrice,
+        coursePrice,
+        paymentMethod: payment_method || 'Online',
+        paymentDate: new Date(),
+        isFullPayment: true,
+        balanceDue: 0,
+      });
+    } catch (emailErr) {
+      console.error('Receipt email failed (non-fatal):', emailErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Balance paid successfully! A receipt has been sent to your email.',
+      balance_collected: Math.max(0, coursePrice - previousAmount),
+    });
+  } catch (error) {
+    console.error('Pay remaining balance error:', error);
+    res.status(500).json({ error: 'Server error while processing payment' });
+  }
+};
+
+// Get all No-Show students with slot + fee info (admin/staff)
+const getNoShowStudents = async (req, res) => {
+  try {
+    const { branchId } = req.query;
+    const params = [];
+    let branchFilter = '';
+    if (branchId) {
+      params.push(branchId);
+      branchFilter = `AND ss.branch_id = $${params.length}`;
+    }
+
+    const result = await pool.query(
+      `SELECT
+         se.id            AS enrollment_id,
+         se.student_id,
+         se.reschedule_fee_paid,
+         se.updated_at    AS no_show_date,
+         u.first_name,
+         u.last_name,
+         u.email,
+         ss.id            AS slot_id,
+         ss.date          AS slot_date,
+         ss.end_date      AS slot_end_date,
+         ss.session,
+         ss.time_range,
+         ss.type,
+         ss.course_type,
+         ss.branch_id,
+         b.name           AS branch_name
+       FROM schedule_enrollments se
+       JOIN users u           ON u.id = se.student_id
+       JOIN schedule_slots ss ON ss.id = se.slot_id
+       LEFT JOIN branches b   ON b.id = ss.branch_id
+       WHERE se.enrollment_status = 'no-show'
+         ${branchFilter}
+       ORDER BY se.updated_at DESC`,
+      params
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error('getNoShowStudents error:', error);
+    res.status(500).json({ error: 'Server error fetching no-show students' });
+  }
+};
+
 module.exports = {
   getSlotsByDate,
   createSlot,
@@ -467,6 +882,11 @@ module.exports = {
   enrollStudent,
   updateEnrollmentStatus,
   cancelEnrollment,
+  markFeePaid,
   getMyEnrollments,
   processNoShow,
+  rescheduleEnrollment,
+  getUnassignedPdcStudents,
+  payRemainingBalance,
+  getNoShowStudents,
 };

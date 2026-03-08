@@ -33,6 +33,7 @@ app.use('/api/schedules', require('./routes/schedules'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/crm', require('./routes/crm'));
 app.use('/api/roles', require('./routes/roles'));
+app.use('/api/starpay', require('./routes/starpay')); // StarPay payment gateway
 
 // TEST ROUTE - ABSOLUTE PRIORITY
 app.get('/api/crm-check', (req, res) => {

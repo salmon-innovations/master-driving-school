@@ -454,6 +454,27 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
               <div className="space-y-4 text-sm leading-relaxed">
                 <p className="text-gray-700">{selectedCourse.description}</p>
                 <p className="text-gray-600">{selectedCourse.contact}</p>
+
+                {/* B1/B2 VAN/L300 Notice */}
+                {selectedCourse && (selectedCourse.name.toLowerCase().includes('b1') || selectedCourse.name.toLowerCase().includes('b2') || selectedCourse.name.toLowerCase().includes('van') || selectedCourse.name.toLowerCase().includes('l300')) && (
+                  <div className="bg-blue-50 border-l-4 border-[#2157da] p-4 my-4 rounded-r-md">
+                    <p className="text-[#2157da] font-medium text-sm">
+                      <span className="font-bold mr-1">Note:</span>
+                      For Practical Driving Course (PDC) - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.
+                    </p>
+                  </div>
+                )}
+
+                {/* A1 Tricycle Notice */}
+                {selectedCourse && (selectedCourse.name.toLowerCase().includes('a1') || selectedCourse.name.toLowerCase().includes('tricycle')) && (
+                  <div className="bg-blue-50 border-l-4 border-[#2157da] p-4 my-4 rounded-r-md">
+                    <p className="text-[#2157da] font-medium text-sm">
+                      <span className="font-bold mr-1">Note:</span>
+                      For Practical Driving Course (PDC) - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.
+                    </p>
+                  </div>
+                )}
+
                 <p className="text-gray-600">
                   Please be reminded that upon checking out <span className="text-red-600 font-semibold">you agree to our company terms and conditions.</span> To check the available schedule for walk in you may call the numbers below:
                 </p>

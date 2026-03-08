@@ -57,7 +57,7 @@ const SalePayment = () => {
                     // Inject diverse mock data if none exists
                     response.transactions = [
                         { transaction_id: 'TXN-2026-001', student_name: 'John Doe', transaction_date: new Date().toISOString(), amount: 2500, payment_method: 'GCash', status: 'success' },
-                        { transaction_id: 'TXN-2026-002', student_name: 'Jane Smith', transaction_date: new Date().toISOString(), amount: 1500, payment_method: 'StarPay', status: 'success' },
+                        { transaction_id: 'TXN-2026-002', student_name: 'Jane Smith', transaction_date: new Date().toISOString(), amount: 1500, payment_method: 'GCash', status: 'success' },
                         { transaction_id: 'TXN-2026-003', student_name: 'Juan Dela Cruz', transaction_date: new Date().toISOString(), amount: 3000, payment_method: 'Cash', status: 'success' },
                         { transaction_id: 'TXN-2026-004', student_name: 'Maria Clara', transaction_date: new Date().toISOString(), amount: 2500, payment_method: 'GCash', status: 'success' }
                     ];
@@ -149,7 +149,7 @@ const SalePayment = () => {
     // Derived chart data
     const paymentMethods = [
         { name: 'GCash', value: 0, color: '#007dfe' },
-        { name: 'StarPay', value: 0, color: '#ef4444' },
+        { name: 'Cash', value: 0, color: '#6366f1' },
         { name: 'Cash', value: 0, color: '#64748b' },
     ];
 
@@ -773,9 +773,6 @@ const SalePayment = () => {
                         <div className="quick-method-filters">
                             <button className="method-btn gcash" onClick={() => { setSearchTerm('GCash'); setShowHistoryModal(true); }}>
                                 <span className="dot"></span>GCash
-                            </button>
-                            <button className="method-btn starpay" onClick={() => { setSearchTerm('StarPay'); setShowHistoryModal(true); }}>
-                                <span className="dot"></span>StarPay
                             </button>
                             <button className="method-btn cash" onClick={() => { setSearchTerm('Cash'); setShowHistoryModal(true); }}>
                                 <span className="dot"></span>Cash

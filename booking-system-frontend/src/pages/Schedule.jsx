@@ -20,18 +20,36 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
   const [dbSlots2, setDbSlots2] = useState([])                 // Slots for Day 2 date
   const [loadingSlots2, setLoadingSlots2] = useState(false)
 
+  // Promo Bundle state (category === 'Promo': TDC + PDC bundle)
+  const [promoStep, setPromoStep] = useState(1)               // 1 = pick TDC, 2 = pick PDC
+  const [promoTdcViewMonth, setPromoTdcViewMonth] = useState(new Date())
+  const [promoTdcRawSlots, setPromoTdcRawSlots] = useState([])
+  const [loadingPromoTdc, setLoadingPromoTdc] = useState(false)
+  const [promoTdcSlot, setPromoTdcSlot] = useState(null)
+  const [promoPdcCalMonth, setPromoPdcCalMonth] = useState(new Date())
+  const [promoPdcDate, setPromoPdcDate] = useState(null)
+  const [promoPdcRawSlots, setPromoPdcRawSlots] = useState([])
+  const [loadingPromoPdc, setLoadingPromoPdc] = useState(false)
+  const [promoPdcSlot, setPromoPdcSlot] = useState(null)
+  const [promoPdcMotorType, setPromoPdcMotorType] = useState(null) // 'MT' | 'AT' — only for Motorcycle PDC bundles
+  // Promo PDC Day 2 state (half-day sessions: Morning / Afternoon)
+  const [promoPdcSelectingDay2, setPromoPdcSelectingDay2] = useState(false)
+  const [promoPdcDay2CalMonth, setPromoPdcDay2CalMonth] = useState(new Date())
+  const [promoPdcDate2, setPromoPdcDate2] = useState(null)
+  const [promoPdcRawSlots2, setPromoPdcRawSlots2] = useState([])
+  const [loadingPromoPdc2, setLoadingPromoPdc2] = useState(false)
+  const [promoPdcSlot2, setPromoPdcSlot2] = useState(null)
+
   // Determine which slot type to show based on selected course
   const isTDCCourse = selectedCourse?.type === 'tdc' ||
     selectedCourse?.category === 'TDC' ||
     selectedCourse?.name?.toLowerCase().includes('tdc') ||
     selectedCourse?.shortName?.toLowerCase().includes('tdc')
 
-  // Motorcycle PDC: schedule is assigned by admin only — students cannot self-select
-  const isMotorcyclePDC = !isTDCCourse && (
-    selectedCourse?.name?.toLowerCase().includes('motorcycle') ||
-    selectedCourse?.shortName?.toLowerCase().includes('motorcycle') ||
-    selectedCourse?.category?.toLowerCase().includes('motorcycle')
-  )
+  // Promo bundle: separate two-step flow (TDC slot + PDC slot)
+  const isPromoCourse = selectedCourse?.category === 'Promo'
+  const promoTdcType = isPromoCourse ? (selectedCourse.course_type?.split('+')[0] || 'F2F') : null
+  const promoPdcType = isPromoCourse ? (selectedCourse.course_type?.split('+')[1] || 'Motorcycle') : null
 
   // Redirect if no course is selected
   useEffect(() => {
@@ -98,6 +116,58 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
     }
   }, [preSelectedBranch])
 
+  // Promo bundle: fetch all TDC slots (step 1)
+  const fetchPromoTdcSlots = useCallback(async () => {
+    setLoadingPromoTdc(true)
+    try {
+      const branchId = preSelectedBranch?.id || null
+      const slots = await schedulesAPI.getSlotsByDate(null, branchId)
+      setPromoTdcRawSlots(slots.filter(s => s.type?.toLowerCase() === 'tdc'))
+    } catch (e) {
+      console.error('Failed to fetch promo TDC slots:', e)
+      setPromoTdcRawSlots([])
+    } finally {
+      setLoadingPromoTdc(false)
+    }
+  }, [preSelectedBranch])
+
+  // Promo bundle: fetch PDC slots for a selected date (step 2)
+  const fetchPromoPdcSlots = useCallback(async (date) => {
+    if (!date) return
+    setLoadingPromoPdc(true)
+    try {
+      const branchId = preSelectedBranch?.id || null
+      const y = date.getFullYear()
+      const m = String(date.getMonth() + 1).padStart(2, '0')
+      const d = String(date.getDate()).padStart(2, '0')
+      const slots = await schedulesAPI.getSlotsByDate(`${y}-${m}-${d}`, branchId)
+      setPromoPdcRawSlots(slots.filter(s => s.type?.toLowerCase() === 'pdc'))
+    } catch (e) {
+      console.error('Failed to fetch promo PDC slots:', e)
+      setPromoPdcRawSlots([])
+    } finally {
+      setLoadingPromoPdc(false)
+    }
+  }, [preSelectedBranch])
+
+  // Promo bundle: fetch PDC slots for Day 2 date
+  const fetchPromoPdcSlots2 = useCallback(async (date) => {
+    if (!date) return
+    setLoadingPromoPdc2(true)
+    try {
+      const branchId = preSelectedBranch?.id || null
+      const y = date.getFullYear()
+      const m = String(date.getMonth() + 1).padStart(2, '0')
+      const d = String(date.getDate()).padStart(2, '0')
+      const slots = await schedulesAPI.getSlotsByDate(`${y}-${m}-${d}`, branchId)
+      setPromoPdcRawSlots2(slots.filter(s => s.type?.toLowerCase() === 'pdc'))
+    } catch (e) {
+      setPromoPdcRawSlots2([])
+    } finally {
+      setLoadingPromoPdc2(false)
+    }
+  }, [preSelectedBranch])
+
   useEffect(() => {
     fetchSlotsForDate(selectedDate)
   }, [selectedDate, fetchSlotsForDate])
@@ -107,6 +177,24 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
       fetchSlotsForDate2(selectedDate2)
     }
   }, [selectedDate2, fetchSlotsForDate2, selectingDay2])
+
+  // Promo: fetch TDC slots once on mount
+  useEffect(() => {
+    if (isPromoCourse) fetchPromoTdcSlots()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchPromoTdcSlots])
+
+  // Promo: fetch PDC slots when step 2 date is picked
+  useEffect(() => {
+    if (isPromoCourse && promoPdcDate) fetchPromoPdcSlots(promoPdcDate)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promoPdcDate, fetchPromoPdcSlots])
+
+  // Promo: fetch PDC Day 2 slots when day 2 date is picked
+  useEffect(() => {
+    if (isPromoCourse && promoPdcDate2) fetchPromoPdcSlots2(promoPdcDate2)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promoPdcDate2, fetchPromoPdcSlots2])
 
   const getDaysInMonth = (date) => {
     const year = date.getFullYear()
@@ -170,6 +258,35 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
   // Called when user clicks a slot card
   const handleSlotClick = (slot) => {
     if (slot.available_slots === 0) return
+
+    // Promo bundle: step 1 = TDC slot, step 2 = PDC slot
+    if (isPromoCourse) {
+      if (promoStep === 1) {
+        setPromoTdcSlot(slot)
+      } else if (!promoPdcSelectingDay2) {
+        // Picking PDC Day 1
+        setPromoPdcSlot(slot)
+        setPromoPdcSlot2(null)
+        setPromoPdcDate2(null)
+        setPromoPdcRawSlots2([])
+        if (isHalfDay(slot.session)) {
+          setPromoPdcSelectingDay2(true)
+          showNotification(`PDC Day 1 selected (${slot.session}). Pick a different date below for Day 2.`, 'info')
+        } else {
+          setPromoPdcSelectingDay2(false)
+        }
+      } else {
+        // Picking PDC Day 2 — must match session
+        if (slot.session !== promoPdcSlot?.session) {
+          showNotification(`Day 2 must be the same session: ${promoPdcSlot?.session}`, 'warning')
+          return
+        }
+        setPromoPdcSlot2(slot)
+        showNotification('Both PDC days selected! Ready to proceed.', 'success')
+      }
+      return
+    }
+
     const halfDay = !isTDCCourse && isHalfDay(slot.session)
 
     if (!halfDay) {
@@ -202,23 +319,65 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
   }
 
   const handleProceedToPayment = () => {
-    // Motorcycle PDC: skip slot validation — admin assigns schedule
-    if (isMotorcyclePDC) {
+
+    // Promo bundle: requires both TDC + PDC slots
+    if (isPromoCourse) {
+      if (!promoTdcSlot) {
+        showNotification('Please select a TDC schedule (Step 1)', 'error')
+        setPromoStep(1)
+        return
+      }
+      if (!promoPdcSlot) {
+        showNotification('Please select a PDC schedule (Step 2)', 'error')
+        setPromoStep(2)
+        return
+      }
+      if (isHalfDay(promoPdcSlot.session) && !promoPdcSlot2) {
+        showNotification(`${promoPdcSlot.session} PDC sessions require 2 days. Please pick a Day 2 date and slot.`, 'warning')
+        setPromoStep(2)
+        return
+      }
       const scheduleData = {
-        date: new Date(),
-        slot: null,
-        slotDetails: null,
-        isMotorcyclePDC: true
+        date: new Date(promoTdcSlot.date + 'T00:00:00'),
+        slot: promoTdcSlot.id,
+        slotDetails: {
+          id: promoTdcSlot.id,
+          session: promoTdcSlot.session,
+          type: promoTdcSlot.type,
+          time: promoTdcSlot.time_range,
+          available: promoTdcSlot.available_slots,
+          total: promoTdcSlot.total_capacity,
+          date: promoTdcSlot.date,
+          end_date: promoTdcSlot.end_date,
+        },
+        pdcDate: promoPdcDate,
+        pdcSlot: promoPdcSlot.id,
+        pdcSlotDetails: {
+          id: promoPdcSlot.id,
+          session: promoPdcSlot.session,
+          type: promoPdcSlot.type,
+          time: promoPdcSlot.time_range,
+          available: promoPdcSlot.available_slots,
+          total: promoPdcSlot.total_capacity,
+          date: promoPdcDate,
+        },
+        pdcDate2: promoPdcSlot2 ? promoPdcDate2 : null,
+        pdcSlot2: promoPdcSlot2 ? promoPdcSlot2.id : null,
+        pdcSlotDetails2: promoPdcSlot2 ? {
+          id: promoPdcSlot2.id,
+          session: promoPdcSlot2.session,
+          type: promoPdcSlot2.type,
+          time: promoPdcSlot2.time_range,
+          available: promoPdcSlot2.available_slots,
+          total: promoPdcSlot2.total_capacity,
+          date: promoPdcDate2,
+        } : null,
       }
       setScheduleSelection(scheduleData)
       if (selectedCourse) {
-        const existingItem = cart.find(item => item.id === selectedCourse.id && item.type === courseType)
+        const existingItem = cart.find(item => item.id === selectedCourse.id)
         if (existingItem) {
-          setCart(cart.map(item =>
-            item.id === selectedCourse.id && item.type === courseType
-              ? { ...item, quantity: item.quantity + 1 }
-              : item
-          ))
+          setCart(cart.map(item => item.id === selectedCourse.id ? { ...item, quantity: 1 } : item))
         } else {
           setCart([...cart, {
             id: selectedCourse.id,
@@ -234,7 +393,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
           }])
         }
       }
-      showNotification('Proceeding to payment. Your schedule will be assigned by our admin.', 'info')
+      showNotification('Promo bundle schedule selected! Proceeding to payment...', 'success')
       onNavigate('payment')
       return
     }
@@ -276,6 +435,8 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
         time: selectedSlot.time_range,
         available: selectedSlot.available_slots,
         total: selectedSlot.total_capacity,
+        date: selectedSlot.date,
+        end_date: selectedSlot.end_date,
       },
       // Day 2 fields (only set for half-day PDC)
       ...(selectedSlot2 ? {
@@ -299,7 +460,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
       if (existingItem) {
         setCart(cart.map(item =>
           item.id === selectedCourse.id && item.type === courseType
-            ? { ...item, quantity: item.quantity + 1 }
+            ? { ...item, quantity: 1 }
             : item
         ))
       } else {
@@ -324,13 +485,84 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
 
   const tdcSlots = dbSlots.filter(s => {
     if (s.type?.toLowerCase() !== 'tdc' || !s.date) return false
+
+    // Filter TDC slots based on the courseType selected (e.g. F2F or Online)
+    if (courseType && s.course_type && s.course_type.toLowerCase() !== courseType.toLowerCase()) {
+      return false
+    }
+
     const d = new Date(s.date + 'T00:00:00')
     return isDateAvailable(d.getDate(), d)
   })
   const pdcSlots = dbSlots.filter(s => s.type?.toLowerCase() === 'pdc')
 
-  // Apply PDC session filter — matches DB values: 'Morning', 'Afternoon', 'Whole Day'
+  // Helper: check if a slot's course_type is "universal" (applies to all PDC courses)
+  const isUniversalCourseType = (ct) => {
+    if (!ct) return true;
+    const norm = ct.toLowerCase().trim();
+    return norm === 'both' || norm === 'any' || norm === 'all';
+  };
+
+  // Extract meaningful category-specific tokens from a course name string.
+  // Filters out generic words so only distinguishing identifiers remain,
+  // e.g. "Practical Driving Course(PDC) - (A1 - TRICYCLE)" → ["a1", "tricycle"]
+  const extractCategoryTokens = (str) => {
+    const stopWords = new Set([
+      'practical', 'driving', 'course', 'pdc', 'tdc', 'theoretical',
+      'dc', 'a', 'an', 'the', 'and', 'or', 'for', 'of', 'in', 'to',
+    ]);
+    return str
+      .toLowerCase()
+      .replace(/[()[\]{}'"%]/g, ' ')
+      .split(/[\s\-\/,;|&+]+/)
+      .filter(t => t.length >= 2 && !stopWords.has(t));
+  };
+
+  // Helper: check if a slot's course_type matches the student's selected course.
+  // Strategy:
+  //   1. Universal slot (null / both / any / all) → always show
+  //   2. Extract key tokens from slot.course_type and selectedCourse.name
+  //   3. If slot has NO specific tokens (too generic) → show
+  //   4. If ANY token overlaps between slot and selected course → show
+  //   5. No overlap → hide (slot is for a different PDC sub-course)
+  const pdcCourseTypeMatches = (slotCourseType) => {
+    if (isUniversalCourseType(slotCourseType)) return true;
+
+    const slotTokens = extractCategoryTokens(slotCourseType);
+    // Slot has no distinguishing tokens → treat as universal
+    if (slotTokens.length === 0) return true;
+
+    const courseTokens = new Set(
+      extractCategoryTokens((selectedCourse?.name || '') + ' ' + (selectedCourse?.shortName || ''))
+    );
+
+    // Show if at least one identifying token matches
+    return slotTokens.some(t => courseTokens.has(t));
+  };
+
+  // Apply PDC session & transmission filter
+  // Only filter by transmission if the selected courseType is explicitly a transmission variant (manual/automatic)
+  const transmissionKeywords = ['manual', 'automatic', 'at', 'mt'];
+  const isTransmissionType = !isTDCCourse && courseType &&
+    transmissionKeywords.some(k => courseType.toLowerCase().includes(k));
+
   const filteredPdcSlots = pdcSlots.filter(slot => {
+    // Filter by course_type (motorcycle vs car, etc.)
+    if (!pdcCourseTypeMatches(slot.course_type)) return false;
+
+    // Only apply transmission filter when student's courseType is a known transmission type
+    if (isTransmissionType && slot.transmission &&
+      slot.transmission.toLowerCase() !== 'both' &&
+      slot.transmission.toLowerCase() !== 'any') {
+      const transmissionNorm = slot.transmission.toLowerCase().trim();
+      const selectedNorm = courseType.toLowerCase().trim();
+      if (!selectedNorm.includes(transmissionNorm) && !transmissionNorm.includes(selectedNorm)) {
+        return false;
+      }
+    }
+
+    // Vehicle type filter
+
     if (pdcSessionFilter === 'All') return true
     if (pdcSessionFilter === 'Whole Day') return slot.session === 'Whole Day'
     if (pdcSessionFilter === 'Morning') return slot.session === 'Morning'
@@ -368,6 +600,78 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
     }
   }
 
+  // Promo TDC slot filtering (matches promoTdcType: 'F2F' or 'Online')
+  const promoTdcFiltered = promoTdcRawSlots.filter(s => {
+    if (!s.date) return false
+    if (promoTdcType) {
+      const sc = (s.course_type || '').toLowerCase()
+      const exp = promoTdcType.toLowerCase()
+      if (sc && sc !== exp && !sc.startsWith(exp)) return false
+    }
+    const d = new Date(s.date + 'T00:00:00')
+    return isDateAvailable(d.getDate(), d)
+  })
+
+  const promoTdcByMonth = promoTdcFiltered.reduce((acc, s) => {
+    const d = new Date(s.date + 'T00:00:00')
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    if (!acc[key]) acc[key] = []
+    acc[key].push(s)
+    return acc
+  }, {})
+  const promoTdcMonthKeys = Object.keys(promoTdcByMonth).sort()
+  const promoTdcCurrentMonthKey = `${promoTdcViewMonth.getFullYear()}-${String(promoTdcViewMonth.getMonth() + 1).padStart(2, '0')}`
+  const promoTdcSlotsForMonth = promoTdcByMonth[promoTdcCurrentMonthKey] || []
+  const hasPromoTdcPrev = promoTdcMonthKeys.some(k => k < promoTdcCurrentMonthKey)
+  const hasPromoTdcNext = promoTdcMonthKeys.some(k => k > promoTdcCurrentMonthKey)
+
+  const goToPrevPromoTdcMonth = () => {
+    const prev = promoTdcMonthKeys.filter(k => k < promoTdcCurrentMonthKey)
+    if (prev.length > 0) {
+      const [y, m] = prev[prev.length - 1].split('-').map(Number)
+      setPromoTdcViewMonth(new Date(y, m - 1, 1))
+    }
+  }
+  const goToNextPromoTdcMonth = () => {
+    const next = promoTdcMonthKeys.filter(k => k > promoTdcCurrentMonthKey)
+    if (next.length > 0) {
+      const [y, m] = next[0].split('-').map(Number)
+      setPromoTdcViewMonth(new Date(y, m - 1, 1))
+    }
+  }
+
+  // Promo PDC slot matching — filters by motorcycle vs car type + transmission
+  const promoPdcSlotMatches = (slot) => {
+    const ct = (slot.course_type || '').toLowerCase().trim()
+    const tr = (slot.transmission || '').toLowerCase().trim()
+    if (!ct || ct === 'both' || ct === 'any' || ct === 'all') {
+      if (promoPdcType === 'Motorcycle') return ct.includes('motor') || ct.includes('bike') || !ct
+      return true
+    }
+    if (promoPdcType === 'Motorcycle') {
+      const isMotor = ct.includes('motorcycle') || ct.includes('motor') || ct.includes('moto') || ct.includes('bike')
+      if (!isMotor) return false
+      if (promoPdcMotorType === 'MT') return !tr || tr === 'both' || tr === 'any' || tr.includes('manual') || tr === 'mt'
+      if (promoPdcMotorType === 'AT') return !tr || tr === 'both' || tr === 'any' || tr.includes('auto') || tr === 'at'
+      return true
+    }
+    // Car types — exclude motorcycle + special vehicle slots
+    if (ct.includes('motorcycle') || ct.includes('motor') || ct.includes('moto') || ct.includes('bike') ||
+      ct.includes('tricycle') || ct.includes('van') || ct.includes('l300') || ct.includes('b1-') ||
+      ct.includes('b2-') || ct.includes('v1-')) return false
+    if (promoPdcType === 'CarAT') return !tr || tr === 'both' || tr === 'any' || tr.includes('auto') || tr === 'at'
+    if (promoPdcType === 'CarMT') return !tr || tr === 'both' || tr === 'any' || tr.includes('manual') || tr === 'mt'
+    return true
+  }
+  const promoPdcFiltered = promoPdcRawSlots.filter(promoPdcSlotMatches)
+  // Day 2 slots must match vehicle type AND must match the same session as Day 1
+  const promoPdcFiltered2 = promoPdcRawSlots2
+    .filter(promoPdcSlotMatches)
+    .filter(s => s.session === promoPdcSlot?.session)
+
+  const { daysInMonth: promoPdcDaysInMonth, startingDayOfWeek: promoPdcStartDay } = getDaysInMonth(promoPdcCalMonth)
+  const { daysInMonth: promoPdcDay2DaysInMonth, startingDayOfWeek: promoPdcDay2StartDay } = getDaysInMonth(promoPdcDay2CalMonth)
+
   // Sync tdcViewMonth to the first available month when slots load
   useEffect(() => {
     if (isTDCCourse && tdcMonthKeys.length > 0 && !tdcSlotsByMonth[tdcCurrentMonthKey]) {
@@ -376,6 +680,15 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbSlots])
+
+  // Sync promoTdcViewMonth to the first available month when promo TDC slots load
+  useEffect(() => {
+    if (isPromoCourse && promoTdcMonthKeys.length > 0 && !promoTdcByMonth[promoTdcCurrentMonthKey]) {
+      const [y, m] = promoTdcMonthKeys[0].split('-').map(Number)
+      setPromoTdcViewMonth(new Date(y, m - 1, 1))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promoTdcRawSlots])
 
   // Show TDC slots for TDC courses (month-filtered), filtered PDC slots for PDC courses
   const relevantSlots = isTDCCourse ? tdcSlotsForMonth : filteredPdcSlots
@@ -403,62 +716,52 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
         {/* Header */}
         <div className="mb-8" data-aos="fade-down">
           <h1 className="text-3xl sm:text-4xl font-black text-gray-900 mb-2">
-            📅 {isMotorcyclePDC ? 'Schedule Information' : 'Select Your Schedule'}
+            📅 Select Your Schedule
           </h1>
           <p className="text-base text-gray-600">
-            {isMotorcyclePDC
-              ? <>For <span className="font-semibold text-[#2157da]">{selectedCourse?.name || 'Motorcycle PDC'}</span> — schedule is assigned by our admin team after payment.</>
-              : <>Choose your preferred date and time slot for <span className="font-semibold text-[#2157da]">{selectedCourse?.name || 'Course'}</span></>
-            }
+            <>Choose your preferred date and time slot for <span className="font-semibold text-[#2157da]">{selectedCourse?.name || 'Course'}</span></>
           </p>
         </div>
 
-        {/* Motorcycle PDC: Admin-only notice */}
-        {isMotorcyclePDC && (
+        {/* B1/B2 VAN/L300 Notice */}
+        {selectedCourse && (selectedCourse.name.toLowerCase().includes('b1') || selectedCourse.name.toLowerCase().includes('b2') || selectedCourse.name.toLowerCase().includes('van') || selectedCourse.name.toLowerCase().includes('l300')) && (
           <div className="mb-6" data-aos="fade-up">
-            <div className="bg-gradient-to-br from-orange-50 to-amber-50 border-2 border-amber-400 rounded-3xl p-6 sm:p-8 text-center shadow-lg">
-              <div className="w-20 h-20 bg-gradient-to-br from-amber-400 to-orange-500 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg">
-                <span className="text-4xl">🏍️</span>
-              </div>
-              <h2 className="text-2xl font-black text-gray-900 mb-3">Motorcycle PDC — Admin-Assigned Schedule</h2>
-              <p className="text-sm text-gray-600 max-w-lg mx-auto mb-5 leading-relaxed">
-                For <strong className="text-gray-900">{selectedCourse?.name}</strong>, your practical driving schedule is personally assigned
-                by our admin team based on instructor and vehicle availability.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl mx-auto mb-6">
-                <div className="bg-white rounded-2xl p-4 border border-amber-200 shadow-sm">
-                  <div className="text-2xl mb-2">💳</div>
-                  <p className="text-xs font-black text-gray-700 uppercase tracking-wider mb-1">Step 1</p>
-                  <p className="text-sm font-semibold text-gray-600">Complete payment below</p>
+            <div className="bg-blue-50 border-l-4 border-[#2157da] p-5 rounded-r-2xl shadow-sm">
+              <div className="flex items-start">
+                <div className="flex-shrink-0">
+                  <span className="text-xl">ℹ️</span>
                 </div>
-                <div className="bg-white rounded-2xl p-4 border border-amber-200 shadow-sm">
-                  <div className="text-2xl mb-2">📞</div>
-                  <p className="text-xs font-black text-gray-700 uppercase tracking-wider mb-1">Step 2</p>
-                  <p className="text-sm font-semibold text-gray-600">Admin contacts you within 24 hrs</p>
+                <div className="ml-3">
+                  <h3 className="text-sm font-bold text-[#2157da]">Vehicle Rental Requirement</h3>
+                  <p className="mt-1 text-sm text-gray-600">
+                    For Practical Driving Course (PDC) - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.
+                  </p>
                 </div>
-                <div className="bg-white rounded-2xl p-4 border border-amber-200 shadow-sm">
-                  <div className="text-2xl mb-2">📅</div>
-                  <p className="text-xs font-black text-gray-700 uppercase tracking-wider mb-1">Step 3</p>
-                  <p className="text-sm font-semibold text-gray-600">Schedule confirmed &amp; emailed to you</p>
-                </div>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <button
-                  onClick={() => onNavigate('courses')}
-                  className="px-6 py-3 bg-white text-gray-700 border-2 border-gray-200 rounded-2xl font-bold hover:bg-gray-50 transition-all"
-                >
-                  ← Back to Courses
-                </button>
-                <button
-                  onClick={handleProceedToPayment}
-                  className="px-8 py-3 bg-gradient-to-r from-amber-400 to-orange-500 text-white rounded-2xl font-black hover:shadow-xl hover:shadow-amber-500/30 hover:scale-105 transition-all"
-                >
-                  Proceed to Payment →
-                </button>
               </div>
             </div>
           </div>
         )}
+
+        {/* A1 Tricycle Notice */}
+        {selectedCourse && (selectedCourse.name.toLowerCase().includes('a1') || selectedCourse.name.toLowerCase().includes('tricycle')) && (
+          <div className="mb-6" data-aos="fade-up">
+            <div className="bg-blue-50 border-l-4 border-[#2157da] p-5 rounded-r-2xl shadow-sm">
+              <div className="flex items-start">
+                <div className="flex-shrink-0">
+                  <span className="text-xl">ℹ️</span>
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-bold text-[#2157da]">Vehicle Rental Requirement</h3>
+                  <p className="mt-1 text-sm text-gray-600">
+                    For Practical Driving Course (PDC) - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+
 
         {/* Info Cards Row */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6" data-aos="fade-up">
@@ -484,7 +787,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Selected Course</p>
-                  <p className="text-sm font-bold text-gray-900 truncate">{selectedCourse.shortName || selectedCourse.name}</p>
+                  <p className="text-sm font-bold text-gray-900 leading-tight">{selectedCourse.name}</p>
                 </div>
               </div>
             </div>
@@ -492,8 +795,9 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
 
         </div>
 
-        {/* Calendar (Hidden for TDC and Motorcycle PDC) */}
-        {!isTDCCourse && !isMotorcyclePDC && (
+        {/* Calendar (Hidden for TDC and Promo which has its own flow) */}
+        {!isTDCCourse && !isPromoCourse && (
+
           <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-6" data-aos="fade-up" data-aos-delay="100">
             <div className="flex items-center justify-between mb-6">
               <button
@@ -616,7 +920,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
         )}
 
         {/* Slot Selection Panel */}
-        {!isMotorcyclePDC && (isTDCCourse || selectedDate) ? (
+        {!isPromoCourse && (isTDCCourse || selectedDate) ? (
           <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-6" data-aos="fade-up" data-aos-delay="200">
             <div className="flex items-center justify-between mb-5">
               <div>
@@ -748,107 +1052,164 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                   const isFull = slot.available_slots === 0
                   const isDay1 = selectedSlot?.id === slot.id
                   const isDay2 = selectedSlot2?.id === slot.id
-                  const isSelected = isDay1 || isDay2
                   const bookedPct = ((slot.total_capacity - slot.available_slots) / slot.total_capacity) * 100
-                  const colors = sessionColor(slot.session, isDay1)
+
+                  const sessionMeta = {
+                    'Morning': { icon: '🌅', color: '#ea580c', bg: '#fff7ed', border: '#fed7aa', pill: 'bg-orange-100 text-orange-700' },
+                    'Afternoon': { icon: '☀️', color: '#ca8a04', bg: '#fefce8', border: '#fde68a', pill: 'bg-yellow-100 text-yellow-700' },
+                    'Whole Day': { icon: '🕐', color: '#2157da', bg: '#eff6ff', border: '#bfdbfe', pill: 'bg-blue-100 text-blue-700' },
+                  }[slot.session] || { icon: '🕐', color: '#2157da', bg: '#eff6ff', border: '#bfdbfe', pill: 'bg-blue-100 text-blue-700' }
+
+                  const courseLabel = (() => {
+                    const base = slot.type?.toLowerCase() === 'tdc' ? 'TDC' : 'PDC';
+                    const parts = [base];
+                    if (slot.course_type && slot.course_type !== 'both' && slot.course_type !== 'any') {
+                      parts.push(slot.course_type);
+                    }
+                    if (slot.transmission) {
+                      parts.push(slot.transmission);
+                    }
+                    return parts.join(' · ');
+                  })()
+
+                  const statusColor = isFull ? '#ef4444' : bookedPct > 70 ? '#f59e0b' : '#22c55e';
+                  const statusLabel = isFull ? 'FULL' : bookedPct > 70 ? 'FILLING UP' : 'OPEN';
+                  const statusBg = isFull ? '#fef2f2' : bookedPct > 70 ? '#fffbeb' : '#f0fdf4';
+                  const statusText = isFull ? '#dc2626' : bookedPct > 70 ? '#b45309' : '#15803d';
+
+                  // Active state overrides
+                  const cardBg = isDay1
+                    ? 'linear-gradient(135deg, #1a4fba 0%, #1e3a8a 100%)'
+                    : isDay2
+                      ? '#f0fdf4'
+                      : isFull
+                        ? '#f8fafc'
+                        : 'white';
+                  const cardBorder = isDay1
+                    ? 'transparent'
+                    : isDay2
+                      ? '#22c55e'
+                      : isFull
+                        ? '#e2e8f0'
+                        : '#e2e8f0';
 
                   return (
                     <button
                       key={slot.id}
                       onClick={() => handleSlotClick(slot)}
                       disabled={isFull}
-                      style={isDay1 ? { background: colors.bg } : {}}
-                      className={`group relative p-5 rounded-2xl transition-all text-left border-2 ${isDay1
-                        ? 'shadow-xl shadow-blue-500/30 scale-105 border-transparent'
-                        : isDay2
-                          ? 'border-green-500 bg-green-50 shadow-md'
-                          : isFull
-                            ? 'bg-gray-50 border-gray-200 cursor-not-allowed opacity-60'
-                            : 'bg-white border-gray-200 hover:border-[#2157da] hover:shadow-lg hover:scale-105'
+                      style={{ background: cardBg, borderColor: cardBorder }}
+                      className={`group relative flex flex-col text-left rounded-2xl border-2 transition-all overflow-hidden ${isFull
+                        ? 'opacity-60 cursor-not-allowed'
+                        : isDay1
+                          ? 'shadow-xl shadow-blue-500/30 scale-[1.02]'
+                          : isDay2
+                            ? 'shadow-lg shadow-green-500/20'
+                            : 'hover:border-[#2157da] hover:shadow-lg hover:scale-[1.02] hover:-translate-y-0.5'
                         }`}
                     >
-                      {/* Header row: session icon + name + type badge + day label */}
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-2xl">{sessionIcon(slot.session)}</span>
-                          <div>
-                            <p className={`text-xs font-black uppercase tracking-wider ${isDay1 ? 'text-blue-100' : isDay2 ? 'text-green-600' : 'text-gray-400'}`}>
-                              {slot.type.toUpperCase()}
-                            </p>
-                            <p className={`font-black text-sm ${isDay1 ? 'text-white' : isDay2 ? 'text-green-800' : 'text-gray-900'}`}>
-                              {slot.session} Session
-                            </p>
+                      {/* Color accent bar */}
+                      <div
+                        className="h-1.5 w-full flex-shrink-0"
+                        style={{ background: isDay1 ? 'rgba(255,255,255,0.3)' : isDay2 ? '#22c55e' : sessionMeta.color }}
+                      />
+
+                      <div className="p-5 flex flex-col flex-1">
+                        {/* Top row: session pill + status badge */}
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl leading-none">{sessionMeta.icon}</span>
+                            <span
+                              className="text-xs font-black uppercase tracking-wider px-2.5 py-1 rounded-full"
+                              style={isDay1
+                                ? { background: 'rgba(255,255,255,0.18)', color: '#fff' }
+                                : { background: sessionMeta.bg, color: sessionMeta.color, border: `1px solid ${sessionMeta.border}` }
+                              }
+                            >
+                              {slot.session}
+                            </span>
                           </div>
-                        </div>
-                        {isDay1 ? (
-                          <span className="text-[10px] font-black uppercase px-2 py-1 rounded-lg bg-white/20 text-white">DAY 1</span>
-                        ) : isDay2 ? (
-                          <span className="text-[10px] font-black uppercase px-2 py-1 rounded-lg bg-green-200 text-green-800">DAY 1 ✓</span>
-                        ) : (
                           <span
-                            className="text-[10px] font-black uppercase px-2 py-1 rounded-lg"
-                            style={{ background: colors.badge, color: colors.badgeText }}
-                          >
-                            {slot.type.toUpperCase()}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Date badge — shown for TDC only since PDC date comes from the calendar */}
-                      {isTDCCourse && slot.date && (
-                        <div className={`text-xs font-bold px-3 py-1.5 rounded-lg mb-3 flex items-center gap-1.5 ${isSelected ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-700'
-                          }`}>
-                          <span>📅</span>
-                          <span>
-                            {slot.end_date && slot.end_date !== slot.date
-                              ? `${new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(slot.end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                              : new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })
+                            className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full"
+                            style={isFull
+                              ? { background: '#fef2f2', color: '#dc2626' }
+                              : isDay1
+                                ? { background: 'rgba(255,255,255,0.18)', color: '#fff' }
+                                : isDay2
+                                  ? { background: '#dcfce7', color: '#15803d' }
+                                  : { background: statusBg, color: statusText }
                             }
+                          >
+                            {isDay1 ? '✓ DAY 1' : isDay2 ? '✓ DAY 2' : statusLabel}
                           </span>
                         </div>
-                      )}
 
-                      {/* Time */}
-                      <p className={`text-sm font-bold mb-4 ${isDay1 ? 'text-blue-100' : isDay2 ? 'text-green-700' : 'text-gray-600'}`}>
-                        🕐 {slot.time_range}
-                      </p>
+                        {/* Course type */}
+                        <p
+                          className="text-[11px] font-bold uppercase tracking-wider mb-2 leading-tight"
+                          style={{ color: isDay1 ? 'rgba(255,255,255,0.65)' : '#94a3b8' }}
+                        >
+                          {courseLabel}
+                        </p>
 
-                      {/* Progress bar */}
-                      <div className="mb-3">
-                        <div className={`h-2 rounded-full overflow-hidden ${isDay1 ? 'bg-white/20' : 'bg-gray-200'}`}>
-                          <div
-                            className={`h-full rounded-full transition-all ${isDay1 ? 'bg-white'
-                              : isFull ? 'bg-red-500'
-                                : bookedPct > 70 ? 'bg-orange-500'
-                                  : 'bg-green-500'
-                              }`}
-                            style={{ width: `${bookedPct}%` }}
-                          />
-                        </div>
-                      </div>
+                        {/* Session name */}
+                        <p
+                          className="text-base font-black mb-1"
+                          style={{ color: isDay1 ? '#fff' : isDay2 ? '#166534' : '#1e293b' }}
+                        >
+                          {slot.session} Session
+                        </p>
 
-                      {/* Footer row: availability + status badge */}
-                      <div className="flex items-center justify-between">
-                        <span className={`text-xs font-bold ${isDay1 ? 'text-white' : isDay2 ? 'text-green-700' : 'text-gray-600'}`}>
-                          {slot.available_slots}/{slot.total_capacity} Available
-                        </span>
-                        {isFull ? (
-                          <span className="text-xs bg-red-100 text-red-700 px-2.5 py-1 rounded-full font-black">FULL</span>
-                        ) : isDay1 ? (
-                          <span className="text-xs bg-white/20 text-white px-2.5 py-1 rounded-full font-black">✓ DAY 1</span>
-                        ) : isDay2 ? (
-                          <span className="text-xs bg-green-200 text-green-800 px-2.5 py-1 rounded-full font-black">✓ DAY 1</span>
-                        ) : (
-                          <span className={`text-xs px-2.5 py-1 rounded-full font-black ${bookedPct > 70 ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
-                            }`}>
-                            {bookedPct > 70 ? 'FILLING UP' : 'OPEN'}
-                          </span>
+                        {/* TDC date range */}
+                        {isTDCCourse && slot.date && (
+                          <p
+                            className="text-xs font-semibold mb-3"
+                            style={{ color: isDay1 ? 'rgba(255,255,255,0.7)' : '#64748b' }}
+                          >
+                            📅 {slot.end_date && slot.end_date !== slot.date
+                              ? `${new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(slot.end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                              : new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}
+                          </p>
                         )}
+
+                        {/* Time */}
+                        <div
+                          className="flex items-center gap-1.5 text-sm font-bold mb-4"
+                          style={{ color: isDay1 ? 'rgba(255,255,255,0.9)' : '#334155' }}
+                        >
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10" strokeWidth="2" />
+                            <polyline points="12 6 12 12 16 14" strokeWidth="2" />
+                          </svg>
+                          {slot.time_range}
+                        </div>
+
+                        {/* Capacity bar */}
+                        <div className="mt-auto">
+                          <div
+                            className="h-1.5 rounded-full overflow-hidden mb-2"
+                            style={{ background: isDay1 ? 'rgba(255,255,255,0.2)' : '#e2e8f0' }}
+                          >
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${bookedPct}%`,
+                                background: isDay1 ? 'rgba(255,255,255,0.8)' : statusColor
+                              }}
+                            />
+                          </div>
+                          <p
+                            className="text-xs font-semibold"
+                            style={{ color: isDay1 ? 'rgba(255,255,255,0.65)' : '#64748b' }}
+                          >
+                            {slot.available_slots} / {slot.total_capacity} Available
+                          </p>
+                        </div>
                       </div>
 
-                      {/* Checkmark for selected day 1 */}
+                      {/* Selected day 1 checkmark */}
                       {isDay1 && (
-                        <div className="absolute top-3 right-3">
+                        <div className="absolute top-4 right-4">
                           <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center shadow">
                             <svg className="w-4 h-4 text-[#2157da]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
@@ -862,22 +1223,461 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
               </div>
             )}
           </div>
-        ) : (
-          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-3xl border-2 border-dashed border-blue-300 p-8 sm:p-12 mb-6 text-center" data-aos="fade-up" data-aos-delay="200">
-            <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-              <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
+        ) : null}
+
+        {/* =================== PROMO BUNDLE 2-STEP FLOW =================== */}
+        {isPromoCourse && (() => {
+          const pdcTypeLabel = promoPdcType === 'Motorcycle'
+            ? (promoPdcMotorType === 'MT' ? 'Motorcycle (Manual)' : promoPdcMotorType === 'AT' ? 'Motorcycle (Automatic)' : 'Motorcycle')
+            : promoPdcType === 'CarAT' ? 'Car (Automatic)' : 'Car (Manual)'
+          const totalSteps = 2
+          return (
+            <div data-aos="fade-up" data-aos-delay="100">
+
+              {/* Step indicator */}
+              <div className="flex items-center gap-3 mb-5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4">
+                <span className="text-2xl">🏷️</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-black text-amber-900 text-sm">Promo Bundle — 2-Step Schedule</p>
+                  <p className="text-xs text-amber-700 mt-0.5">{selectedCourse?.name}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className={`flex items-center gap-1.5 ${promoStep === 1 ? 'opacity-100' : 'opacity-60'}`}>
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs ${promoTdcSlot ? 'bg-green-500 text-white' : promoStep === 1 ? 'bg-[#2157da] text-white' : 'bg-gray-200 text-gray-500'}`}>
+                      {promoTdcSlot ? '✓' : '1'}
+                    </div>
+                    <span className="text-xs font-bold text-gray-700 hidden sm:block">TDC</span>
+                  </div>
+                  <div className="w-6 h-0.5 bg-gray-300 rounded" />
+                  <div className={`flex items-center gap-1.5 ${promoStep === 2 ? 'opacity-100' : 'opacity-60'}`}>
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs ${promoPdcSlot ? 'bg-green-500 text-white' : promoStep === 2 ? 'bg-[#2157da] text-white' : 'bg-gray-200 text-gray-500'}`}>
+                      {promoPdcSlot ? '✓' : '2'}
+                    </div>
+                    <span className="text-xs font-bold text-gray-700 hidden sm:block">PDC</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* ---- STEP 1: TDC Slot Selection ---- */}
+              {promoStep === 1 && (
+                <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
+                  <div className="flex items-center gap-3 mb-5">
+                    <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <span className="text-white font-black text-sm">1</span>
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-black text-gray-900">Step 1: Select TDC Schedule</h3>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {promoTdcType === 'F2F' ? 'Face-to-Face TDC' : 'Online TDC'} — {promoTdcViewMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                      </p>
+                    </div>
+                    {!loadingPromoTdc && (
+                      <div className="px-3 py-1.5 bg-blue-50 rounded-lg">
+                        <span className="text-xs font-bold text-[#2157da]">{promoTdcSlotsForMonth.length} Slots</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Month navigation */}
+                  <div className="mb-5">
+                    <div className="flex items-center justify-center gap-4 mb-3">
+                      <button onClick={goToPrevPromoTdcMonth} disabled={!hasPromoTdcPrev} className={`w-9 h-9 flex items-center justify-center rounded-xl border-2 transition-all ${hasPromoTdcPrev ? 'border-gray-200 hover:border-[#2157da] hover:bg-blue-50' : 'border-gray-100 opacity-30 cursor-not-allowed'}`}>
+                        <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
+                      </button>
+                      <p className="text-base font-black text-gray-900">{promoTdcViewMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+                      <button onClick={goToNextPromoTdcMonth} disabled={!hasPromoTdcNext} className={`w-9 h-9 flex items-center justify-center rounded-xl border-2 transition-all ${hasPromoTdcNext ? 'border-gray-200 hover:border-[#2157da] hover:bg-blue-50' : 'border-gray-100 opacity-30 cursor-not-allowed'}`}>
+                        <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg>
+                      </button>
+                    </div>
+                    {promoTdcMonthKeys.length > 1 && (
+                      <div className="flex items-center justify-center gap-1.5">
+                        {promoTdcMonthKeys.map(key => (
+                          <button key={key} onClick={() => { const [y, m] = key.split('-').map(Number); setPromoTdcViewMonth(new Date(y, m - 1, 1)) }}
+                            className="transition-all rounded-full"
+                            style={{ width: key === promoTdcCurrentMonthKey ? '24px' : '8px', height: '8px', background: key === promoTdcCurrentMonthKey ? '#2157da' : '#d1d5db' }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {loadingPromoTdc ? (
+                    <div className="flex flex-col items-center justify-center py-12 gap-4">
+                      <div className="w-10 h-10 border-4 border-[#2157da] border-t-transparent rounded-full animate-spin" />
+                      <p className="text-sm text-gray-500 font-medium">Loading TDC slots...</p>
+                    </div>
+                  ) : promoTdcSlotsForMonth.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                      <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center"><span className="text-3xl">📭</span></div>
+                      <p className="text-base font-black text-gray-700">No {promoTdcType} TDC slots this month</p>
+                      <p className="text-sm text-gray-500">Try navigating to a different month above.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {promoTdcSlotsForMonth.map(slot => {
+                        const isFull = slot.available_slots === 0
+                        const isSel = promoTdcSlot?.id === slot.id
+                        const colors = sessionColor(slot.session, isSel)
+                        const slotDate = new Date(slot.date + 'T00:00:00')
+                        const endDate = slot.end_date ? new Date(slot.end_date + 'T00:00:00') : null
+                        return (
+                          <button key={slot.id} onClick={() => handleSlotClick(slot)} disabled={isFull}
+                            style={isSel ? { background: colors.bg } : {}}
+                            className={`relative p-4 rounded-2xl text-left border-2 transition-all ${isSel ? 'border-transparent shadow-xl shadow-blue-500/30 scale-105' : isFull ? 'bg-gray-50 border-gray-200 cursor-not-allowed opacity-60' : 'bg-white border-gray-200 hover:border-[#2157da] hover:shadow-md hover:scale-105'}`}
+                          >
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-xl">{sessionIcon(slot.session)}</span>
+                              <div className="flex-1">
+                                <p className={`font-black text-sm ${isSel ? 'text-white' : 'text-gray-900'}`}>{slot.session} Session</p>
+                                <p className={`text-xs font-bold ${isSel ? 'text-blue-100' : 'text-gray-500'}`}>🕐 {slot.time_range}</p>
+                              </div>
+                              {isSel && <span className="text-[10px] font-black bg-white/20 text-white px-2 py-0.5 rounded-lg">TDC ✓</span>}
+                            </div>
+                            <p className={`text-xs font-bold mb-1 ${isSel ? 'text-blue-100' : 'text-gray-500'}`}>
+                              📅 {slotDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{endDate ? ` – ${endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+                            </p>
+                            <div className={`h-1.5 rounded-full overflow-hidden ${isSel ? 'bg-white/20' : 'bg-gray-200'} mb-2`}>
+                              <div className={`h-full rounded-full ${isSel ? 'bg-white' : slot.available_slots === 0 ? 'bg-red-500' : 'bg-green-500'}`}
+                                style={{ width: `${((slot.total_capacity - slot.available_slots) / slot.total_capacity) * 100}%` }} />
+                            </div>
+                            <p className={`text-xs font-bold ${isSel ? 'text-blue-100' : 'text-gray-500'}`}>{slot.available_slots}/{slot.total_capacity} available</p>
+                            {isFull && <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-black mt-1 inline-block">FULL</span>}
+                            {isSel && <div className="absolute top-2 right-2 w-5 h-5 bg-white rounded-full flex items-center justify-center shadow"><svg className="w-3 h-3 text-[#2157da]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg></div>}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ---- STEP 2: PDC Calendar + Slot Selection ---- */}
+              {promoStep === 2 && (
+                <>
+                  {/* ---- Motor Type Selector (Motorcycle PDC bundles only) ---- */}
+                  {promoPdcType === 'Motorcycle' && (
+                    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center flex-shrink-0 text-xl">🏍️</div>
+                        <div>
+                          <h3 className="text-base font-black text-gray-900">Select Motorcycle Transmission</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">Choose Manual or Automatic before picking a schedule date</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        {[
+                          { key: 'MT', label: 'Manual', sub: 'Manual Transmission', icon: '⚙️' },
+                          { key: 'AT', label: 'Automatic', sub: 'Automatic Transmission', icon: '🔄' },
+                        ].map(({ key, label, sub, icon }) => {
+                          const isSel = promoPdcMotorType === key
+                          return (
+                            <button key={key}
+                              onClick={() => { setPromoPdcMotorType(key); setPromoPdcDate(null); setPromoPdcSlot(null) }}
+                              className={`p-4 rounded-2xl border-2 text-left transition-all ${
+                                isSel
+                                  ? 'border-[#2157da] bg-blue-50 shadow-md shadow-blue-100'
+                                  : 'border-gray-200 bg-gray-50 hover:border-[#2157da] hover:bg-blue-50 hover:scale-105'
+                              }`}
+                            >
+                              <div className="text-2xl mb-2">{icon}</div>
+                              <p className={`font-black text-sm ${isSel ? 'text-[#2157da]' : 'text-gray-900'}`}>{label}</p>
+                              <p className="text-xs text-gray-500 mt-0.5">{sub}</p>
+                              {isSel && (
+                                <div className="mt-2 flex items-center gap-1 text-[#2157da]">
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                                  <span className="text-xs font-black">Selected</span>
+                                </div>
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PDC Calendar — only shown once motor type selected (for Motorcycle) */}
+                  {(promoPdcType !== 'Motorcycle' || promoPdcMotorType) && (
+                  <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
+                    <div className="flex items-center gap-3 mb-5">
+                      <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <span className="text-white font-black text-sm">2</span>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-black text-gray-900">Step 2: Select PDC Schedule</h3>
+                        <p className="text-xs text-gray-500 mt-0.5">{pdcTypeLabel} — pick a date from the calendar</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between mb-6">
+                      <button onClick={() => setPromoPdcCalMonth(new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth() - 1))} className="w-10 h-10 flex items-center justify-center rounded-xl border border-gray-200 hover:border-[#2157da] hover:bg-blue-50 transition-all">
+                        <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
+                      </button>
+                      <h2 className="text-lg sm:text-xl font-black text-gray-900">{monthNames[promoPdcCalMonth.getMonth()]} {promoPdcCalMonth.getFullYear()}</h2>
+                      <button onClick={() => setPromoPdcCalMonth(new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth() + 1))} className="w-10 h-10 flex items-center justify-center rounded-xl border border-gray-200 hover:border-[#2157da] hover:bg-blue-50 transition-all">
+                        <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-1.5 sm:gap-2 mb-2">
+                      {dayNames.map(d => <div key={d} className="text-center text-[10px] sm:text-xs font-black text-gray-400 uppercase tracking-wider py-2">{d}</div>)}
+                    </div>
+                    <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+                      {[...Array(promoPdcStartDay)].map((_, i) => <div key={`ep-${i}`} className="aspect-square" />)}
+                      {[...Array(promoPdcDaysInMonth)].map((_, i) => {
+                        const day = i + 1
+                        const avail = isDateAvailable(day, promoPdcCalMonth)
+                        const today = new Date(); today.setHours(0, 0, 0, 0)
+                        const isToday = new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth(), day).getTime() === today.getTime()
+                        const isSel = promoPdcDate?.getDate() === day && promoPdcDate?.getMonth() === promoPdcCalMonth.getMonth() && promoPdcDate?.getFullYear() === promoPdcCalMonth.getFullYear()
+                        return (
+                          <button key={day} onClick={() => { if (!avail) return; const d = new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth(), day); setPromoPdcDate(d); setPromoPdcSlot(null) }}
+                            disabled={!avail}
+                            className={`aspect-square flex items-center justify-center rounded-xl text-xs sm:text-sm font-bold transition-all relative ${isSel ? 'bg-gradient-to-br from-[#2157da] to-[#1a3a8a] text-white shadow-lg shadow-blue-500/30 scale-105 z-10' : isToday && avail ? 'bg-blue-100 text-[#2157da] border-2 border-[#2157da] font-black hover:bg-blue-200' : avail ? 'bg-gray-50 text-gray-900 hover:bg-blue-50 hover:text-[#2157da] hover:scale-105 border border-gray-200' : 'bg-gray-100/50 text-gray-300 cursor-not-allowed border border-gray-100'}`}
+                          >
+                            {day}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  )}
+
+                  {/* PDC Day 1 Slots */}
+                  {(promoPdcType !== 'Motorcycle' || promoPdcMotorType) && promoPdcDate && (
+                    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
+                      <div className="flex items-center justify-between mb-5">
+                        <div>
+                          <h3 className="text-lg font-black text-gray-900">PDC Time Slots — {pdcTypeLabel} <span className="text-sm font-bold text-gray-400">(Day 1)</span></h3>
+                          <p className="text-xs text-gray-500 mt-1">{promoPdcDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                        </div>
+                        {!loadingPromoPdc && <div className="px-3 py-1.5 bg-blue-50 rounded-lg"><span className="text-xs font-bold text-[#2157da]">{promoPdcFiltered.length} Slots</span></div>}
+                      </div>
+                      {loadingPromoPdc ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-4">
+                          <div className="w-10 h-10 border-4 border-[#2157da] border-t-transparent rounded-full animate-spin" />
+                          <p className="text-sm text-gray-500">Loading PDC slots...</p>
+                        </div>
+                      ) : promoPdcFiltered.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                          <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center"><span className="text-3xl">📭</span></div>
+                          <p className="text-base font-black text-gray-700">No {pdcTypeLabel} PDC slots on this date</p>
+                          <p className="text-sm text-gray-500">Pick a different date from the calendar above.</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {promoPdcFiltered.map(slot => {
+                            const isFull = slot.available_slots === 0
+                            const isSel = promoPdcSlot?.id === slot.id
+                            const colors = sessionColor(slot.session, isSel)
+                            return (
+                              <button key={slot.id} onClick={() => handleSlotClick(slot)} disabled={isFull}
+                                style={isSel ? { background: colors.bg } : {}}
+                                className={`relative p-4 rounded-2xl text-left border-2 transition-all ${isSel ? 'border-transparent shadow-xl shadow-blue-500/30 scale-105' : isFull ? 'bg-gray-50 border-gray-200 cursor-not-allowed opacity-60' : 'bg-white border-gray-200 hover:border-[#2157da] hover:shadow-md hover:scale-105'}`}
+                              >
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="text-xl">{sessionIcon(slot.session)}</span>
+                                  <div className="flex-1">
+                                    <p className={`font-black text-sm ${isSel ? 'text-white' : 'text-gray-900'}`}>{slot.session} Session</p>
+                                    <p className={`text-xs font-bold ${isSel ? 'text-blue-100' : 'text-gray-500'}`}>🕐 {slot.time_range}</p>
+                                  </div>
+                                  {isSel && <span className="text-[10px] font-black bg-white/20 text-white px-2 py-0.5 rounded-lg">Day 1 ✓</span>}
+                                </div>
+                                <div className={`h-1.5 rounded-full overflow-hidden ${isSel ? 'bg-white/20' : 'bg-gray-200'} mb-2`}>
+                                  <div className={`h-full rounded-full ${isSel ? 'bg-white' : slot.available_slots === 0 ? 'bg-red-500' : 'bg-green-500'}`}
+                                    style={{ width: `${((slot.total_capacity - slot.available_slots) / slot.total_capacity) * 100}%` }} />
+                                </div>
+                                <p className={`text-xs font-bold ${isSel ? 'text-blue-100' : 'text-gray-500'}`}>{slot.available_slots}/{slot.total_capacity} available</p>
+                                {isFull && <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-black mt-1 inline-block">FULL</span>}
+                                {isSel && <div className="absolute top-2 right-2 w-5 h-5 bg-white rounded-full flex items-center justify-center shadow"><svg className="w-3 h-3 text-[#2157da]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg></div>}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ---- PDC Day 1 selected banner (half-day) ---- */}
+                  {promoPdcSlot && isHalfDay(promoPdcSlot.session) && !promoPdcSlot2 && (
+                    <div className="bg-blue-50 border-2 border-[#2157da] rounded-2xl p-4 mb-4 flex items-center gap-3">
+                      <div className="w-10 h-10 bg-[#2157da] rounded-xl flex items-center justify-center flex-shrink-0">
+                        <span className="text-white font-black text-sm">1</span>
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-black text-[#2157da] text-sm">PDC Day 1 Selected — {promoPdcSlot.session} · {promoPdcSlot.time_range}</p>
+                        <p className="text-xs text-blue-600 mt-0.5">{promoPdcSlot.session} sessions require 2 days. Pick a different date below for <strong>Day 2</strong>.</p>
+                      </div>
+                      <button onClick={() => { setPromoPdcSlot(null); setPromoPdcSlot2(null); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]) }}
+                        className="text-xs text-[#2157da] underline hover:no-underline font-bold flex-shrink-0">Change Day 1</button>
+                    </div>
+                  )}
+
+                  {/* ---- PDC Day 2 complete banner ---- */}
+                  {promoPdcSlot && promoPdcSlot2 && (
+                    <div className="bg-green-50 border-2 border-green-500 rounded-2xl p-4 mb-4 flex items-center gap-3">
+                      <div className="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-black text-green-800 text-sm">PDC Both Days Selected!</p>
+                        <p className="text-xs text-green-700 mt-0.5">
+                          Day 1: {promoPdcSlot.session} · {promoPdcDate?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} &nbsp;|&nbsp;
+                          Day 2: {promoPdcSlot2.session} · {promoPdcDate2?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </p>
+                      </div>
+                      <button onClick={() => { setPromoPdcSlot(null); setPromoPdcSlot2(null); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]) }}
+                        className="text-xs text-green-700 underline hover:no-underline font-bold flex-shrink-0">Change</button>
+                    </div>
+                  )}
+
+                  {/* ---- PDC Day 2 Calendar (half-day sessions only) ---- */}
+                  {promoPdcSelectingDay2 && promoPdcSlot && !promoPdcSlot2 && (
+                    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
+                      <div className="flex items-center gap-3 mb-5">
+                        <div className="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center flex-shrink-0">
+                          <span className="text-white font-black text-sm">2</span>
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-black text-gray-900">Day 2: Pick Another Date</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">Must be a different date — same {promoPdcSlot.session} session</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between mb-6">
+                        <button onClick={() => setPromoPdcDay2CalMonth(new Date(promoPdcDay2CalMonth.getFullYear(), promoPdcDay2CalMonth.getMonth() - 1))} className="w-10 h-10 flex items-center justify-center rounded-xl border border-gray-200 hover:border-[#2157da] hover:bg-blue-50 transition-all">
+                          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
+                        </button>
+                        <h2 className="text-lg sm:text-xl font-black text-gray-900">{monthNames[promoPdcDay2CalMonth.getMonth()]} {promoPdcDay2CalMonth.getFullYear()}</h2>
+                        <button onClick={() => setPromoPdcDay2CalMonth(new Date(promoPdcDay2CalMonth.getFullYear(), promoPdcDay2CalMonth.getMonth() + 1))} className="w-10 h-10 flex items-center justify-center rounded-xl border border-gray-200 hover:border-[#2157da] hover:bg-blue-50 transition-all">
+                          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-7 gap-1.5 sm:gap-2 mb-2">
+                        {dayNames.map(d => <div key={d} className="text-center text-[10px] sm:text-xs font-black text-gray-400 uppercase tracking-wider py-2">{d}</div>)}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+                        {[...Array(promoPdcDay2StartDay)].map((_, i) => <div key={`ep2-${i}`} className="aspect-square" />)}
+                        {[...Array(promoPdcDay2DaysInMonth)].map((_, i) => {
+                          const day = i + 1
+                          const avail = isDateAvailable(day, promoPdcDay2CalMonth)
+                          const isDay1 = promoPdcDate?.getDate() === day && promoPdcDate?.getMonth() === promoPdcDay2CalMonth.getMonth() && promoPdcDate?.getFullYear() === promoPdcDay2CalMonth.getFullYear()
+                          const isSel2 = promoPdcDate2?.getDate() === day && promoPdcDate2?.getMonth() === promoPdcDay2CalMonth.getMonth() && promoPdcDate2?.getFullYear() === promoPdcDay2CalMonth.getFullYear()
+                          const today = new Date(); today.setHours(0,0,0,0)
+                          const isToday = new Date(promoPdcDay2CalMonth.getFullYear(), promoPdcDay2CalMonth.getMonth(), day).getTime() === today.getTime()
+                          return (
+                            <button key={day}
+                              onClick={() => { if (!avail || isDay1) return; const d = new Date(promoPdcDay2CalMonth.getFullYear(), promoPdcDay2CalMonth.getMonth(), day); setPromoPdcDate2(d); setPromoPdcSlot2(null) }}
+                              disabled={!avail || isDay1}
+                              title={isDay1 ? 'Already used for Day 1' : undefined}
+                              className={`aspect-square flex items-center justify-center rounded-xl text-xs sm:text-sm font-bold transition-all relative ${
+                                isDay1 ? 'bg-orange-100 text-orange-400 cursor-not-allowed border border-orange-200'
+                                : isSel2 ? 'bg-gradient-to-br from-green-500 to-green-700 text-white shadow-lg scale-105 z-10'
+                                : isToday && avail ? 'bg-blue-100 text-[#2157da] border-2 border-[#2157da] font-black hover:bg-blue-200'
+                                : avail ? 'bg-gray-50 text-gray-900 hover:bg-blue-50 hover:text-[#2157da] hover:scale-105 border border-gray-200'
+                                : 'bg-gray-100/50 text-gray-300 cursor-not-allowed border border-gray-100'
+                              }`}
+                            >{day}</button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PDC Day 2 Slots */}
+                  {promoPdcSelectingDay2 && !promoPdcSlot2 && promoPdcDate2 && (
+                    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
+                      <div className="flex items-center justify-between mb-5">
+                        <div>
+                          <h3 className="text-lg font-black text-gray-900">PDC Time Slots — {pdcTypeLabel} <span className="text-sm font-bold text-gray-400">(Day 2)</span></h3>
+                          <p className="text-xs text-gray-500 mt-1">{promoPdcDate2.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} · {promoPdcSlot?.session} session only</p>
+                        </div>
+                        {!loadingPromoPdc2 && <div className="px-3 py-1.5 bg-green-50 rounded-lg"><span className="text-xs font-bold text-green-700">{promoPdcFiltered2.length} Slots</span></div>}
+                      </div>
+                      {loadingPromoPdc2 ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-4">
+                          <div className="w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full animate-spin" />
+                          <p className="text-sm text-gray-500">Loading Day 2 slots...</p>
+                        </div>
+                      ) : promoPdcFiltered2.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                          <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center"><span className="text-3xl">📭</span></div>
+                          <p className="text-base font-black text-gray-700">No {promoPdcSlot?.session} slots on this date</p>
+                          <p className="text-sm text-gray-500">Pick a different date for Day 2.</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {promoPdcFiltered2.map(slot => {
+                            const isFull = slot.available_slots === 0
+                            const isSel = promoPdcSlot2?.id === slot.id
+                            const colors = sessionColor(slot.session, isSel)
+                            return (
+                              <button key={slot.id} onClick={() => handleSlotClick(slot)} disabled={isFull}
+                                style={isSel ? { background: colors.bg } : {}}
+                                className={`relative p-4 rounded-2xl text-left border-2 transition-all ${isSel ? 'border-transparent shadow-xl shadow-green-500/30 scale-105' : isFull ? 'bg-gray-50 border-gray-200 cursor-not-allowed opacity-60' : 'bg-white border-gray-200 hover:border-green-500 hover:shadow-md hover:scale-105'}`}
+                              >
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="text-xl">{sessionIcon(slot.session)}</span>
+                                  <div className="flex-1">
+                                    <p className={`font-black text-sm ${isSel ? 'text-white' : 'text-gray-900'}`}>{slot.session} Session</p>
+                                    <p className={`text-xs font-bold ${isSel ? 'text-green-100' : 'text-gray-500'}`}>🕐 {slot.time_range}</p>
+                                  </div>
+                                  {isSel && <span className="text-[10px] font-black bg-white/20 text-white px-2 py-0.5 rounded-lg">Day 2 ✓</span>}
+                                </div>
+                                <div className={`h-1.5 rounded-full overflow-hidden ${isSel ? 'bg-white/20' : 'bg-gray-200'} mb-2`}>
+                                  <div className={`h-full rounded-full ${isSel ? 'bg-white' : slot.available_slots === 0 ? 'bg-red-500' : 'bg-green-500'}`}
+                                    style={{ width: `${((slot.total_capacity - slot.available_slots) / slot.total_capacity) * 100}%` }} />
+                                </div>
+                                <p className={`text-xs font-bold ${isSel ? 'text-green-100' : 'text-gray-500'}`}>{slot.available_slots}/{slot.total_capacity} available</p>
+                                {isFull && <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-black mt-1 inline-block">FULL</span>}
+                                {isSel && <div className="absolute top-2 right-2 w-5 h-5 bg-white rounded-full flex items-center justify-center shadow"><svg className="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg></div>}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Promo Action Buttons */}
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6" data-aos="fade-up" data-aos-delay="300">
+                <button onClick={() => onNavigate('courses')} className="flex-1 py-4 bg-white text-gray-700 border-2 border-gray-200 rounded-2xl font-bold hover:bg-gray-50 hover:border-gray-300 transition-all flex items-center justify-center gap-2">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
+                  Back to Courses
+                </button>
+                {promoStep === 1 ? (
+                  <button
+                    onClick={() => { if (!promoTdcSlot) { showNotification('Please select a TDC schedule first', 'error'); return } setPromoStep(2) }}
+                    disabled={!promoTdcSlot}
+                    className={`flex-1 py-4 rounded-2xl font-black text-base transition-all flex items-center justify-center gap-2 ${promoTdcSlot ? 'bg-gradient-to-r from-[#2157da] to-[#1a3a8a] text-white hover:shadow-2xl hover:shadow-blue-500/40 hover:scale-105 active:scale-100' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                  >
+                    {promoTdcSlot ? <><span>Next: Select PDC Schedule</span><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg></> : 'Select TDC Slot to Continue'}
+                  </button>
+                ) : (
+                  <>
+                    <button onClick={() => { setPromoStep(1); setPromoPdcSlot(null); setPromoPdcSlot2(null); setPromoPdcMotorType(null); setPromoPdcDate(null); setPromoPdcDate2(null); setPromoPdcSelectingDay2(false); setPromoPdcRawSlots2([]) }} className="py-4 px-6 bg-white text-[#2157da] border-2 border-[#2157da] rounded-2xl font-bold hover:bg-blue-50 transition-all flex items-center justify-center gap-2 flex-shrink-0">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
+                      Change TDC
+                    </button>
+                    <button
+                      onClick={handleProceedToPayment}
+                      disabled={!promoPdcSlot || (isHalfDay(promoPdcSlot?.session) && !promoPdcSlot2)}
+                      className={`flex-1 py-4 rounded-2xl font-black text-base transition-all flex items-center justify-center gap-2 ${(promoPdcSlot && (!isHalfDay(promoPdcSlot?.session) || promoPdcSlot2)) ? 'bg-gradient-to-r from-[#2157da] to-[#1a3a8a] text-white hover:shadow-2xl hover:shadow-blue-500/40 hover:scale-105 active:scale-100' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                    >
+                      {(promoPdcSlot && (!isHalfDay(promoPdcSlot?.session) || promoPdcSlot2))
+                        ? <><span>Proceed to Payment</span><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg></>
+                        : isHalfDay(promoPdcSlot?.session) ? 'Select PDC Day 2 to Continue' : 'Select PDC Slot to Continue'
+                      }
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
-            <h3 className="text-lg font-black text-gray-900 mb-2">Select a Date First</h3>
-            <p className="text-sm text-gray-600 max-w-md mx-auto">
-              Choose an available date from the calendar above to view time slots for your course.
-            </p>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Day-1 selected banner (half-day PDC) */}
-        {!isTDCCourse && selectedSlot && isHalfDay(selectedSlot.session) && !selectedSlot2 && (
+        {!isPromoCourse && !isTDCCourse && selectedSlot && isHalfDay(selectedSlot.session) && !selectedSlot2 && (
           <div className="bg-blue-50 border-2 border-[#2157da] rounded-2xl p-4 mb-4 flex items-center gap-3" data-aos="fade-up">
             <div className="w-10 h-10 bg-[#2157da] rounded-xl flex items-center justify-center flex-shrink-0">
               <span className="text-white font-black text-sm">1</span>
@@ -905,7 +1705,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
 
 
         {/* Day-2 complete banner */}
-        {!isTDCCourse && selectedSlot && selectedSlot2 && (
+        {!isPromoCourse && !isTDCCourse && selectedSlot && selectedSlot2 && (
           <div className="bg-green-50 border-2 border-green-500 rounded-2xl p-4 mb-4 flex items-center gap-3" data-aos="fade-up">
             <div className="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center flex-shrink-0">
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -929,7 +1729,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
         )}
 
         {/* Day-2 slot panel — appears below main panel after Day 1 is picked, no second calendar */}
-        {selectingDay2 && !selectedSlot2 && (
+        {!isPromoCourse && selectingDay2 && !selectedSlot2 && (
           <div className="bg-white rounded-3xl shadow-lg border-2 border-dashed border-[#2157da] p-5 sm:p-7 mb-6" data-aos="fade-up">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-8 h-8 bg-[#2157da] rounded-xl flex items-center justify-center flex-shrink-0">
@@ -958,7 +1758,11 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                 <p className="text-sm text-gray-500">Loading Day 2 slots...</p>
               </div>
             ) : (() => {
-              const day2Slots = dbSlots2.filter(s => s.type?.toLowerCase() === 'pdc' && s.session === selectedSlot?.session)
+              const day2Slots = dbSlots2.filter(s =>
+                s.type?.toLowerCase() === 'pdc' &&
+                s.session === selectedSlot?.session &&
+                pdcCourseTypeMatches(s.course_type)
+              )
               return day2Slots.length === 0 ? (
                 <div className="text-center py-8">
                   <span className="text-3xl">📭</span>
@@ -1017,48 +1821,50 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
         )}
 
         {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4" data-aos="fade-up" data-aos-delay="300">
-          <button
-            onClick={() => onNavigate('courses')}
-            className="flex-1 py-4 bg-white text-gray-700 border-2 border-gray-200 rounded-2xl font-bold hover:bg-gray-50 hover:border-gray-300 transition-all flex items-center justify-center gap-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-            </svg>
-            Back to Courses
-          </button>
-          <button
-            onClick={handleProceedToPayment}
-            disabled={(() => {
-              if (!selectedSlot) return true
-              if (!isTDCCourse && !selectedDate) return true
-              if (!isTDCCourse && isHalfDay(selectedSlot.session) && (!selectedDate2 || !selectedSlot2)) return true
-              return false
-            })()}
-            className={`flex-1 py-4 rounded-2xl font-black text-base transition-all flex items-center justify-center gap-2 ${(() => {
-              if (!selectedSlot) return false
-              if (!isTDCCourse && !selectedDate) return false
-              if (!isTDCCourse && isHalfDay(selectedSlot.session) && (!selectedDate2 || !selectedSlot2)) return false
-              return true
-            })()
-              ? 'bg-gradient-to-r from-[#2157da] to-[#1a3a8a] text-white hover:shadow-2xl hover:shadow-blue-500/40 hover:scale-105 active:scale-100'
-              : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              }`}
-          >
-            {(() => {
-              if (!selectedSlot) return 'Select Date & Slot to Continue'
-              if (!isTDCCourse && isHalfDay(selectedSlot.session) && !selectedSlot2) return 'Select Day 2 to Continue'
-              return (
-                <>
-                  Proceed to Payment
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                  </svg>
-                </>
-              )
-            })()}
-          </button>
-        </div>
+        {!isPromoCourse && (
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4" data-aos="fade-up" data-aos-delay="300">
+            <button
+              onClick={() => onNavigate('courses')}
+              className="flex-1 py-4 bg-white text-gray-700 border-2 border-gray-200 rounded-2xl font-bold hover:bg-gray-50 hover:border-gray-300 transition-all flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+              </svg>
+              Back to Courses
+            </button>
+            <button
+              onClick={handleProceedToPayment}
+              disabled={(() => {
+                if (!selectedSlot) return true
+                if (!isTDCCourse && !selectedDate) return true
+                if (!isTDCCourse && isHalfDay(selectedSlot.session) && (!selectedDate2 || !selectedSlot2)) return true
+                return false
+              })()}
+              className={`flex-1 py-4 rounded-2xl font-black text-base transition-all flex items-center justify-center gap-2 ${(() => {
+                if (!selectedSlot) return false
+                if (!isTDCCourse && !selectedDate) return false
+                if (!isTDCCourse && isHalfDay(selectedSlot.session) && (!selectedDate2 || !selectedSlot2)) return false
+                return true
+              })()
+                ? 'bg-gradient-to-r from-[#2157da] to-[#1a3a8a] text-white hover:shadow-2xl hover:shadow-blue-500/40 hover:scale-105 active:scale-100'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
+            >
+              {(() => {
+                if (!selectedSlot) return 'Select Date & Slot to Continue'
+                if (!isTDCCourse && isHalfDay(selectedSlot.session) && !selectedSlot2) return 'Select Day 2 to Continue'
+                return (
+                  <>
+                    Proceed to Payment
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </>
+                )
+              })()}
+            </button>
+          </div>
+        )}
 
         {/* Important Notes */}
         <div className="mt-6 bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-200 rounded-2xl p-5 sm:p-6" data-aos="fade-up" data-aos-delay="400">

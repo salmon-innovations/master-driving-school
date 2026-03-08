@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { authAPI, setAuthToken } from '../services/api'
 import { useNotification } from '../context/NotificationContext'
 
@@ -13,6 +13,24 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
   const [showTermsModal, setShowTermsModal] = useState(false)
+
+  useEffect(() => {
+    const userToken = localStorage.getItem('userToken')
+    const userStr = localStorage.getItem('user')
+    if (userToken && userStr) {
+      try {
+        const user = JSON.parse(userStr)
+        const role = (user.role || 'student').toLowerCase()
+        if (role === 'admin') {
+          onNavigate('admin')
+        } else if (role === 'staff') {
+          onNavigate('staff-dashboard')
+        } else {
+          onNavigate('home')
+        }
+      } catch (e) { }
+    }
+  }, [onNavigate])
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -80,8 +98,6 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
 
         if (role === 'admin') {
           onNavigate('admin')
-        } else if (role === 'hrm') {
-          onNavigate('hr-dashboard')
         } else if (role === 'staff') {
           onNavigate('staff-dashboard')
         } else {
@@ -389,8 +405,16 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
                 The driving school respects your privacy and is committed to protecting your personal information. Personal details collected will be kept confidential and used only for course administration and legal purposes.
               </p>
 
-              {/* 9. AMENDMENTS */}
-              <h3 className="text-lg font-bold text-[#2157da] mb-3">9. AMENDMENTS</h3>
+              {/* 9. EMAIL COMMUNICATIONS */}
+              <h3 className="text-lg font-bold text-[#2157da] mb-3">9. EMAIL COMMUNICATIONS</h3>
+              <ul className="list-disc pl-6 mb-6 space-y-2">
+                <li>By enrolling or creating an account, you agree to receive News, Events, and Promotional emails from Master Driving School.</li>
+                <li>This applies to all students, including guest students who enroll without creating an account.</li>
+                <li>You may contact the school to opt out of promotional emails at any time; however, transactional emails (receipts, schedules, verification) will still be sent.</li>
+              </ul>
+
+              {/* 10. AMENDMENTS */}
+              <h3 className="text-lg font-bold text-[#2157da] mb-3">10. AMENDMENTS</h3>
               <p className="mb-6">
                 The driving school reserves the right to amend these Terms and Conditions at any time. Any changes will be communicated via phone call or email.
               </p>
