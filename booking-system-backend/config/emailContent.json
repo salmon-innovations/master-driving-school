@@ -1,0 +1,169 @@
+{
+  "schoolName": "Master Driving School",
+  "copyrightYear": "2026",
+  "footerTagline": "If you have any questions, please contact our support team.",
+
+  "verification": {
+    "subjectVerify": "Email Verification - Master Driving School",
+    "subjectReset": "Password Reset OTP - Master Driving School",
+    "titleVerify": "Email Verification",
+    "titleReset": "Password Reset",
+    "messageVerify": "Thank you for registering with Master Driving School. Please use the following verification code to complete your registration:",
+    "messageReset": "You requested to reset your password. Please use the following OTP to proceed:",
+    "expiry": "This code will expire in 10 minutes.",
+    "notRequested": "If you didn't request this code, please ignore this email."
+  },
+
+  "newAccount": {
+    "subject": "Account Created - Master Driving School",
+    "headerTitle": "Welcome to the Team!",
+    "credentialsHeading": "Your Login Credentials",
+    "passwordRevealHint": "Click the password above to reveal it",
+    "securityHeading": "⚠️ Important Security Notice:",
+    "securityPoints": [
+      "Please change your password after your first login",
+      "Do not share your password with anyone",
+      "Keep this email secure or delete it after changing your password"
+    ],
+    "loginPrompt": "You can now log in to the system using the credentials provided above.",
+    "loginButtonText": "Go to Login Page",
+    "unexpectedFooter": "If you didn't expect this email, please contact our support team immediately."
+  },
+
+  "walkIn": {
+    "subject": "Walk-In Enrollment Confirmation - Master Driving School",
+    "headerSubtitle": "Walk-In Enrollment Confirmation",
+    "greeting": "Hello {first} {last}!",
+    "intro": "Your walk-in enrollment has been successfully processed. Below are your enrollment details and login credentials.",
+    "scheduleHeading": "📅 Your Training Schedule",
+    "detailsHeading": "📋 Enrollment Details",
+    "credentialsHeading": "🔐 Your Login Credentials",
+    "credentialsIntro": "An account has been created for you. Use the credentials below to log in and manage your enrollment.",
+    "passwordWarning": "⚠️ Important: Please change your password after your first login for security reasons.",
+    "verifyHeading": "📧 Verify Your Email",
+    "verifyIntro": "To activate your account, please verify your email using the code below:",
+    "verifyExpiry": "This code will expire in 10 minutes. You can request a new code from the login page.",
+    "verifyButtonText": "Verify Email & Activate Account",
+    "footerTagline": "If you have any questions, please contact our support team."
+  },
+
+  "guest": {
+    "subject": "Enrollment Confirmation - Master Driving School",
+    "headerSubtitle": "Enrollment Confirmation",
+    "greeting": "Hello {first} {last}!",
+    "intro": "Your enrollment has been successfully processed. Below are your enrollment details and schedule information.",
+    "scheduleHeading": "📅 Your Training Schedule",
+    "detailsHeading": "📋 Enrollment Details",
+    "thankYou": "Thank you for choosing Master Driving School!",
+    "footerTagline": "If you have any questions, please contact our support team."
+  },
+
+  "noShow": {
+    "subject": "Action Required: Missed Training Session - Master Driving School",
+    "headerSubtitle": "Missed Session Notice",
+    "greeting": "Hello {first} {last},",
+    "intro": "We noticed that you did not attend your scheduled training session for <strong>{courseName}</strong> on <strong>{date}</strong> ({session}).",
+    "feeHeading": "Rescheduling Fee Required",
+    "feeNote": "As per our Cancellation and Refund Policy (Section 3), a rescheduling fee of <b>₱1,000.00</b> is required for unattended sessions before you can re-book.",
+    "howToHeading": "How to Reschedule:",
+    "howToSteps": [
+      "Log in to your student portal.",
+      "Settle the ₱1,000 rescheduling fee.",
+      "Select a new training date from the available schedules."
+    ],
+    "loginButtonText": "Log In to Reschedule"
+  },
+
+  "receipt": {
+    "subjectFull": "Full Payment Receipt - Master Driving School",
+    "subjectDown": "Downpayment Receipt & Balance Reminder - Master Driving School",
+    "headerFull": "✅ Full Payment Receipt",
+    "headerDown": "🧾 Downpayment Receipt",
+    "greeting": "Hello {first} {last}!",
+    "introFull": "Your full payment has been received and confirmed. Here is your official receipt.",
+    "introDown": "Your downpayment has been received. Please see your balance details and how to settle it below.",
+    "pdfNote": "📎 A <strong>PDF copy</strong> of your receipt is attached to this email (<strong>{filename}</strong>). Please save it for your records.",
+    "detailsHeading": "📋 Payment Details",
+    "paidInFull": "PAID IN FULL ✅",
+    "amountPaid": "AMOUNT PAID",
+    "balanceHeading": "⚠️ Remaining Balance to Pay",
+    "balanceNote": "To complete your enrollment, please settle your remaining balance of <strong>₱{amount}</strong>.",
+    "balanceStepsHeading": "How to Pay Your Remaining Balance:",
+    "balanceSteps": [
+      "Log in to your student account on our website",
+      "Go to <strong>My Profile → Course History</strong>",
+      "Click <strong>\"Pay Balance Online\"</strong> on your enrollment",
+      "Choose your preferred payment method (GCash, Cash)",
+      "Or pay in person at the branch on your first day of class"
+    ],
+    "successBadge": "🎉",
+    "successHeading": "Payment Complete!",
+    "successNote": "Your enrollment is fully paid. See you on your training date!",
+    "viewAccountButton": "View My Account",
+    "footerTagline": "If you have any questions, contact our support team."
+  },
+
+  "downpaymentReminder": {
+    "heading": "💳 Remaining Balance Reminder:",
+    "note": "Since your payment type is <strong>Downpayment</strong>, please note that you must settle your remaining balance when you go to the branch on the <strong>first or second day</strong> of your class."
+  },
+
+  "vehicleRental": {
+    "heading": "ℹ️ Vehicle Rental Requirement:",
+    "b1b2Note": "For Practical Driving Course (PDC) - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.",
+    "tricycleNote": "For Practical Driving Course (PDC) - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches."
+  },
+
+  "requirements": {
+    "heading": "📌 Requirements to Bring on Your Schedule Date:",
+    "tdc": [
+      "Ball Pen or Pencil",
+      "Be timely and attend all 15 hours (split over sessions/days as scheduled)",
+      "Valid Government-issued ID (for verification)",
+      "Proof of Payment (You can use this email as your official receipt)"
+    ],
+    "pdc": [
+      "Valid Government-issued ID (original + photocopy)",
+      "2x2 ID Picture (2 copies, white background)",
+      "PSA Birth Certificate (original + photocopy)",
+      "Medical Certificate (from any clinic)",
+      "Proof of Payment (You can use this email as your official receipt)",
+      "Student Permit (if applicable)"
+    ]
+  },
+
+  "terms": {
+    "heading": "📜 Terms and Conditions",
+    "items": [
+      "Students must arrive at least 30 minutes before their scheduled session.",
+      "Rescheduling must be done at least 24 hours before the scheduled date.",
+      "No-show on the scheduled date may result in forfeiture of the session.",
+      "Refunds are subject to the school's refund policy (processing fee may apply).",
+      "Students must bring all required documents on the training date.",
+      "The school reserves the right to reschedule sessions due to unforeseen circumstances.",
+      "Students must follow all safety guidelines and instructions during training.",
+      "Completion certificates will be issued only after fulfilling all course requirements.",
+      "Personal belongings are the responsibility of the student during training.",
+      "By enrolling or creating an account, you agree to receive News, Events, and Promotional emails from Master Driving School.",
+      "By enrolling, you agree to abide by all rules and regulations of Master Driving School."
+    ]
+  },
+
+  "news": {
+    "headerSubtitle": "New Announcement & Update",
+    "greeting": "Hi {first},",
+    "intro": "We have a new update for you from Master Driving School!",
+    "visitButton": "Visit Our Website",
+    "unsubNote": "You received this email because you enrolled or created an account at Master Driving School."
+  },
+
+  "pdf": {
+    "schoolName": "MASTER DRIVING SCHOOL",
+    "titleFull": "Full Payment Receipt",
+    "titleDown": "Downpayment Receipt",
+    "receiptTitle": "OFFICIAL RECEIPT",
+    "footerLine1": "Master Driving School  •  This is an official receipt",
+    "footerLine2": "Keep this receipt for your records. Thank you for choosing Master Driving School!",
+    "balanceNote": "Please settle this balance on or before your first day of class."
+  }
+}

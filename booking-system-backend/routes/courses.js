@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { getAllCourses, getCourseById, createCourse, updateCourse, deleteCourse, getCourseConfig, updateCourseConfig } = require('../controllers/courseController');
+const { getAllCourses, getCourseById, createCourse, updateCourse, deleteCourse, updateBranchPrices, getCourseConfig, updateCourseConfig } = require('../controllers/courseController');
+const { getAddonsConfig } = require('../controllers/adminController');
 const { authenticateToken } = require('../middleware/auth');
 
 // Middleware to check if user is admin
@@ -15,6 +16,9 @@ const isAdmin = (req, res, next) => {
 router.get('/config', getCourseConfig);
 router.put('/config', authenticateToken, isAdmin, updateCourseConfig);
 
+// Public Addons config
+router.get('/addons-config', getAddonsConfig);
+
 // Public routes
 router.get('/', getAllCourses);
 router.get('/:id', getCourseById);
@@ -22,6 +26,7 @@ router.get('/:id', getCourseById);
 // Admin routes (protected)
 router.post('/', authenticateToken, isAdmin, createCourse);
 router.put('/:id', authenticateToken, isAdmin, updateCourse);
+router.put('/:id/branch-prices', authenticateToken, isAdmin, updateBranchPrices);
 router.delete('/:id', authenticateToken, isAdmin, deleteCourse);
 
 module.exports = router;

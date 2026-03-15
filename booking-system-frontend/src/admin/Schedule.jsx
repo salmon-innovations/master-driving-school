@@ -34,7 +34,7 @@ const Schedule = ({ onNavigate }) => {
     const [showModal, setShowModal] = useState(false);
     const [showStudentModal, setShowStudentModal] = useState(false);
     const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, confirmText: 'Delete', isDestructive: true });
-    const [feePayModal, setFeePayModal] = useState({ isOpen: false, enrollmentId: null, amount: '1000', paymentMethod: 'Cash', context: 'noshow' });
+    const [feePayModal, setFeePayModal] = useState({ isOpen: false, enrollmentId: null, amount: '1000', paymentMethod: 'Cash', transactionNumber: '', context: 'noshow' });
     const [studentModalTab, setStudentModalTab] = useState('enrolled'); // 'enrolled' | 'unassigned'
     const [unassignedStudents, setUnassignedStudents] = useState([]);
     const [loadingUnassigned, setLoadingUnassigned] = useState(false);
@@ -44,6 +44,8 @@ const Schedule = ({ onNavigate }) => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [rescheduleInfo, setRescheduleInfo] = React.useState(null); // { enrollmentId, studentName, loadingSlots, slots }
     const [summaryRescheduleInfo, setSummaryRescheduleInfo] = React.useState(null); // { enrollmentId, studentName, slotId, slotType, loadingSlots, slots }
+    const [rescheduleMonthFilter, setRescheduleMonthFilter] = React.useState('');
+    const [summaryRescheduleMonthFilter, setSummaryRescheduleMonthFilter] = React.useState('');
     const summaryDateInputRef = React.useRef(null);
     const [editingId, setEditingId] = useState(null);
     const [selectedSlot, setSelectedSlot] = useState(null);
@@ -51,6 +53,22 @@ const Schedule = ({ onNavigate }) => {
     const [selectedBranch, setSelectedBranch] = useState('');
     const [courses, setCourses] = useState([]);
 
+    // Always fetch both tab counts so badges show on initial load
+    React.useEffect(() => {
+        adminAPI.getTodayStudents({
+            date: summaryDate,
+            branchId: selectedBranch || undefined,
+        }).then(res => {
+            if (res && res.success) setTodayStudents(res);
+        }).catch(() => {});
+
+        setNoShowStudents(prev => ({ ...prev, loading: true }));
+        schedulesAPI.getNoShowStudents({ branchId: selectedBranch || undefined })
+            .then(res => { setNoShowStudents({ data: res?.data || [], loading: false }); })
+            .catch(() => setNoShowStudents({ data: [], loading: false }));
+    }, [summaryDate, selectedBranch]);
+
+    // Re-fetch when switching to a tab to get fresh data
     React.useEffect(() => {
         if (scheduleView === 'summary') {
             adminAPI.getTodayStudents({
@@ -66,7 +84,7 @@ const Schedule = ({ onNavigate }) => {
                 .then(res => { setNoShowStudents({ data: res?.data || [], loading: false }); })
                 .catch(() => setNoShowStudents({ data: [], loading: false }));
         }
-    }, [summaryDate, selectedBranch, scheduleView]);
+    }, [scheduleView]);
 
     const [formData, setFormData] = useState({
         type: 'tdc',
@@ -676,17 +694,23 @@ const Schedule = ({ onNavigate }) => {
     };
 
     const openReschedulePanel = async (enrollmentId, studentName) => {
+        setRescheduleMonthFilter('');
         setRescheduleInfo({ enrollmentId, studentName, loadingSlots: true, slots: [] });
         try {
             const res = await schedulesAPI.getSlotsByDate(null, selectedSlot.branch_id || null);
             const allSlots = Array.isArray(res) ? res : [];
             const currentType = (selectedSlot.type || '').toLowerCase();
+            const currentCourseType = (selectedSlot.course_type || '').toLowerCase();
+            const currentTransmission = (selectedSlot.transmission || '').toLowerCase();
             const filtered = allSlots.filter(s =>
                 s.id !== selectedSlot.id &&
                 s.available_slots > 0 &&
-                (!currentType || (s.type || '').toLowerCase() === currentType)
+                (!currentType || (s.type || '').toLowerCase() === currentType) &&
+                (!currentCourseType || (s.course_type || '').toLowerCase() === currentCourseType) &&
+                (!currentTransmission || (s.transmission || '').toLowerCase() === currentTransmission)
             );
-            setRescheduleInfo({ enrollmentId, studentName, loadingSlots: false, slots: filtered });
+            setRescheduleInfo({ enrollmentId, studentName, loadingSlots: false, slots: filtered,
+                courseLabel: [currentType.toUpperCase(), selectedSlot.course_type, selectedSlot.transmission].filter(Boolean).join(' · ') });
         } catch {
             setRescheduleInfo(prev => prev ? { ...prev, loadingSlots: false, slots: [] } : null);
         }
@@ -718,14 +742,14 @@ const Schedule = ({ onNavigate }) => {
     };
 
     const openFeePayModal = (enrollmentId, context) => {
-        setFeePayModal({ isOpen: true, enrollmentId, amount: '1000', paymentMethod: 'Cash', context });
+        setFeePayModal({ isOpen: true, enrollmentId, amount: '1000', paymentMethod: 'Cash', transactionNumber: '', context });
     };
 
     const confirmFeePayment = async () => {
-        const { enrollmentId, context } = feePayModal;
+        const { enrollmentId, context, amount, paymentMethod, transactionNumber } = feePayModal;
         setFeePayModal(prev => ({ ...prev, isOpen: false }));
         try {
-            const res = await schedulesAPI.markFeePaid(enrollmentId);
+            const res = await schedulesAPI.markFeePaid(enrollmentId, amount, paymentMethod, transactionNumber);
             if (res?.error) throw new Error(res.error);
             showNotification('Rescheduling fee marked as paid!', 'success');
             if (context === 'manage') {
@@ -802,18 +826,24 @@ const Schedule = ({ onNavigate }) => {
         });
     };
 
-    const openSummaryReschedulePanel = async (enrollmentId, studentName, slotId, slotType, branchId) => {
+    const openSummaryReschedulePanel = async (enrollmentId, studentName, slotId, slotType, branchId, courseType, transmission) => {
+        setSummaryRescheduleMonthFilter('');
         setSummaryRescheduleInfo({ enrollmentId, studentName, slotId, slotType, branchId, loadingSlots: true, slots: [] });
         try {
             const res = await schedulesAPI.getSlotsByDate(null, branchId || null);
             const allSlots = Array.isArray(res) ? res : [];
             const currentType = (slotType || '').toLowerCase();
+            const currentCourseType = (courseType || '').toLowerCase();
+            const currentTransmission = (transmission || '').toLowerCase();
             const filtered = allSlots.filter(s =>
                 s.id !== slotId &&
                 s.available_slots > 0 &&
-                (!currentType || (s.type || '').toLowerCase() === currentType)
+                (!currentType || (s.type || '').toLowerCase() === currentType) &&
+                (!currentCourseType || (s.course_type || '').toLowerCase() === currentCourseType) &&
+                (!currentTransmission || (s.transmission || '').toLowerCase() === currentTransmission)
             );
-            setSummaryRescheduleInfo(prev => prev ? { ...prev, loadingSlots: false, slots: filtered } : null);
+            setSummaryRescheduleInfo(prev => prev ? { ...prev, loadingSlots: false, slots: filtered,
+                courseLabel: [currentType.toUpperCase(), courseType, transmission].filter(Boolean).join(' · ') } : null);
         } catch {
             setSummaryRescheduleInfo(prev => prev ? { ...prev, loadingSlots: false, slots: [] } : null);
         }
@@ -930,7 +960,7 @@ const Schedule = ({ onNavigate }) => {
             </div>
 
             {/* Tab bar */}
-            <div style={{
+            <div className="schedule-tabs-bar" style={{
                 display: 'flex', alignItems: 'center', gap: '4px',
                 borderBottom: '2px solid var(--border-color, #e2e8f0)',
                 background: 'var(--card-bg, #fff)',
@@ -990,33 +1020,26 @@ const Schedule = ({ onNavigate }) => {
 
             {scheduleView === 'noshow' ? (
                 /* No-Show Students view */
-                <div style={{
-                    background: 'var(--card-bg, #fff)',
-                    borderRadius: '0 0 16px 16px',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-                    padding: '28px 28px 32px',
-                    border: '1px solid var(--border-color, #e2e8f0)',
-                    borderTop: 'none',
-                }}>
+                <div className="noshow-view">
                     {/* Header row */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div className="noshow-header">
+                        <div className="noshow-title-area">
+                            <div className="noshow-icon">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" strokeWidth="2.2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                             </div>
                             <div>
-                                <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-color)' }}>No-Show Students</div>
-                                <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)' }}>Students who missed their scheduled session</div>
+                                <div className="noshow-title">No-Show Students</div>
+                                <div className="noshow-subtitle">Students who missed their scheduled session</div>
                             </div>
                         </div>
                         <button
+                            className="noshow-refresh-btn"
                             onClick={() => {
                                 setNoShowStudents(prev => ({ ...prev, loading: true }));
                                 schedulesAPI.getNoShowStudents({ branchId: selectedBranch || undefined })
                                     .then(res => setNoShowStudents({ data: res?.data || [], loading: false }))
                                     .catch(() => setNoShowStudents({ data: [], loading: false }));
                             }}
-                            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 16px', background: '#fff', border: '1.5px solid var(--border-color, #e2e8f0)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-color)' }}
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                             Refresh
@@ -1024,48 +1047,50 @@ const Schedule = ({ onNavigate }) => {
                     </div>
 
                     {noShowStudents.loading ? (
-                        <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--secondary-text)' }}>
-                            <div style={{ fontSize: '1.8rem', marginBottom: '10px', opacity: 0.3 }}>⏳</div>
-                            <div style={{ fontSize: '0.85rem' }}>Loading no-show students…</div>
+                        <div className="noshow-loading">
+                            <div className="noshow-loading-spinner" />
+                            <div className="noshow-loading-text">Loading no-show students…</div>
                         </div>
                     ) : noShowStudents.data.length === 0 ? (
-                        <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--secondary-text)' }}>
-                            <div style={{ fontSize: '2.5rem', marginBottom: '12px', opacity: 0.25 }}>✅</div>
-                            <div style={{ fontWeight: 700, color: 'var(--text-color)', marginBottom: '4px' }}>No no-show students found</div>
-                            <div style={{ fontSize: '0.82rem' }}>All students attended their sessions.</div>
+                        <div className="noshow-empty">
+                            <div className="noshow-empty-icon">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2.2"><path d="M20 6L9 17l-5-5"/></svg>
+                            </div>
+                            <div className="noshow-empty-title">No no-show students found</div>
+                            <div className="noshow-empty-text">All students attended their sessions — great news!</div>
                         </div>
                     ) : (
-                        <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid var(--border-color, #e2e8f0)' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '700px' }}>
+                        <div className="noshow-table-wrap">
+                            <table className="noshow-data-table">
                                 <thead>
-                                    <tr style={{ background: 'var(--hover-bg, #f8fafc)', borderBottom: '2px solid var(--border-color, #e2e8f0)' }}>
+                                    <tr>
                                         {['Student', 'Email', 'Slot Date', 'Type', 'Branch', 'No-Show Date', 'Fee Status', 'Actions'].map(h => (
-                                            <th key={h} style={{ padding: '11px 14px', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
+                                            <th key={h}>{h}</th>
                                         ))}
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {noShowStudents.data.map((s, i) => (
-                                        <tr key={s.enrollment_id} style={{ borderBottom: '1px solid var(--border-color, #e2e8f0)', background: i % 2 === 0 ? 'transparent' : 'var(--hover-bg, #fafafa)' }}>
-                                            <td style={{ padding: '12px 14px' }}>
+                                        <tr key={s.enrollment_id} style={{ background: i % 2 === 0 ? 'transparent' : 'var(--hover-bg, #fafafa)' }}>
+                                            <td data-label="Student">
                                                 <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-color)' }}>{s.first_name} {s.last_name}</div>
                                             </td>
-                                            <td style={{ padding: '12px 14px', fontSize: '0.82rem', color: 'var(--secondary-text)' }}>{s.email}</td>
-                                            <td style={{ padding: '12px 14px', fontSize: '0.82rem', color: 'var(--text-color)', whiteSpace: 'nowrap' }}>
+                                            <td data-label="Email" style={{ color: 'var(--secondary-text)' }}>{s.email}</td>
+                                            <td data-label="Slot Date" style={{ whiteSpace: 'nowrap', color: 'var(--text-color)' }}>
                                                 {(!s.slot_end_date || s.slot_date === s.slot_end_date)
                                                     ? new Date(s.slot_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                                                     : `${new Date(s.slot_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(s.slot_end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
                                             </td>
-                                            <td style={{ padding: '12px 14px' }}>
+                                            <td data-label="Type">
                                                 <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '3px 10px', borderRadius: '20px', background: (s.type || '').toLowerCase() === 'tdc' ? '#dbeafe' : '#f3e8ff', color: (s.type || '').toLowerCase() === 'tdc' ? '#1d4ed8' : '#7c3aed' }}>
                                                     {s.course_type || s.type}
                                                 </span>
                                             </td>
-                                            <td style={{ padding: '12px 14px', fontSize: '0.82rem', color: 'var(--secondary-text)' }}>{s.branch_name || '—'}</td>
-                                            <td style={{ padding: '12px 14px', fontSize: '0.82rem', color: 'var(--secondary-text)', whiteSpace: 'nowrap' }}>
+                                            <td data-label="Branch" style={{ color: 'var(--secondary-text)' }}>{s.branch_name || '—'}</td>
+                                            <td data-label="No-Show Date" style={{ color: 'var(--secondary-text)', whiteSpace: 'nowrap' }}>
                                                 {new Date(s.no_show_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                                             </td>
-                                            <td style={{ padding: '12px 14px' }}>
+                                            <td data-label="Fee Status">
                                                 {s.reschedule_fee_paid
                                                     ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 700, padding: '3px 10px', borderRadius: '20px', background: '#dcfce7', color: '#166534', border: '1px solid #bbf7d0' }}>
                                                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
@@ -1077,25 +1102,25 @@ const Schedule = ({ onNavigate }) => {
                                                       </span>
                                                 }
                                             </td>
-                                            <td style={{ padding: '12px 14px' }}>
-                                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap' }}>
+                                            <td data-label="Actions">
+                                                <div className="noshow-action-group">
                                                     {!s.reschedule_fee_paid && (
                                                         <button
+                                                            className="noshow-btn noshow-btn-fee"
                                                             onClick={() => openFeePayModal(s.enrollment_id, 'noshow')}
-                                                            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '5px 12px', borderRadius: '7px', border: 'none', background: '#dcfce7', color: '#166534', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700, whiteSpace: 'nowrap' }}
                                                         >
                                                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
                                                             Mark Fee Paid
                                                         </button>
                                                     )}
                                                     <button
+                                                        className="noshow-btn noshow-btn-reschedule"
                                                         onClick={() => s.reschedule_fee_paid
-                                                            ? openSummaryReschedulePanel(s.enrollment_id, `${s.first_name} ${s.last_name}`, s.slot_id, s.type, s.branch_id)
+                                                            ? openSummaryReschedulePanel(s.enrollment_id, `${s.first_name} ${s.last_name}`, s.slot_id, s.type, s.branch_id, s.course_type, s.transmission)
                                                             : null
                                                         }
                                                         disabled={!s.reschedule_fee_paid}
                                                         title={!s.reschedule_fee_paid ? 'Mark fee paid first' : 'Reschedule student'}
-                                                        style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '5px 12px', borderRadius: '7px', border: 'none', background: s.reschedule_fee_paid ? '#fef3c7' : '#f1f5f9', color: s.reschedule_fee_paid ? '#92400e' : '#94a3b8', cursor: s.reschedule_fee_paid ? 'pointer' : 'not-allowed', fontSize: '0.78rem', fontWeight: 700, opacity: s.reschedule_fee_paid ? 1 : 0.6, whiteSpace: 'nowrap' }}
                                                     >
                                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                                                         Reschedule
@@ -1153,7 +1178,7 @@ const Schedule = ({ onNavigate }) => {
                                 type="date"
                                 value={summaryDate}
                                 onChange={e => { if (e.target.value) { setSummaryDate(e.target.value); setSummaryCourseFilter(''); } }}
-                                style={{ position: 'absolute', opacity: 0, width: '1px', height: '1px', pointerEvents: 'none', top: '100%', left: '-5%', transform: 'translateX(-50%)' }}
+                                style={{ position: 'absolute', opacity: 0, width: '1px', height: '1px', pointerEvents: 'none', top: '100%', left: '-2.5%', transform: 'translateX(-50%)' }}
                                 tabIndex={-1}
                             />
                         </div>
@@ -1612,23 +1637,9 @@ const Schedule = ({ onNavigate }) => {
                                             Edit
                                         </button>
                                         <button
+                                            className="slot-delete-btn"
                                             onClick={() => handleDeleteSlot(slot.id)}
                                             title="Delete Slot"
-                                            style={{
-                                                padding: '6px 12px',
-                                                background: '#fee2e2',
-                                                color: '#ef4444',
-                                                border: '1px solid #fca5a5',
-                                                borderRadius: '8px',
-                                                cursor: 'pointer',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                transition: 'all 0.2s ease',
-                                                flexShrink: 0
-                                            }}
-                                            onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; }}
-                                            onMouseLeave={(e) => { e.currentTarget.style.background = '#fee2e2'; }}
                                         >
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                                                 <polyline points="3 6 5 6 21 6"></polyline>
@@ -2207,7 +2218,7 @@ const Schedule = ({ onNavigate }) => {
                                         <div style={{ width: '1px', height: '20px', background: '#e2e8f0' }} />
                                         <div>
                                             <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#1e293b' }}>Reschedule: {rescheduleInfo.studentName}</div>
-                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Select a new slot to move this student to</div>
+                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Course: <strong>{rescheduleInfo.courseLabel || '—'}</strong> — Select a new slot</div>
                                         </div>
                                     </div>
                                     {/* Panel body */}
@@ -2223,6 +2234,23 @@ const Schedule = ({ onNavigate }) => {
                                         ) : (
                                             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                                 <thead>
+                                                    {(() => {
+                                                        const months = [...new Set(rescheduleInfo.slots.map(s => s.date.slice(0, 7)))].sort();
+                                                        const active = rescheduleMonthFilter || months[0] || '';
+                                                        const idx = months.indexOf(active);
+                                                        return (
+                                                            <tr><th colSpan="6" style={{ padding: '7px 16px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                                                    <button onClick={() => setRescheduleMonthFilter(months[idx - 1])} disabled={idx <= 0} style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '3px 9px', fontSize: '0.72rem', fontWeight: 600, color: idx > 0 ? '#475569' : '#cbd5e1', cursor: idx > 0 ? 'pointer' : 'not-allowed', lineHeight: 1.4 }}>‹ Prev</button>
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: '#fff', border: '1.5px solid #1a56db', borderRadius: '8px', padding: '3px 13px', fontSize: '0.78rem', fontWeight: 700, color: '#1a56db', minWidth: '148px', justifyContent: 'center' }}>
+                                                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                                                        {active ? new Date(active + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : ''}
+                                                                    </div>
+                                                                    <button onClick={() => setRescheduleMonthFilter(months[idx + 1])} disabled={idx >= months.length - 1} style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '3px 9px', fontSize: '0.72rem', fontWeight: 600, color: idx < months.length - 1 ? '#475569' : '#cbd5e1', cursor: idx < months.length - 1 ? 'pointer' : 'not-allowed', lineHeight: 1.4 }}>Next ›</button>
+                                                                </div>
+                                                            </th></tr>
+                                                        );
+                                                    })()}
                                                     <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                                                         <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Date</th>
                                                         <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Session</th>
@@ -2233,7 +2261,7 @@ const Schedule = ({ onNavigate }) => {
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    {rescheduleInfo.slots.map(slot => (
+                                                    {rescheduleInfo.slots.filter(s => { const months = [...new Set(rescheduleInfo.slots.map(x => x.date.slice(0, 7)))].sort(); const active = rescheduleMonthFilter || months[0] || ''; return !active || s.date.startsWith(active); }).map(slot => (
                                                         <tr key={slot.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                                             <td style={{ padding: '11px 16px', fontSize: '0.83rem', fontWeight: 600, color: '#1e293b' }}>
                                                                 {(!slot.end_date || slot.date === slot.end_date)
@@ -2242,7 +2270,10 @@ const Schedule = ({ onNavigate }) => {
                                                             </td>
                                                             <td style={{ padding: '11px 16px', fontSize: '0.83rem', color: '#334155' }}>{slot.session}</td>
                                                             <td style={{ padding: '11px 16px', fontSize: '0.83rem', color: '#334155', whiteSpace: 'nowrap' }}>{slot.time_range}</td>
-                                                            <td style={{ padding: '11px 16px', fontSize: '0.83rem', color: '#334155' }}>{slot.course_type || slot.type}</td>
+                                                            <td style={{ padding: '11px 16px', fontSize: '0.83rem', color: '#334155' }}>
+                                                                <span style={{ fontWeight: 600, color: '#1e293b' }}>{(slot.type || '').toUpperCase()}</span>
+                                                                {(slot.course_type || slot.transmission) && <span style={{ display: 'block', fontSize: '0.72rem', color: '#64748b' }}>{[slot.course_type, slot.transmission].filter(Boolean).join(' · ')}</span>}
+                                                            </td>
                                                             <td style={{ padding: '11px 16px' }}>
                                                                 <span style={{
                                                                     fontSize: '0.78rem', fontWeight: 700,
@@ -2459,6 +2490,126 @@ const Schedule = ({ onNavigate }) => {
                 </div>
             )}
 
+            {/* ── No-Show Reschedule Modal (triggered from No-Show tab) ── */}
+            {summaryRescheduleInfo && !summaryStudentModal && (
+                <div style={{
+                    position: 'fixed', inset: 0, zIndex: 1000,
+                    background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(2px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '32px 16px',
+                }} onClick={() => setSummaryRescheduleInfo(null)}>
+                    <div style={{
+                        background: 'var(--card-bg, #fff)', borderRadius: '16px',
+                        width: '100%', maxWidth: '760px',
+                        boxShadow: '0 24px 72px rgba(0,0,0,0.22)',
+                        overflow: 'hidden',
+                    }} onClick={e => e.stopPropagation()}>
+                        {/* Header */}
+                        <div style={{
+                            display: 'flex', alignItems: 'center', gap: '12px',
+                            padding: '16px 24px', borderBottom: '1px solid var(--border-color, #e2e8f0)',
+                            background: '#fef3c7',
+                        }}>
+                            <button
+                                onClick={() => setSummaryRescheduleInfo(null)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#92400e', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}
+                            >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                                Cancel
+                            </button>
+                            <div style={{ width: '1px', height: '20px', background: '#fde68a' }} />
+                            <div>
+                                <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#78350f' }}>
+                                    Reschedule: {summaryRescheduleInfo.studentName}
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: '#92400e' }}>Course: <strong>{summaryRescheduleInfo.courseLabel || '—'}</strong> — Select a new slot</div>
+                            </div>
+                        </div>
+                        {/* Body */}
+                        <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                            {summaryRescheduleInfo.loadingSlots ? (
+                                <div style={{ textAlign: 'center', padding: '50px', color: '#92400e', fontSize: '0.85rem' }}>Loading available slots…</div>
+                            ) : summaryRescheduleInfo.slots.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '50px' }}>
+                                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="1.5" style={{ marginBottom: '12px' }}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                                    <p style={{ fontWeight: 700, color: '#475569', margin: '0 0 6px' }}>No available slots found</p>
+                                    <p style={{ fontSize: '0.82rem', color: '#94a3b8', margin: 0 }}>There are no upcoming slots with open capacity for this course type.</p>
+                                </div>
+                            ) : (
+                                <div style={{ overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '560px' }}>
+                                        <thead>
+                                            {(() => {
+                                                const months = [...new Set(summaryRescheduleInfo.slots.map(s => s.date.slice(0, 7)))].sort();
+                                                const active = summaryRescheduleMonthFilter || months[0] || '';
+                                                const idx = months.indexOf(active);
+                                                return (
+                                                    <tr><th colSpan="6" style={{ padding: '7px 16px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                                            <button onClick={() => setSummaryRescheduleMonthFilter(months[idx - 1])} disabled={idx <= 0} style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '3px 9px', fontSize: '0.72rem', fontWeight: 600, color: idx > 0 ? '#475569' : '#cbd5e1', cursor: idx > 0 ? 'pointer' : 'not-allowed', lineHeight: 1.4 }}>‹ Prev</button>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: '#fff', border: '1.5px solid #1a56db', borderRadius: '8px', padding: '3px 13px', fontSize: '0.78rem', fontWeight: 700, color: '#1a56db', minWidth: '148px', justifyContent: 'center' }}>
+                                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                                                {active ? new Date(active + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : ''}
+                                                            </div>
+                                                            <button onClick={() => setSummaryRescheduleMonthFilter(months[idx + 1])} disabled={idx >= months.length - 1} style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '3px 9px', fontSize: '0.72rem', fontWeight: 600, color: idx < months.length - 1 ? '#475569' : '#cbd5e1', cursor: idx < months.length - 1 ? 'pointer' : 'not-allowed', lineHeight: 1.4 }}>Next ›</button>
+                                                        </div>
+                                                    </th></tr>
+                                                );
+                                            })()}
+                                            <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                                                {['Date', 'Session', 'Time', 'Type', 'Available', ''].map(h => (
+                                                    <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {summaryRescheduleInfo.slots.filter(s => { const months = [...new Set(summaryRescheduleInfo.slots.map(x => x.date.slice(0, 7)))].sort(); const active = summaryRescheduleMonthFilter || months[0] || ''; return !active || s.date.startsWith(active); }).map(slot => (
+                                                <tr key={slot.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                    <td style={{ padding: '11px 16px', fontSize: '0.83rem', fontWeight: 600, color: '#1e293b' }}>
+                                                        {(!slot.end_date || slot.date === slot.end_date)
+                                                            ? new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                                            : `${new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(slot.end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
+                                                    </td>
+                                                    <td style={{ padding: '11px 16px', fontSize: '0.83rem', color: '#334155' }}>{slot.session}</td>
+                                                    <td style={{ padding: '11px 16px', fontSize: '0.83rem', color: '#334155', whiteSpace: 'nowrap' }}>{slot.time_range}</td>
+                                                    <td style={{ padding: '11px 16px', fontSize: '0.83rem', color: '#334155' }}>
+                                                        <span style={{ fontWeight: 600, color: '#1e293b' }}>{(slot.type || '').toUpperCase()}</span>
+                                                        {(slot.course_type || slot.transmission) && <span style={{ display: 'block', fontSize: '0.72rem', color: '#64748b' }}>{[slot.course_type, slot.transmission].filter(Boolean).join(' · ')}</span>}
+                                                    </td>
+                                                    <td style={{ padding: '11px 16px' }}>
+                                                        <span style={{
+                                                            fontSize: '0.78rem', fontWeight: 700,
+                                                            color: slot.available_slots <= 2 ? '#d97706' : '#166534',
+                                                            background: slot.available_slots <= 2 ? '#fef3c7' : '#dcfce7',
+                                                            padding: '2px 9px', borderRadius: '10px',
+                                                            border: `1px solid ${slot.available_slots <= 2 ? '#fde68a' : '#bbf7d0'}`
+                                                        }}>
+                                                            {slot.available_slots} / {slot.total_capacity}
+                                                        </span>
+                                                    </td>
+                                                    <td style={{ padding: '11px 16px', textAlign: 'right' }}>
+                                                        <button
+                                                            onClick={() => confirmSummaryReschedule(slot.id)}
+                                                            style={{
+                                                                background: '#92400e', color: '#fff',
+                                                                border: 'none', borderRadius: '8px', padding: '6px 18px',
+                                                                fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer',
+                                                            }}
+                                                        >
+                                                            Select
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* ── Student Summary Detail Modal ─────────────────────────── */}
             {summaryStudentModal && (
                 <div style={{
@@ -2583,7 +2734,7 @@ const Schedule = ({ onNavigate }) => {
                                             </button>
                                         )}
                                         <button
-                                            onClick={() => canReschedule ? openSummaryReschedulePanel(si?.enrollment_id, summaryStudentModal.student ? [summaryStudentModal.student.first_name, summaryStudentModal.student.last_name].join(' ') : si?.name, si?.slot_id, si?.type, si?.branch_id) : null}
+                                            onClick={() => canReschedule ? openSummaryReschedulePanel(si?.enrollment_id, summaryStudentModal.student ? [summaryStudentModal.student.first_name, summaryStudentModal.student.last_name].join(' ') : si?.name, si?.slot_id, si?.type, si?.branch_id, si?.course_type, si?.transmission) : null}
                                             disabled={!canReschedule}
                                             title={!isNoShow ? 'Student must be marked No-Show first' : !feePaid ? 'Student must pay the ₱1,000 no-show fee first' : 'Reschedule Student'}
                                             style={{
@@ -2629,7 +2780,7 @@ const Schedule = ({ onNavigate }) => {
                                     </button>
                                     <div style={{ width: '1px', height: '18px', background: '#fde68a' }} />
                                     <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#78350f' }}>
-                                        Reschedule: {summaryRescheduleInfo.studentName} — Select a new slot
+                                        Reschedule: {summaryRescheduleInfo.studentName} — <span style={{ fontWeight: 400 }}>{summaryRescheduleInfo.courseLabel || 'Select a new slot'}</span>
                                     </div>
                                 </div>
                                 {summaryRescheduleInfo.loadingSlots ? (
@@ -2640,6 +2791,23 @@ const Schedule = ({ onNavigate }) => {
                                     <div style={{ overflowX: 'auto' }}>
                                         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '560px' }}>
                                             <thead>
+                                                {(() => {
+                                                    const months = [...new Set(summaryRescheduleInfo.slots.map(s => s.date.slice(0, 7)))].sort();
+                                                    const active = summaryRescheduleMonthFilter || months[0] || '';
+                                                    const idx = months.indexOf(active);
+                                                    return (
+                                                        <tr><th colSpan="6" style={{ padding: '7px 14px', background: '#fef9ec', borderBottom: '1px solid #fde68a' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                                                <button onClick={() => setSummaryRescheduleMonthFilter(months[idx - 1])} disabled={idx <= 0} style={{ background: 'none', border: '1px solid #fde68a', borderRadius: '6px', padding: '3px 9px', fontSize: '0.72rem', fontWeight: 600, color: idx > 0 ? '#92400e' : '#f6d28a', cursor: idx > 0 ? 'pointer' : 'not-allowed', lineHeight: 1.4 }}>‹ Prev</button>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: '#fff', border: '1.5px solid #92400e', borderRadius: '8px', padding: '3px 13px', fontSize: '0.78rem', fontWeight: 700, color: '#92400e', minWidth: '148px', justifyContent: 'center' }}>
+                                                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                                                    {active ? new Date(active + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : ''}
+                                                                </div>
+                                                                <button onClick={() => setSummaryRescheduleMonthFilter(months[idx + 1])} disabled={idx >= months.length - 1} style={{ background: 'none', border: '1px solid #fde68a', borderRadius: '6px', padding: '3px 9px', fontSize: '0.72rem', fontWeight: 600, color: idx < months.length - 1 ? '#92400e' : '#f6d28a', cursor: idx < months.length - 1 ? 'pointer' : 'not-allowed', lineHeight: 1.4 }}>Next ›</button>
+                                                            </div>
+                                                        </th></tr>
+                                                    );
+                                                })()}
                                                 <tr style={{ borderBottom: '1px solid #fde68a' }}>
                                                     {['Date', 'Session', 'Time', 'Type', 'Available', ''].map(h => (
                                                         <th key={h} style={{ padding: '8px 14px', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>
@@ -2647,7 +2815,7 @@ const Schedule = ({ onNavigate }) => {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {summaryRescheduleInfo.slots.map(slot => (
+                                                {summaryRescheduleInfo.slots.filter(s => { const months = [...new Set(summaryRescheduleInfo.slots.map(x => x.date.slice(0, 7)))].sort(); const active = summaryRescheduleMonthFilter || months[0] || ''; return !active || s.date.startsWith(active); }).map(slot => (
                                                     <tr key={slot.id} style={{ borderBottom: '1px solid #fef3c7' }}>
                                                         <td style={{ padding: '10px 14px', fontSize: '0.83rem', fontWeight: 600, color: '#1e293b' }}>
                                                             {(!slot.end_date || slot.date === slot.end_date)
@@ -2656,7 +2824,10 @@ const Schedule = ({ onNavigate }) => {
                                                         </td>
                                                         <td style={{ padding: '10px 14px', fontSize: '0.83rem', color: '#334155' }}>{slot.session}</td>
                                                         <td style={{ padding: '10px 14px', fontSize: '0.83rem', color: '#334155', whiteSpace: 'nowrap' }}>{slot.time_range}</td>
-                                                        <td style={{ padding: '10px 14px', fontSize: '0.83rem', color: '#334155' }}>{slot.course_type || slot.type}</td>
+                                                        <td style={{ padding: '10px 14px', fontSize: '0.83rem', color: '#334155' }}>
+                                                            <span style={{ fontWeight: 600, color: '#1e293b' }}>{(slot.type || '').toUpperCase()}</span>
+                                                            {(slot.course_type || slot.transmission) && <span style={{ display: 'block', fontSize: '0.72rem', color: '#64748b' }}>{[slot.course_type, slot.transmission].filter(Boolean).join(' · ')}</span>}
+                                                        </td>
                                                         <td style={{ padding: '10px 14px' }}>
                                                             <span style={{
                                                                 fontSize: '0.78rem', fontWeight: 700,
@@ -2891,7 +3062,7 @@ const Schedule = ({ onNavigate }) => {
                                     style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1.5px solid #e2e8f0', fontSize: '1.05rem', fontWeight: 700, color: '#1e293b', outline: 'none', boxSizing: 'border-box' }}
                                 />
                             </div>
-                            <div style={{ marginBottom: '24px' }}>
+                            <div style={{ marginBottom: '18px' }}>
                                 <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#475569', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Payment Method</label>
                                 <select
                                     value={feePayModal.paymentMethod}
@@ -2899,10 +3070,23 @@ const Schedule = ({ onNavigate }) => {
                                     style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1.5px solid #e2e8f0', fontSize: '0.9rem', fontWeight: 600, color: '#1e293b', outline: 'none', background: '#fff', boxSizing: 'border-box' }}
                                 >
                                     <option value="Cash">Cash</option>
-                                    <option value="GCash">GCash</option>
+                                    <option value="Starpay">Starpay</option>
                                     <option value="Bank Transfer">Bank Transfer</option>
+                                    <option value="MetroBank">MetroBank</option>
                                 </select>
                             </div>
+                            {feePayModal.paymentMethod !== 'Cash' && (
+                            <div style={{ marginBottom: '24px' }}>
+                                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#475569', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Transaction Number</label>
+                                <input
+                                    type="text"
+                                    placeholder="e.g. TXN-20260310-001"
+                                    value={feePayModal.transactionNumber}
+                                    onChange={e => setFeePayModal(prev => ({ ...prev, transactionNumber: e.target.value }))}
+                                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1.5px solid #e2e8f0', fontSize: '0.9rem', fontWeight: 600, color: '#1e293b', outline: 'none', boxSizing: 'border-box' }}
+                                />
+                            </div>
+                            )}
                             <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '12px 14px', marginBottom: '20px', fontSize: '0.82rem', color: '#166534' }}>
                                 <strong>Note:</strong> This records that the student paid the reschedule fee in person. The student will then be eligible for rescheduling.
                             </div>

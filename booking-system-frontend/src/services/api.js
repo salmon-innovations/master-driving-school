@@ -176,11 +176,23 @@ export const coursesAPI = {
     return await apiRequest('/courses/config');
   },
 
+  getAddonsConfig: async () => {
+    return await apiRequest('/courses/addons-config');
+  },
+
   // Update course type config (Admin only)
   updateConfig: async (config) => {
     return await apiRequest('/courses/config', {
       method: 'PUT',
       body: JSON.stringify(config),
+    });
+  },
+
+  // Update branch prices for a course (only stores branches that differ from the default)
+  updateBranchPrices: async (id, branch_prices) => {
+    return await apiRequest(`/courses/${id}/branch-prices`, {
+      method: 'PUT',
+      body: JSON.stringify({ branch_prices }),
     });
   },
 };
@@ -235,6 +247,9 @@ export const starpayAPI = {
   payRescheduleFee: async (enrollmentId) => await apiRequest(`/starpay/reschedule-fee/${enrollmentId}`, {
     method: 'POST',
   }),
+  testMarkFeePaid: async (enrollmentId) => await apiRequest(`/starpay/test-mark-fee-paid/${enrollmentId}`, {
+    method: 'PATCH',
+  }),
 };
 
 // Bookings API
@@ -275,16 +290,19 @@ export const bookingsAPI = {
 
 // Admin API
 export const adminAPI = {
+  getAddonsConfig: async () => await apiRequest('/admin/addons-config'),
+  updateAddonsConfig: async (config) => await apiRequest('/admin/addons-config', { method: 'PUT', body: JSON.stringify({ config }) }),
   // Get dashboard statistics
   getStats: async () => {
     return await apiRequest('/admin/stats');
   },
 
   // Get all bookings (admin view)
-  getAllBookings: async (status = null, limit = 50) => {
+  getAllBookings: async (status = null, limit = 50, branchId = null) => {
     const params = new URLSearchParams();
     if (status) params.append('status', status);
     params.append('limit', limit);
+    if (branchId) params.append('branchId', branchId);
     return await apiRequest(`/admin/bookings?${params.toString()}`);
   },
 
@@ -527,10 +545,11 @@ export const schedulesAPI = {
     });
   },
 
-  // Mark no-show rescheduling fee (₱1000) as paid
-  markFeePaid: async (enrollmentId) => {
+  // Mark no-show rescheduling fee (walk-in) as paid
+  markFeePaid: async (enrollmentId, amount, paymentMethod, transactionNumber) => {
     return await apiRequest(`/schedules/enrollments/${enrollmentId}/mark-fee-paid`, {
       method: 'PATCH',
+      body: JSON.stringify({ amount, paymentMethod, transactionNumber }),
     });
   },
 

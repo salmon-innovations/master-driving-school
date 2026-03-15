@@ -6,12 +6,15 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const pool = require('./config/db'); // Import database connection
 
-// Test database connection
+// Test database connection + auto-migrate branch_prices column
 pool.query('SELECT NOW()', (err, res) => {
   if (err) {
     console.error('❌ Database connection failed:', err);
   } else {
     console.log('✅ Database connected successfully');
+    pool.query('ALTER TABLE courses ADD COLUMN IF NOT EXISTS branch_prices JSONB')
+      .then(() => console.log('✅ branch_prices column ready'))
+      .catch(e => console.warn('⚠️  branch_prices migration skipped:', e.message));
   }
 });
 

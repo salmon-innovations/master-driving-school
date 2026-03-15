@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './css/user.css';
-import { coursesAPI } from '../services/api';
+import { coursesAPI, branchesAPI, adminAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import Pagination from './components/Pagination';
 
@@ -18,7 +18,10 @@ const CourseManagement = () => {
         name: '',
         description: '',
         price: '',
+        discount: 0,
         duration: '',
+        duration_tdc: '',
+        duration_pdc: '',
         images: [],
         status: 'active',
         category: 'Basic',
@@ -27,11 +30,21 @@ const CourseManagement = () => {
     const [pricingVariations, setPricingVariations] = useState([]);
     const [viewingImage, setViewingImage] = useState(null);
     const [courseConfig, setCourseConfig] = useState(null);
+    const [branches, setBranches] = useState([]);
+    const [viewingBranchId, setViewingBranchId] = useState(null); // null = All Branches
+    const [branchPrices, setBranchPrices] = useState({}); // { branchId: priceString }
+    const [editingBranchId, setEditingBranchId] = useState('');
+    const [activeTab, setActiveTab] = useState('courses');
+    const [discountForm, setDiscountForm] = useState({});
+    const [addonsConfig, setAddonsConfig] = useState({ reviewer: 30, vehicleTips: 20, convenienceFee: 25 });
+    const [addonsLoading, setAddonsLoading] = useState(false);
 
     // Fetch courses from database
     useEffect(() => {
         fetchCourses();
         coursesAPI.getConfig().then(r => { if (r.success) setCourseConfig(r.config); }).catch(() => {});
+        branchesAPI.getAll().then(r => { if (r.success) setBranches(r.branches || []); }).catch(() => {});
+        adminAPI.getAddonsConfig().then(r => { if (r.success) setAddonsConfig(r.config); }).catch(() => {});
     }, []);
 
     const fetchCourses = async () => {
@@ -78,6 +91,7 @@ const CourseManagement = () => {
                     images: parsedImages,
                     status: course.status || 'active',
                     price: parseFloat(course.price) || 0,
+                    discount: parseFloat(course.discount) || 0,
                     category: course.category || 'Basic',
                     course_type: course.course_type || '',
                     pricing_data: parsedPricingData
@@ -105,7 +119,7 @@ const CourseManagement = () => {
         }
 
         // Validate duration field
-        if (name === 'duration') {
+        if (name === 'duration' || name === 'duration_tdc' || name === 'duration_pdc') {
             // Only allow positive numbers (no letters, no negative, no zero)
             if (value === '' || (parseFloat(value) > 0 && /^\d*\.?\d*$/.test(value))) {
                 setCourseData({ ...courseData, [name]: value });
@@ -209,9 +223,16 @@ const CourseManagement = () => {
         }
 
         // Validate duration
-        if (!courseData.duration || parseFloat(courseData.duration) <= 0) {
-            showNotification('Please enter a valid duration (must be greater than 0)', 'error');
-            return;
+        if (courseData.category === 'Promo') {
+            if (!courseData.duration_tdc || !courseData.duration_pdc || parseFloat(courseData.duration_tdc) <= 0 || parseFloat(courseData.duration_pdc) <= 0) {
+                showNotification('Please enter valid durations for both TDC and PDC (must be greater than 0)', 'error');
+                return;
+            }
+        } else {
+            if (!courseData.duration || parseFloat(courseData.duration) <= 0) {
+                showNotification('Please enter a valid duration (must be greater than 0)', 'error');
+                return;
+            }
         }
 
         // Validate pricing variations prices
@@ -232,16 +253,26 @@ const CourseManagement = () => {
                 }))
                 : null;
 
+            const branchPricesPayload = editingCourse
+                ? branches
+                    .map(b => ({ branch_id: b.id, price: parseFloat(branchPrices[String(b.id)]) || 0 }))
+                    .filter(bp => bp.price > 0 && bp.price !== parseFloat(courseData.price))
+                : undefined;
+
             const coursePayload = {
                 name: courseData.name,
                 description: courseData.description,
                 price: parseFloat(courseData.price),
-                duration: courseData.duration,
+                discount: parseFloat(courseData.discount) || 0,
+                duration: courseData.category === 'Promo' 
+                    ? `TDC: ${courseData.duration_tdc} hrs, PDC: ${courseData.duration_pdc} hrs` 
+                    : courseData.duration,
                 status: courseData.status,
                 images: courseData.images,
                 category: courseData.category,
                 course_type: courseData.course_type || null,
-                pricing_data: processedPricingData
+                pricing_data: processedPricingData,
+                ...(branchPricesPayload !== undefined && { branch_prices: branchPricesPayload })
             };
 
             console.log('Sending course payload:', coursePayload);
@@ -271,13 +302,27 @@ const CourseManagement = () => {
             name: course.name,
             description: course.description,
             price: course.price.toString(),
-            duration: course.duration,
+            discount: course.discount || 0,
+            duration: course.category === 'Promo' ? '' : course.duration,
+            duration_tdc: course.category === 'Promo' && course.duration ? (course.duration.match(/TDC:\s*([\d.]+)/)?.[1] || '') : '',
+            duration_pdc: course.category === 'Promo' && course.duration ? (course.duration.match(/PDC:\s*([\d.]+)/)?.[1] || '') : '',
             images: course.images || [],
             status: course.status.toLowerCase(),
             category: course.category || 'Basic',
             course_type: course.course_type || ''
         });
         setPricingVariations(course.pricing_data || []);
+        // Only load branches that genuinely have a custom price.
+        // Do NOT pre-fill all branches with the default — that would create stale
+        // overrides if the user later changes the main course price.
+        const existingBp = {};
+        if (Array.isArray(course.branch_prices)) {
+            course.branch_prices.forEach(bp => { existingBp[String(bp.branch_id)] = String(bp.price); });
+        }
+        setBranchPrices(existingBp);
+        // If currently viewing a specific branch, pre-select it so the user edits
+        // that branch's price directly instead of accidentally changing the global default.
+        setEditingBranchId(viewingBranchId ? String(viewingBranchId) : '');
         setShowModal(true);
     };
 
@@ -302,27 +347,217 @@ const CourseManagement = () => {
             name: '',
             description: '',
             price: '',
+            discount: 0,
             duration: '',
+            duration_tdc: '',
+            duration_pdc: '',
             images: [],
             status: 'active',
             category: 'Basic',
             course_type: ''
         });
         setPricingVariations([]);
+        setBranchPrices({});
+        setEditingBranchId('');
+    };
+
+
+    const getEffectivePrice = (course, basePrice) => {
+        if (!viewingBranchId) return parseFloat(basePrice);
+        const base = parseFloat(basePrice);
+        const bp = Array.isArray(course.branch_prices)
+            ? course.branch_prices.find(b => String(b.branch_id) === String(viewingBranchId))
+            : null;
+        // Only use custom price if it genuinely DIFFERS from the current default.
+        // Entries equal to the default are stale (saved by old code) — ignore them.
+        if (bp && bp.price > 0 && parseFloat(bp.price) !== base) return parseFloat(bp.price);
+        return base;
     };
 
     const filteredCourses = courses.filter(course =>
         course.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    // Shorten long branch names for display: strip school prefix, remove "Main", capitalise after hyphens
+    const shortBranchName = (name) => {
+        return (name || '')
+            .replace(/^Masters?\s+Prime\s+Holdings\s+Corp\.\s*/i, '')
+            .replace(/^Masters?\s+Prime\s+Driving\s+School\s*/i, '')
+            .replace(/^Masters?\s+Driving\s+School\s*/i, '')
+            .replace(/\bMain\b\s*/i, '')
+            .replace(/-([a-z])/g, (_, c) => '-' + c.toUpperCase())
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+    };
+
     // Reset to page 1 when search changes
     useEffect(() => { setCoursePage(1); }, [searchTerm]);
 
     const courseTotalPages = Math.ceil(filteredCourses.length / COURSE_PAGE_SIZE);
     const pagedCourses = filteredCourses.slice((coursePage - 1) * COURSE_PAGE_SIZE, coursePage * COURSE_PAGE_SIZE);
+    const viewingBranch = branches.find(b => String(b.id) === String(viewingBranchId)) || null;
+
+    const handleSaveAddonsConfig = async () => {
+        setAddonsLoading(true);
+        try {
+            const res = await adminAPI.updateAddonsConfig(addonsConfig);
+            if (res.success) {
+                showNotification('Add-ons configuration saved successfully!', 'success');
+            } else {
+                throw new Error(res.error || 'Failed to save config');
+            }
+        } catch (error) {
+            console.error('Error saving addons config:', error);
+            showNotification(error.message || 'Error saving addons configuration.', 'error');
+        } finally {
+            setAddonsLoading(false);
+        }
+    };
+
+    const handleDiscountUpdate = async (courseId) => {
+        const discountValue = discountForm[courseId] ?? 0;
+        const courseToUpdate = courses.find(c => c.id === courseId);
+        if (!courseToUpdate) return;
+
+        let updatedPricingData = courseToUpdate.pricing_data;
+        if (updatedPricingData && updatedPricingData.length > 0) {
+            updatedPricingData = updatedPricingData.map(v => ({
+                ...v,
+                discount: parseFloat(discountForm[`${courseId}_${v.type}`] || 0)
+            }));
+        }
+
+        try {
+            const coursePayload = {
+                name: courseToUpdate.name,
+                description: courseToUpdate.description,
+                price: parseFloat(courseToUpdate.price),
+                discount: parseFloat(discountValue) || 0,
+                duration: courseToUpdate.duration,
+                status: courseToUpdate.status,
+                images: courseToUpdate.images,
+                category: courseToUpdate.category,
+                course_type: courseToUpdate.course_type || null,
+                pricing_data: updatedPricingData,
+                branch_prices: courseToUpdate.branch_prices
+            };
+            await coursesAPI.update(courseId, coursePayload);
+            showNotification('Discount updated successfully!', 'success');
+            await fetchCourses();
+        } catch (error) {
+            console.error('Error updating discount:', error);
+            showNotification(error.message || 'Failed to update discount.', 'error');
+        }
+    };
 
     return (
         <div className="user-management-container">
+            {/* Tabs */}
+            <div className="cfg-tabs-header" style={{ display: 'flex', gap: '8px', borderBottom: '2px solid var(--border-color)', marginBottom: '24px', overflow: 'hidden', background: 'var(--card-bg)', padding: '0 20px', borderRadius: '12px' }}>
+                <button
+                    className={`cfg-tab-btn${activeTab === 'courses' ? ' active' : ''}`}
+                    onClick={() => setActiveTab('courses')}
+                    style={{ marginBottom: '-2px' }}
+                >
+                    <span className="cfg-tab-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+                    </span>
+                    <span className="tab-label">Courses</span>
+                </button>
+                <button
+                    className={`cfg-tab-btn${activeTab === 'discounts' ? ' active' : ''}`}
+                    onClick={() => {
+                        setActiveTab('discounts');
+                        const initForm = {};
+                        courses.forEach(c => { 
+                            initForm[c.id] = c.discount || 0; 
+                            if (c.pricing_data) {
+                                c.pricing_data.forEach(v => {
+                                    initForm[`${c.id}_${v.type}`] = v.discount || 0;
+                                });
+                            }
+                        });
+                        setDiscountForm(initForm);
+                    }}
+                    style={{ marginBottom: '-2px' }}
+                >
+                    <span className="cfg-tab-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 0 2.83 2.83L23.41 16.24v-2.83l-2.82-2.82z"></path><line x1="7" y1="7" x2="7" y2="7"></line></svg>
+                    </span>
+                    <span className="tab-label">Discounts</span>
+                </button>
+                <button
+                    className={`cfg-tab-btn${activeTab === 'config' ? ' active' : ''}`}
+                    onClick={() => setActiveTab('config')}
+                    style={{ marginBottom: '-2px' }}
+                >
+                    <span className="cfg-tab-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    </span>
+                    <span className="tab-label">Config</span>
+                </button>
+            </div>
+
+            {/* Viewing Branch Bar */}
+            <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: 'var(--card-bg)', border: '1px solid var(--border-color)',
+                borderLeft: '4px solid var(--primary-color)',
+                borderRadius: '12px', padding: '14px 20px', marginBottom: '20px', gap: '16px', flexWrap: 'wrap'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{
+                        width: '38px', height: '38px', borderRadius: '10px',
+                        background: 'var(--primary-color)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                    }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2">
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                            <circle cx="12" cy="10" r="3"></circle>
+                        </svg>
+                    </div>
+                    <div>
+                        <div style={{ fontSize: '0.72rem', fontWeight: '700', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '2px' }}>Viewing Branch</div>
+                        <div style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--text-color)' }}>
+                            {viewingBranch ? shortBranchName(viewingBranch.name) : 'All Branches'}
+                        </div>
+                    </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{
+                        padding: '4px 12px', borderRadius: '20px',
+                        background: 'var(--primary-light)', color: 'var(--primary-color)',
+                        fontSize: '0.82rem', fontWeight: '700'
+                    }}>
+                        {branches.length} Branch{branches.length !== 1 ? 'es' : ''}
+                    </span>
+                    <select
+                        value={viewingBranchId ?? ''}
+                        onChange={e => setViewingBranchId(e.target.value || null)}
+                        style={{
+                            padding: '8px 36px 8px 14px',
+                            border: '1.5px solid var(--border-color)',
+                            borderRadius: '10px',
+                            fontSize: '0.9rem',
+                            fontWeight: '600',
+                            background: 'var(--card-bg)',
+                            color: 'var(--text-color)',
+                            cursor: 'pointer',
+                            appearance: 'none',
+                            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+                            backgroundRepeat: 'no-repeat',
+                            backgroundPosition: 'right 10px center',
+                            minWidth: '220px'
+                        }}
+                    >
+                        <option value="">All Branches / Default View</option>
+                        {branches.map(b => (
+                            <option key={b.id} value={b.id}>{shortBranchName(b.name)}</option>
+                        ))}
+                    </select>
+                </div>
+            </div>
+
             <div className="course-management-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
                 <div className="search-box" style={{ flex: '1', minWidth: '250px', maxWidth: '500px' }}>
                     <svg className="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -346,34 +581,38 @@ const CourseManagement = () => {
                         }}
                     />
                 </div>
-                <button
-                    onClick={() => setShowModal(true)}
-                    style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '12px 24px',
-                        background: 'var(--primary-color)',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '12px',
-                        fontSize: '0.95rem',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s',
-                        whiteSpace: 'nowrap'
-                    }}
-                >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                    Add Course
-                </button>
+                {activeTab === 'courses' && (
+                    <button
+                        onClick={() => setShowModal(true)}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '12px 24px',
+                            background: 'var(--primary-color)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '12px',
+                            fontSize: '0.95rem',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                            whiteSpace: 'nowrap'
+                        }}
+                    >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        Add Course
+                    </button>
+                )}
             </div>
 
-            {/* Courses Grid */}
-            {loading ? (
+            {activeTab === 'courses' && (
+                <>
+                {/* Courses Grid */}
+                {loading ? (
                 <div style={{ textAlign: 'center', padding: '60px', color: 'var(--secondary-text)' }}>
                     <div style={{ fontSize: '1.1rem' }}>Loading courses...</div>
                 </div>
@@ -512,6 +751,21 @@ const CourseManagement = () => {
 
                                 {/* Price Section */}
                                 <div style={{ paddingTop: '16px', borderTop: '1px solid var(--border-color)', marginTop: 'auto' }}>
+                                    {course.discount > 0 && (
+                                        <div style={{ marginBottom: '8px' }}>
+                                            <span style={{
+                                                display: 'inline-block',
+                                                padding: '2px 8px',
+                                                background: '#ef4444',
+                                                color: 'white',
+                                                borderRadius: '4px',
+                                                fontSize: '0.75rem',
+                                                fontWeight: 'bold'
+                                            }}>
+                                                {course.discount}% OFF
+                                            </span>
+                                        </div>
+                                    )}
                                     {/* Pricing Options - Show both main and variations */}
                                     {(course.course_type || (course.pricing_data && course.pricing_data.length > 0)) ? (
                                         <div style={{ marginBottom: '12px' }}>
@@ -540,7 +794,7 @@ const CourseManagement = () => {
                                                             })() : course.course_type}
                                                         </span>
                                                         <span style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--primary-color)' }}>
-                                                            ₱{parseFloat(course.price).toLocaleString()}
+                                                            ₱{getEffectivePrice(course, course.price).toLocaleString()}
                                                         </span>
                                                     </div>
                                                 )}
@@ -566,15 +820,15 @@ const CourseManagement = () => {
                                             </div>
                                         </div>
                                     ) : (
-                                        <div style={{ marginBottom: '12px' }}>
+                                        <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                                             <span style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--primary-color)' }}>
-                                                ₱{course.price.toLocaleString()}
+                                                ₱{getEffectivePrice(course, course.price).toLocaleString()}
                                             </span>
                                         </div>
                                     )}
 
                                     {/* Action Buttons */}
-                                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                                         <button
                                             onClick={() => handleEdit(course)}
                                             style={{
@@ -621,6 +875,207 @@ const CourseManagement = () => {
                     pageSize={COURSE_PAGE_SIZE}
                 />
                 </>
+            )}
+            </>
+            )}
+
+            {activeTab === 'discounts' && (
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                    <div className="bg-white border-b border-gray-100 p-6 text-center">
+                        <h2 className="text-xl font-semibold text-[#1a2332]">Course Discounts</h2>
+                    </div>
+                    {loading ? (
+                        <div className="text-center p-10 text-gray-500">Loading courses...</div>
+                    ) : filteredCourses.length === 0 ? (
+                        <div className="text-center p-10 text-gray-500">No courses match your search.</div>
+                    ) : (
+                        <>
+                        <div className="overflow-x-auto">
+                            <table className="w-full min-w-[800px]">
+                                <thead className="bg-[#f8fafc]">
+                                    <tr>
+                                        <th className="py-4 px-6 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Course Name</th>
+                                        <th className="py-4 px-6 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Price {viewingBranchId ? `(${shortBranchName(branches.find(b => String(b.id) === String(viewingBranchId))?.name)})` : ''}</th>
+                                        <th className="py-4 px-6 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Discount (%)</th>
+                                        <th className="py-4 px-6 text-center text-xs font-bold text-gray-600 uppercase tracking-wider w-32">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y border-t border-gray-100 divide-gray-100">
+                                    {pagedCourses.map(course => {
+                                        const effectivePrice = getEffectivePrice(course, course.price);
+                                        return (
+                                            <tr key={course.id} className="hover:bg-gray-50 transition-colors">
+                                                <td className="py-5 px-6">
+                                                    <div className="flex flex-col items-center sm:items-start text-center sm:text-left gap-1">
+                                                        <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
+                                                            <span className="font-semibold text-[#1a2332] text-[0.95rem]">{course.name}</span>
+                                                            {course.category === 'Promo' && (
+                                                                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md border border-amber-200">
+                                                                    PROMO
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        {(course.course_type || course.category) && course.category !== 'Basic' && (
+                                                            <span className="text-xs text-gray-500 font-medium">
+                                                                {course.category === 'Promo' ? (() => {
+                                                                    const labels = {
+                                                                        'F2F+Motorcycle': 'F2F TDC + MOTOR', 'F2F+CarAT': 'F2F TDC + CAR AT', 'F2F+CarMT': 'F2F TDC + CAR MT',
+                                                                        'Online+Motorcycle': 'OTDC + MOTOR', 'Online+CarAT': 'OTDC + CAR AT', 'Online+CarMT': 'OTDC + CAR MT'
+                                                                    }
+                                                                    return labels[course.course_type] || course.course_type
+                                                                })() : (
+                                                                    `${course.category} ${course.course_type ? '- ' + course.course_type : ''}`
+                                                                )}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="py-5 px-6 text-center">
+                                                    <div className="flex flex-col items-center gap-1.5">
+                                                        <div className="font-bold text-[#2157da]">
+                                                            {course.pricing_data && course.pricing_data.length > 0 && <span className="text-xs text-gray-500 font-medium mr-1.5">Base:</span>}
+                                                            ₱{effectivePrice.toLocaleString()}
+                                                        </div>
+                                                        {course.pricing_data && course.pricing_data.map((v, i) => (
+                                                            <div key={i} className="text-sm font-semibold text-[#2157da]">
+                                                                <span className="text-xs text-gray-500 font-medium mr-1.5">{v.type}:</span>
+                                                                ₱{parseFloat(v.price).toLocaleString()}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                                <td className="py-5 px-6">
+                                                    <div className="flex flex-col items-center gap-2">
+                                                        <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5 shadow-sm focus-within:border-[#2157da] focus-within:ring-1 focus-within:ring-[#2157da] transition-all">
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                max="100"
+                                                                value={discountForm[course.id] ?? course.discount ?? 0}
+                                                                onChange={(e) => setDiscountForm({...discountForm, [course.id]: e.target.value})}
+                                                                className="w-12 text-center text-sm font-semibold text-gray-700 outline-none p-0 border-none bg-transparent"
+                                                            />
+                                                            <span className="text-gray-400 text-sm font-medium">%</span>
+                                                        </div>
+
+                                                        {course.pricing_data && course.pricing_data.map((v, i) => (
+                                                            <div key={i} className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5 shadow-sm focus-within:border-[#2157da] focus-within:ring-1 focus-within:ring-[#2157da] transition-all">
+                                                                <input
+                                                                    type="number"
+                                                                    min="0"
+                                                                    max="100"
+                                                                    value={discountForm[`${course.id}_${v.type}`] ?? v.discount ?? 0}
+                                                                    onChange={(e) => setDiscountForm({...discountForm, [`${course.id}_${v.type}`]: e.target.value})}
+                                                                    className="w-12 text-center text-sm font-semibold text-gray-700 outline-none p-0 border-none bg-transparent"
+                                                                />
+                                                                <span className="text-gray-400 text-sm font-medium">%</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                                <td className="py-5 px-6">
+                                                    <div className="flex justify-center">
+                                                        <button 
+                                                            onClick={() => handleDiscountUpdate(course.id)}
+                                                            className="flex items-center gap-1.5 bg-[#2157da] hover:bg-[#1a46b8] text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors active:scale-95 shadow-sm"
+                                                        >
+                                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                                                                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                                                <polyline points="7 3 7 8 15 8"></polyline>
+                                                            </svg>
+                                                            Save
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className="p-4 border-t border-gray-100">
+                            <Pagination
+                                currentPage={coursePage}
+                                totalPages={courseTotalPages}
+                                onPageChange={setCoursePage}
+                                totalItems={filteredCourses.length}
+                                pageSize={COURSE_PAGE_SIZE}
+                            />
+                        </div>
+                        </>
+                    )}
+                </div>
+            )}
+
+            {/* Config Tab */}
+            {activeTab === 'config' && (
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm max-w-4xl mx-auto">
+                    <div className="p-8 text-center border-b border-gray-100">
+                        <h2 className="text-xl font-bold text-[#1a2332] mb-2">Global Add-Ons Price Settings</h2>
+                        <p className="text-sm text-gray-500 max-w-2xl mx-auto">Set the global prices for course checkout add-ons. These will be automatically checked by default for students to easily add during checkout.</p>
+                    </div>
+                    
+                    <div className="p-8">
+                        <div className="flex flex-col gap-6 max-w-md mx-auto">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">
+                                    Reviewer Price (₱)
+                                </label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={addonsConfig.reviewer}
+                                    onChange={(e) => setAddonsConfig({...addonsConfig, reviewer: e.target.value})}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:border-[#2157da] focus:ring-2 focus:ring-blue-100 outline-none transition-all text-gray-800 font-semibold"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">
+                                    Vehicle Tips Price (₱)
+                                </label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={addonsConfig.vehicleTips}
+                                    onChange={(e) => setAddonsConfig({...addonsConfig, vehicleTips: e.target.value})}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:border-[#2157da] focus:ring-2 focus:ring-blue-100 outline-none transition-all text-gray-800 font-semibold"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">
+                                    Convenience Fee (₱)
+                                </label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={addonsConfig.convenienceFee}
+                                    onChange={(e) => setAddonsConfig({...addonsConfig, convenienceFee: e.target.value})}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:border-[#2157da] focus:ring-2 focus:ring-blue-100 outline-none transition-all text-gray-800 font-semibold"
+                                />
+                            </div>
+                            
+                            <button
+                                onClick={handleSaveAddonsConfig}
+                                disabled={addonsLoading}
+                                className={`mt-4 w-full py-3.5 rounded-xl font-bold text-white transition-all shadow-sm flex items-center justify-center gap-2 ${
+                                    addonsLoading 
+                                        ? 'bg-[#1a46b8] opacity-70 cursor-not-allowed' 
+                                        : 'bg-[#2157da] hover:bg-[#1a46b8] hover:shadow-md active:scale-[0.98]'
+                                }`}
+                            >
+                                {addonsLoading ? (
+                                    <>
+                                        <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                        Saving...
+                                    </>
+                                ) : (
+                                    'Save Configuration'
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* Image Viewer Modal */}
@@ -791,51 +1246,135 @@ const CourseManagement = () => {
 
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
                                     <div>
-                                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-color)' }}>
-                                            Price (₱) <span style={{ color: '#ef4444' }}>*</span>
-                                        </label>
-                                        <input
-                                            type="number"
-                                            name="price"
-                                            value={courseData.price}
-                                            onChange={handleInputChange}
-                                            placeholder="5000"
-                                            required
-                                            min="0"
-                                            step="0.01"
-                                            style={{
-                                                width: '100%',
-                                                padding: '12px',
-                                                border: '1.5px solid var(--border-color)',
-                                                borderRadius: '10px',
-                                                fontSize: '0.95rem',
-                                                background: 'var(--card-bg)',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
+                                        {editingCourse && viewingBranchId ? (
+                                            <>
+                                                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-color)' }}>
+                                                    Price for {shortBranchName(branches.find(b => String(b.id) === String(viewingBranchId))?.name || '')} (₱)
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={branchPrices[String(viewingBranchId)] ?? courseData.price}
+                                                    onChange={e => {
+                                                        const val = e.target.value;
+                                                        if (val === '' || (/^\d*\.?\d*$/.test(val) && parseFloat(val) >= 0)) {
+                                                            setBranchPrices(prev => ({ ...prev, [String(viewingBranchId)]: val }));
+                                                        }
+                                                    }}
+                                                    placeholder="5000"
+                                                    min="0"
+                                                    step="0.01"
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '12px',
+                                                        border: '1.5px solid var(--primary-color)',
+                                                        borderRadius: '10px',
+                                                        fontSize: '0.95rem',
+                                                        background: 'var(--card-bg)',
+                                                        color: 'var(--text-color)'
+                                                    }}
+                                                />
+                                                <div style={{ fontSize: '0.78rem', color: 'var(--secondary-text)', marginTop: '5px' }}>
+                                                    Default (all branches): ₱{parseFloat(courseData.price || 0).toLocaleString()}
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-color)' }}>
+                                                    Price (₱) <span style={{ color: '#ef4444' }}>*</span>
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    name="price"
+                                                    value={courseData.price}
+                                                    onChange={handleInputChange}
+                                                    placeholder="5000"
+                                                    required
+                                                    min="0"
+                                                    step="0.01"
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '12px',
+                                                        border: '1.5px solid var(--border-color)',
+                                                        borderRadius: '10px',
+                                                        fontSize: '0.95rem',
+                                                        background: 'var(--card-bg)',
+                                                        color: 'var(--text-color)'
+                                                    }}
+                                                />
+                                            </>
+                                        )}
                                     </div>
-                                    <div>
-                                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-color)' }}>
-                                            Duration <span style={{ color: '#ef4444' }}>*</span>
-                                        </label>
-                                        <input
-                                            type="text"
-                                            name="duration"
-                                            value={courseData.duration}
-                                            onChange={handleInputChange}
-                                            placeholder="e.g., 2 weeks"
-                                            required
-                                            style={{
-                                                width: '100%',
-                                                padding: '12px',
-                                                border: '1.5px solid var(--border-color)',
-                                                borderRadius: '10px',
-                                                fontSize: '0.95rem',
-                                                background: 'var(--card-bg)',
-                                                color: 'var(--text-color)'
-                                            }}
-                                        />
-                                    </div>
+                                    {courseData.category === 'Promo' ? (
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                                            <div>
+                                                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-color)' }}>
+                                                    TDC Duration <span style={{ color: '#ef4444' }}>*</span>
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    name="duration_tdc"
+                                                    value={courseData.duration_tdc || ''}
+                                                    onChange={handleInputChange}
+                                                    placeholder="e.g., 15"
+                                                    required
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '12px',
+                                                        border: '1.5px solid var(--border-color)',
+                                                        borderRadius: '10px',
+                                                        fontSize: '0.95rem',
+                                                        background: 'var(--card-bg)',
+                                                        color: 'var(--text-color)'
+                                                    }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-color)' }}>
+                                                    PDC Duration <span style={{ color: '#ef4444' }}>*</span>
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    name="duration_pdc"
+                                                    value={courseData.duration_pdc || ''}
+                                                    onChange={handleInputChange}
+                                                    placeholder="e.g., 8"
+                                                    required
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '12px',
+                                                        border: '1.5px solid var(--border-color)',
+                                                        borderRadius: '10px',
+                                                        fontSize: '0.95rem',
+                                                        background: 'var(--card-bg)',
+                                                        color: 'var(--text-color)'
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: 'var(--text-color)' }}>
+                                                Duration <span style={{ color: '#ef4444' }}>*</span>
+                                            </label>
+                                            <input
+                                                type="text"
+                                                name="duration"
+                                                value={courseData.duration}
+                                                onChange={handleInputChange}
+                                                placeholder="e.g., 2 weeks"
+                                                required
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '12px',
+                                                    border: '1.5px solid var(--border-color)',
+                                                    borderRadius: '10px',
+                                                    fontSize: '0.95rem',
+                                                    background: 'var(--card-bg)',
+                                                    color: 'var(--text-color)'
+                                                }}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>

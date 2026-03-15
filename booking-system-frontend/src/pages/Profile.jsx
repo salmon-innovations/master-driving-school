@@ -137,6 +137,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
 
   const handlePayRescheduleFee = async (enrollmentId) => {
     setRescheduleFeeModal({ enrollmentId, loading: true, codeUrl: null, msgId: null, qrStatus: 'pending' })
+
     try {
       const result = await starpayAPI.payRescheduleFee(enrollmentId)
       if (!result.success || !result.codeUrl) {

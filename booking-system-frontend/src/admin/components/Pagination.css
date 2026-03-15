@@ -1,0 +1,101 @@
+.pagination-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 2px 4px;
+    flex-wrap: wrap;
+    gap: 10px;
+    border-top: 1px solid var(--border-color);
+    margin-top: 6px;
+}
+
+.pagination-info {
+    font-size: 0.8rem;
+    color: var(--secondary-text);
+    user-select: none;
+    font-weight: 500;
+}
+
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.pg-btn {
+    min-width: 34px;
+    height: 34px;
+    padding: 0 10px;
+    border: 1.5px solid var(--border-color, #e2e8f0);
+    border-radius: 8px;
+    background: var(--card-bg, #fff);
+    color: var(--text-color, #1e293b);
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
+    user-select: none;
+    line-height: 1;
+}
+
+.pg-btn:hover:not(:disabled):not(.pg-btn--active) {
+    background: var(--primary-light, #eff6ff);
+    border-color: var(--primary-color, #2157da);
+    color: var(--primary-color, #2157da);
+}
+
+.pg-btn:active:not(:disabled) {
+    transform: scale(0.94);
+}
+
+.pg-btn--active {
+    background: var(--primary-color, #2157da);
+    border-color: var(--primary-color, #2157da);
+    color: #fff;
+    font-weight: 700;
+    cursor: default;
+    box-shadow: 0 2px 8px rgba(33, 87, 218, 0.25);
+}
+
+.pg-btn:disabled,
+.pg-btn--disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+    background: transparent;
+}
+
+.pg-btn--nav {
+    min-width: 34px;
+    padding: 0;
+}
+
+.pg-ellipsis {
+    padding: 0 6px;
+    font-size: 0.9rem;
+    color: var(--secondary-text, #94a3b8);
+    user-select: none;
+    line-height: 34px;
+}
+
+/* Dark mode */
+[data-theme='dark'] .pg-btn {
+    background: var(--card-bg, #1e293b);
+    border-color: var(--border-color, #334155);
+    color: var(--text-color, #e2e8f0);
+}
+
+[data-theme='dark'] .pg-btn:hover:not(:disabled):not(.pg-btn--active) {
+    background: rgba(33, 87, 218, 0.15);
+    border-color: var(--primary-color, #2157da);
+    color: var(--primary-color, #2157da);
+}
+
+[data-theme='dark'] .pg-btn--active {
+    background: var(--primary-color, #2157da);
+    border-color: var(--primary-color, #2157da);
+    color: #fff;
+}

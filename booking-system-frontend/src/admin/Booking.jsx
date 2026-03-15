@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './css/booking.css';
-import { adminAPI } from '../services/api';
+import { adminAPI, branchesAPI, authAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import Pagination from './components/Pagination';
 
@@ -17,17 +17,44 @@ const Booking = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [bkPage, setBkPage] = useState(1);
+    const [branches, setBranches] = useState([]);
+    const [selectedBranch, setSelectedBranch] = useState('');
+    const [userRole, setUserRole] = useState(null);
+
+    // Fetch branches and user role on mount
+    useEffect(() => {
+        const init = async () => {
+            try {
+                const profileRes = await authAPI.getProfile();
+                let role = 'guest';
+                let profileBranchId = null;
+                if (profileRes.success) {
+                    role = profileRes.user.role;
+                    profileBranchId = profileRes.user.branchId;
+                    setUserRole(role);
+                }
+                const res = await branchesAPI.getAll();
+                let loaded = res.branches || [];
+                if (role === 'staff' && profileBranchId) {
+                    loaded = loaded.filter(b => String(b.id) === String(profileBranchId));
+                    setSelectedBranch(String(profileBranchId));
+                }
+                setBranches(loaded);
+            } catch (_) {}
+        };
+        init();
+    }, []);
 
     // Fetch bookings from database
     useEffect(() => {
         loadBookings();
-    }, []);
+    }, [selectedBranch]);
 
     const loadBookings = async () => {
         try {
             setLoading(true);
             setError(null);
-            const response = await adminAPI.getAllBookings(null, 100);
+            const response = await adminAPI.getAllBookings(null, 100, selectedBranch || null);
             if (response.success) {
                 // Transform database fields to match UI expectations
                 const transformedBookings = response.bookings.map(booking => {
@@ -287,6 +314,54 @@ const Booking = () => {
 
     return (
         <div className="booking-module">
+            {/* Branch Filter Bar */}
+            <div className="branch-filter-bar">
+                <div className="branch-filter-left">
+                    <div className="branch-filter-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                            <circle cx="12" cy="10" r="3" />
+                        </svg>
+                    </div>
+                    <div className="branch-filter-text">
+                        <span className="branch-filter-label">Viewing Branch</span>
+                        <span className="branch-filter-value">
+                            {selectedBranch
+                                ? (() => {
+                                    const b = branches.find(br => String(br.id) === String(selectedBranch));
+                                    if (!b) return 'Selected Branch';
+                                    let name = b.name;
+                                    const prefixes = ['Master Driving School ', 'Master Prime Driving School ', 'Masters Prime Holdings Corp. ', 'Master Prime Holdings Corp. '];
+                                    for (const prefix of prefixes) {
+                                        if (name.startsWith(prefix)) { name = name.substring(prefix.length); break; }
+                                    }
+                                    return name;
+                                })()
+                                : 'All Branches'}
+                        </span>
+                    </div>
+                </div>
+                <div className="branch-filter-right">
+                    <span className="branch-filter-count">{branches.length} Branches</span>
+                    <select
+                        className="branch-filter-select"
+                        value={selectedBranch}
+                        onChange={(e) => setSelectedBranch(e.target.value)}
+                        disabled={userRole === 'staff'}
+                    >
+                        {userRole !== 'staff' && <option value="">All Branches / Default View</option>}
+                        {branches.map(branch => {
+                            let formattedName = branch.name;
+                            const prefixes = ['Master Driving School ', 'Master Prime Driving School ', 'Masters Prime Holdings Corp. ', 'Master Prime Holdings Corp. '];
+                            for (const prefix of prefixes) {
+                                if (formattedName.startsWith(prefix)) { formattedName = formattedName.substring(prefix.length); break; }
+                            }
+                            return <option key={branch.id} value={branch.id}>{formattedName}</option>;
+                        })}
+                    </select>
+                </div>
+            </div>
+
             <div className="booking-header-section">
                 <div className="booking-header">
                     <div className="header-left">

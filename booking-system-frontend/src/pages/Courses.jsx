@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNotification } from '../context/NotificationContext'
-import { coursesAPI, branchesAPI } from '../services/api'
+import { coursesAPI, branchesAPI, schedulesAPI } from '../services/api'
 
 function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, setSelectedCourseForSchedule }) {
   const { showNotification } = useNotification()
@@ -9,10 +9,15 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   const [selectedCourse, setSelectedCourse] = useState(null)
   const [courseType, setCourseType] = useState('online')
   const [quantity, setQuantity] = useState(1)
+  const [addonsConfig, setAddonsConfig] = useState({ reviewer: 30, vehicleTips: 20, convenienceFee: 25 })
+  const [selectedAddons, setSelectedAddons] = useState({ reviewer: true, vehicleTips: true, convenienceFee: true })
   const [courses, setCourses] = useState([])
   const [branchContacts, setBranchContacts] = useState([])
   const [loading, setLoading] = useState(true)
   const [mainImage, setMainImage] = useState(null)
+  const [availabilityLoading, setAvailabilityLoading] = useState(false)
+  const [hasAvailableSlots, setHasAvailableSlots] = useState(true)
+  const [slotAvailabilityDetail, setSlotAvailabilityDetail] = useState(null) // null | { hasTdc, hasPdc, tdcLabel, pdcLabel }
 
   // Format branch name - remove company prefixes
   const formatBranchName = (name) => {
@@ -40,10 +45,15 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
     const fetchInitialData = async () => {
       try {
         setLoading(true);
-        const [coursesRes, branchesRes] = await Promise.all([
+        const [coursesRes, branchesRes, addonsRes] = await Promise.all([
           coursesAPI.getAll(),
-          branchesAPI.getAll()
+          branchesAPI.getAll(),
+          coursesAPI.getAddonsConfig()
         ]);
+
+        if (addonsRes?.success && addonsRes.config) {
+          setAddonsConfig(addonsRes.config);
+        }
 
         if (coursesRes.success) {
           const activeCourses = coursesRes.courses.filter(c => c.status === 'active');
@@ -68,15 +78,27 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
 
   // Transform database courses to match UI structure
   const packages = courses.map(course => {
+    // Resolve the effective price for the currently selected branch.
+    // If a branch is selected and the course has a custom price for that branch, use it.
+    // Otherwise fall back to the course default price.
+    const defaultPrice = parseFloat(course.price) || 0;
+    const branchEffectivePrice = (() => {
+      if (!preSelectedBranch || !Array.isArray(course.branch_prices)) return defaultPrice;
+      const bp = course.branch_prices.find(b => String(b.branch_id) === String(preSelectedBranch.id));
+      if (bp && bp.price > 0 && parseFloat(bp.price) !== defaultPrice) return parseFloat(bp.price);
+      return defaultPrice;
+    })();
+
     // Build type options array
     const typeOptions = [];
 
-    // Add main course type with its price
+    // Add main course type with its price (branch-adjusted)
     if (course.course_type) {
       typeOptions.push({
         value: course.course_type.toLowerCase().replace(/\s+/g, '-'),
         label: course.course_type.toUpperCase(),
-        price: parseFloat(course.price)
+        price: branchEffectivePrice,
+        discount: parseFloat(course.discount) || 0
       });
     }
 
@@ -86,7 +108,8 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
         typeOptions.push({
           value: variation.type.toLowerCase().replace(/\s+/g, '-'),
           label: variation.type.toUpperCase(),
-          price: parseFloat(variation.price)
+          price: parseFloat(variation.price),
+          discount: parseFloat(variation.discount) || parseFloat(course.discount) || 0
         });
       });
     }
@@ -96,7 +119,8 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
       typeOptions.push({
         value: 'standard',
         label: 'STANDARD',
-        price: parseFloat(course.price)
+        price: branchEffectivePrice,
+        discount: parseFloat(course.discount) || 0
       });
     }
 
@@ -147,7 +171,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
       name: displayName,
       shortName: shortName,
       duration: `${course.duration || 8} Hours`,
-      price: parseFloat(course.price) || 0,
+      price: branchEffectivePrice,
       image: courseImages.length > 0 ? courseImages[0] : '/images/default-course.jpg',
       allImages: courseImages,
       features: features,
@@ -187,6 +211,8 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
       hasTypeOption: pkg.hasTypeOption,
       quantity: qty,
       type: type,
+      addonsConfig: addonsConfig,
+      selectedAddons: selectedAddons,
     }
     const existingItem = cart.find(item => item.id === pkg.id && item.type === type)
     if (existingItem) {
@@ -232,6 +258,8 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
         typeOptions: selectedCourse.typeOptions,
         hasTypeOption: selectedCourse.hasTypeOption,
         selectedType: courseType,
+        addonsConfig: addonsConfig,
+        selectedAddons: selectedAddons,
       })
       if (!isLoggedIn) {
         onNavigate('guest-enrollment')
@@ -241,6 +269,111 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
   }
+
+  // Token-based course_type matcher (same logic as Schedule.jsx)
+  const buildCourseTypeChecker = (courseName, courseShortName) => {
+    const stopWords = new Set(['practical', 'driving', 'course', 'pdc', 'tdc', 'theoretical', 'dc', 'a', 'an', 'the', 'and', 'or', 'for', 'of', 'in', 'to'])
+    const extractTokens = (str) => (str || '').toLowerCase().replace(/[()\[\]{}'"]/g, ' ').split(/[\s\-\/,;|&+]+/).filter(t => t.length >= 2 && !stopWords.has(t))
+    const courseTokens = new Set(extractTokens((courseName || '') + ' ' + (courseShortName || '')))
+    return (slotCourseType) => {
+      if (!slotCourseType) return true
+      const norm = slotCourseType.toLowerCase().trim()
+      if (norm === 'both' || norm === 'any' || norm === 'all') return true
+      const slotTokens = extractTokens(slotCourseType)
+      if (slotTokens.length === 0) return true
+      return slotTokens.some(t => courseTokens.has(t))
+    }
+  }
+
+  // Check slot availability whenever the viewed course, branch, or type changes
+  useEffect(() => {
+    if (!selectedCourse || !preSelectedBranch) {
+      setHasAvailableSlots(true)
+      setSlotAvailabilityDetail(null)
+      return
+    }
+    const checkAvailability = async () => {
+      setAvailabilityLoading(true)
+      setHasAvailableSlots(true)
+      setSlotAvailabilityDetail(null)
+      try {
+        const name = (selectedCourse.name || '').toLowerCase()
+        const shortName = (selectedCourse.shortName || '').toLowerCase()
+        const category = selectedCourse.category || ''
+        const isPromo = category === 'Promo'
+        const isTDC = !isPromo && (category === 'TDC' || name.includes('tdc') || shortName.includes('tdc'))
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+
+        if (isPromo) {
+          // Promo bundles (TDC + PDC): BOTH parts must have available slots
+          const allSlots = await schedulesAPI.getSlotsByDate(null, preSelectedBranch.id)
+          const tdcPart = courseType.includes('+') ? courseType.split('+')[0].toLowerCase().trim() : courseType.toLowerCase()
+          const pdcPart = courseType.includes('+') ? courseType.split('+').slice(1).join('+').toLowerCase().trim() : ''
+          const tdcMinDate = new Date(today); tdcMinDate.setDate(today.getDate() + 1)
+          const pdcMinDate = new Date(today); pdcMinDate.setDate(today.getDate() + 2)
+
+          const hasTdc = Array.isArray(allSlots) && allSlots.some(s => {
+            if (s.type?.toLowerCase() !== 'tdc') return false
+            const sd = new Date((s.date || s.start_date) + 'T00:00:00')
+            if (sd < tdcMinDate) return false
+            if (tdcPart && s.course_type && s.course_type.toLowerCase() !== tdcPart) return false
+            return s.available_slots == null || s.available_slots > 0
+          })
+
+          const isMotorPdc = pdcPart.includes('motorcycle') || pdcPart.includes('motor')
+          const isCarAT = pdcPart.includes('carat') || pdcPart.includes('car-at')
+          const isCarMT = pdcPart.includes('carmt') || pdcPart.includes('car-mt')
+
+          const hasPdc = Array.isArray(allSlots) && allSlots.some(s => {
+            if (s.type?.toLowerCase() !== 'pdc') return false
+            const sd = new Date((s.date || s.start_date) + 'T00:00:00')
+            if (sd < pdcMinDate) return false
+            const ct = (s.course_type || '').toLowerCase()
+            const tr = (s.transmission || '').toLowerCase()
+            // Universal/untyped PDC slots match all promo types
+            if (!ct || ct === 'both' || ct === 'any' || ct === 'all') return s.available_slots == null || s.available_slots > 0
+            if (isMotorPdc) {
+              if (!ct.includes('motorcycle') && !ct.includes('motor') && !ct.includes('moto') && !ct.includes('bike')) return false
+            } else if (isCarAT) {
+              if (ct.includes('motorcycle') || ct.includes('motor') || ct.includes('tricycle') || ct.includes('van') || ct.includes('l300')) return false
+              if (tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false
+            } else if (isCarMT) {
+              if (ct.includes('motorcycle') || ct.includes('motor') || ct.includes('tricycle') || ct.includes('van') || ct.includes('l300')) return false
+              if (tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false
+            }
+            return s.available_slots == null || s.available_slots > 0
+          })
+
+          const pdcLabel = isMotorPdc ? 'PDC Motorcycle' : isCarAT ? 'PDC Car (Automatic)' : isCarMT ? 'PDC Car (Manual)' : 'PDC'
+          const tdcLabel = tdcPart === 'f2f' ? 'TDC (Face-to-Face)' : tdcPart === 'online' ? 'TDC (Online)' : 'TDC'
+          setSlotAvailabilityDetail({ hasTdc, hasPdc, tdcLabel, pdcLabel })
+          setHasAvailableSlots(hasTdc && hasPdc)
+          return
+        }
+
+        const slotType = isTDC ? 'TDC' : 'PDC'
+        const slots = await schedulesAPI.getSlotsByDate(null, preSelectedBranch.id, slotType)
+        const minDate = new Date(today)
+        minDate.setDate(today.getDate() + (isTDC ? 1 : 2))
+        const courseTypeMatches = buildCourseTypeChecker(selectedCourse.name, selectedCourse.shortName)
+        const tdcCourseType = courseType.includes('+') ? courseType.split('+')[0].trim() : courseType
+        const available = Array.isArray(slots) ? slots.filter(s => {
+          const slotDate = new Date((s.date || s.start_date) + 'T00:00:00')
+          if (slotDate < minDate) return false
+          if (isTDC && tdcCourseType && s.course_type && s.course_type.toLowerCase() !== tdcCourseType.toLowerCase()) return false
+          if (!isTDC && !courseTypeMatches(s.course_type)) return false
+          return s.available_slots == null || s.available_slots > 0
+        }) : []
+        setHasAvailableSlots(available.length > 0)
+      } catch (e) {
+        setHasAvailableSlots(true) // fail open on error
+      } finally {
+        setAvailabilityLoading(false)
+      }
+    }
+    checkAvailability()
+  }, [selectedCourse?.id, preSelectedBranch?.id, courseType])
 
   const handleViewCourse = (pkg) => {
     setSelectedCourse(pkg)
@@ -288,6 +421,22 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   }
 
   const filteredPackages = getFilteredPackages()
+
+  let calcBasePrice = 0;
+  let calcDiscountRate = 0;
+  let calcDiscountValue = 0;
+  let hasDiscount = false;
+
+  if (selectedCourse) {
+    const activeType = selectedCourse.typeOptions?.find(opt => opt.value === courseType);
+    calcBasePrice = activeType?.price || parseFloat(selectedCourse.price) || 0;
+    calcDiscountRate = activeType?.discount || parseFloat(selectedCourse.discount) || 0;
+    
+    if (calcDiscountRate > 0) {
+      hasDiscount = true;
+      calcDiscountValue = calcBasePrice * (calcDiscountRate / 100);
+    }
+  }
 
   // If a course is selected, show detail view
   if (selectedCourse) {
@@ -369,17 +518,62 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
               )}
             </div>
 
-            {/* Course Details */}
+            {/* Course Details & Breakdown */}
             <div className="text-left">
-              <p className="text-xs text-gray-500 font-medium mb-2 uppercase tracking-wider">
-                {selectedCourse.brand}
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                {selectedCourse.brand || 'MASTER DRIVING SCHOOL PH'}
               </p>
-              <h1 className="text-2xl sm:text-3xl font-bold text-[#2157da] mb-4">
-                {selectedCourse.name}
-              </h1>
-              <p className="text-3xl font-bold text-gray-800 mb-6">
-                {selectedCourse.priceNote || `₱${(selectedCourse.typeOptions?.find(opt => opt.value === courseType)?.price || selectedCourse.price).toLocaleString()}`}
-              </p>
+              <div className="flex flex-wrap items-center gap-3 mb-6">
+                <h1 className="text-2xl sm:text-3xl font-black text-[#2157da]">
+                  {selectedCourse.name}
+                </h1>
+                {hasDiscount && (
+                  <span className="bg-[#2157da] text-white text-xs font-bold px-3 py-1 rounded-md">
+                    Student {calcDiscountRate}% OFF
+                  </span>
+                )}
+              </div>
+
+              {/* Top Breakdown List */}
+              <div className="space-y-3.5 text-[0.95rem] text-gray-600 font-medium mb-8">
+                <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                  <span>Course Price</span>
+                  <span className="font-bold text-gray-900">
+                    ₱{(calcBasePrice * quantity).toLocaleString()}
+                  </span>
+                </div>
+
+                {((selectedAddons.reviewer ? parseFloat(addonsConfig.reviewer || 30) : 0) + (selectedAddons.vehicleTips ? parseFloat(addonsConfig.vehicleTips || 20) : 0)) > 0 && (
+                  <div className="flex justify-between items-center py-0.5">
+                    <span>Add-ons</span>
+                    <span className="font-bold text-gray-900">₱{(((selectedAddons.reviewer ? parseFloat(addonsConfig.reviewer || 30) : 0) + (selectedAddons.vehicleTips ? parseFloat(addonsConfig.vehicleTips || 20) : 0)) * quantity).toLocaleString()}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center py-0.5">
+                  <span>Convenience Fee</span>
+                  <span className="font-bold text-gray-900">₱{(parseFloat(addonsConfig.convenienceFee || 25) * quantity).toLocaleString()}</span>
+                </div>
+
+                {hasDiscount && (
+                  <div className="flex justify-between items-center py-2 -mx-2 px-2 mt-2 bg-green-50/80 rounded-lg text-green-700 font-bold">
+                    <span>Bundle Discount ({calcDiscountRate}% OFF)</span>
+                    <span>- ₱{(calcDiscountValue * quantity).toLocaleString()}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center pt-5 mt-4 border-t border-gray-100">
+                  <span className="text-lg font-black text-[#1a2332]">Total Amount</span>
+                  <span className="text-3xl font-black text-[#2157da]">
+                    ₱{((
+                      calcBasePrice - (hasDiscount ? calcDiscountValue : 0) +
+                      (selectedAddons.reviewer ? parseFloat(addonsConfig.reviewer || 30) : 0) +
+                      (selectedAddons.vehicleTips ? parseFloat(addonsConfig.vehicleTips || 20) : 0) +
+                      parseFloat(addonsConfig.convenienceFee || 25)
+                    ) * quantity).toLocaleString()}
+                  </span>
+                </div>
+              </div>
 
               {/* Type Selection */}
               {selectedCourse.hasTypeOption && selectedCourse.typeOptions && selectedCourse.typeOptions.length > 0 && (
@@ -431,6 +625,54 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                 </div>
               </div>
 
+              {/* Available Add-ons check boxes */}
+              <div className="mb-8">
+                <label className="block text-xs font-bold text-gray-700 mb-3 uppercase tracking-wider text-left">
+                  AVAILABLE ADD-ONS
+                </label>
+                <div className="space-y-3">
+                  {/* Reviewer Option */}
+                  <label className={`flex items-center justify-between p-4 border rounded-xl cursor-pointer transition-colors ${selectedAddons.reviewer ? 'border-[#2157da] bg-blue-50/10' : 'border-gray-200 hover:border-blue-300'}`}>
+                    <div className="flex items-center gap-4">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedAddons.reviewer} 
+                        onChange={(e) => setSelectedAddons({...selectedAddons, reviewer: e.target.checked})} 
+                        className="w-5 h-5 text-[#2157da] rounded border-gray-300 focus:ring-[#2157da]" 
+                      />
+                      <div className="flex items-center gap-2">
+                        <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                        <div>
+                          <p className="font-bold text-[#1a2332]">Driving School Reviewer</p>
+                          <p className="text-[11px] text-gray-500">Comprehensive study guide for your theoretical exam</p>
+                        </div>
+                      </div>
+                    </div>
+                    <span className="font-bold text-[#2157da]">₱{(parseFloat(addonsConfig.reviewer || 30) * quantity).toLocaleString()}</span>
+                  </label>
+
+                  {/* Vehicle Tips Option */}
+                  <label className={`flex items-center justify-between p-4 border rounded-xl cursor-pointer transition-colors ${selectedAddons.vehicleTips ? 'border-[#2157da] bg-blue-50/10' : 'border-gray-200 hover:border-blue-300'}`}>
+                    <div className="flex items-center gap-4">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedAddons.vehicleTips} 
+                        onChange={(e) => setSelectedAddons({...selectedAddons, vehicleTips: e.target.checked})} 
+                        className="w-5 h-5 text-[#2157da] rounded border-gray-300 focus:ring-[#2157da]" 
+                      />
+                      <div className="flex items-center gap-2">
+                        <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>
+                        <div>
+                          <p className="font-bold text-[#1a2332]">Vehicle Tips</p>
+                          <p className="text-[11px] text-gray-500">Essential guide for practical driving preparation</p>
+                        </div>
+                      </div>
+                    </div>
+                    <span className="font-bold text-[#2157da]">₱{(parseFloat(addonsConfig.vehicleTips || 20) * quantity).toLocaleString()}</span>
+                  </label>
+                </div>
+              </div>
+
               {/* Action Buttons */}
               <div className="space-y-3 mb-8 relative">
                 <button
@@ -441,13 +683,49 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                 </button>
                 <button
                   onClick={handleEnrollNow}
-                  className={`w-full py-3 rounded-md font-bold transition-all text-sm uppercase ${preSelectedBranch
-                    ? 'bg-[#F3B74C] text-gray-800 hover:bg-[#e1a63b]'
-                    : 'bg-[#2157da] text-white hover:bg-[#1a3a8a]'
-                    }`}
+                  disabled={availabilityLoading || (!hasAvailableSlots && !!preSelectedBranch)}
+                  className={`w-full py-3 rounded-md font-bold transition-all text-sm uppercase ${
+                    availabilityLoading
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      : !hasAvailableSlots && preSelectedBranch
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : preSelectedBranch
+                          ? 'bg-[#F3B74C] text-gray-800 hover:bg-[#e1a63b]'
+                          : 'bg-[#2157da] text-white hover:bg-[#1a3a8a]'
+                  }`}
                 >
-                  {preSelectedBranch ? 'ENROLL NOW' : 'SELECT BRANCH TO ENROLL'}
+                  {availabilityLoading
+                    ? 'Checking availability...'
+                    : !hasAvailableSlots && preSelectedBranch
+                      ? 'No Available Slots'
+                      : preSelectedBranch ? 'ENROLL NOW' : 'SELECT BRANCH TO ENROLL'}
                 </button>
+
+                {/* Slot availability detail note — shown when a course has no slots */}
+                {!availabilityLoading && !hasAvailableSlots && preSelectedBranch && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 mt-1">
+                    <div className="flex items-start gap-2">
+                      <svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                      <div>
+                        <p className="text-xs font-bold text-red-700 mb-1">No available slots at this branch:</p>
+                        {slotAvailabilityDetail ? (
+                          <ul className="space-y-0.5">
+                            <li className={`text-xs flex items-center gap-1.5 ${slotAvailabilityDetail.hasTdc ? 'text-green-700' : 'text-red-600 font-semibold'}`}>
+                              <span>{slotAvailabilityDetail.hasTdc ? '✓' : '✗'}</span>
+                              <span>{slotAvailabilityDetail.tdcLabel}{slotAvailabilityDetail.hasTdc ? ' — Slots available' : ' — No slots available'}</span>
+                            </li>
+                            <li className={`text-xs flex items-center gap-1.5 ${slotAvailabilityDetail.hasPdc ? 'text-green-700' : 'text-red-600 font-semibold'}`}>
+                              <span>{slotAvailabilityDetail.hasPdc ? '✓' : '✗'}</span>
+                              <span>{slotAvailabilityDetail.pdcLabel}{slotAvailabilityDetail.hasPdc ? ' — Slots available' : ' — No slots available'}</span>
+                            </li>
+                          </ul>
+                        ) : (
+                          <p className="text-xs text-red-600">No upcoming slots found. Please check back later or contact the branch.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Course Information */}

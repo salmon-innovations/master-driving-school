@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './css/sale.css';
 import { adminAPI, coursesAPI, branchesAPI, authAPI } from '../services/api';
-const logo = '/images/logo.png';
+const logo = `${window.location.origin}/images/logo.png`;
 import Pagination from './components/Pagination';
 import {
     BarChart,
@@ -458,6 +458,13 @@ const SalePayment = () => {
     const handlePrint = (data = transactions, title = "RECENT TRANSACTIONS") => {
         const printWindow = window.open('', '_blank');
         const timestamp = new Date().toLocaleString();
+        const isUsers = title.includes('USERS');
+        const totalAmount = isUsers
+            ? data.reduce((sum, t) => sum + (parseFloat(t.balance_due) || 0), 0)
+            : data.reduce((sum, t) => {
+                const raw = (t.amount || '').toString().replace(/[^0-9.]/g, '');
+                return sum + (parseFloat(raw) || 0);
+              }, 0);
 
         const html = `
             <html>
@@ -476,6 +483,7 @@ const SalePayment = () => {
                     .amount { font-weight: bold; }
                     .status-success { color: #16a34a; font-weight: bold; }
                     .status-collectable { color: #ea580c; font-weight: bold; }
+                    .total-row td { background: #f0f6ff; font-weight: bold; color: #1a4fba; border-top: 2px solid #1a4fba; font-size: 11pt; }
                     .footer { margin-top: 30px; font-size: 10pt; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 20px; text-align: center; }
                     @media print { .no-print { display: none; } }
                 </style>
@@ -492,7 +500,7 @@ const SalePayment = () => {
                 <table>
                     <thead>
                         <tr>
-                            ${title.includes('USERS') ? `
+                            ${isUsers ? `
                                 <th>BOOKING ID</th>
                                 <th>STUDENT NAME</th>
                                 <th>COURSE</th>
@@ -511,7 +519,7 @@ const SalePayment = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        ${data.map(t => title.includes('USERS') ? `
+                        ${data.map(t => isUsers ? `
                             <tr>
                                 <td>BK-${t.id}</td>
                                 <td>${t.student_name}</td>
@@ -531,6 +539,12 @@ const SalePayment = () => {
                                 <td class="${t.status.toLowerCase() === 'success' ? 'status-success' : 'status-collectable'}">${t.status.toUpperCase()}</td>
                             </tr>
                         `).join('')}
+                        <tr class="total-row">
+                            ${isUsers
+                                ? `<td colspan="3" style="text-align:right;">TOTAL AMOUNT DUE</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="2"></td>`
+                                : `<td colspan="5" style="text-align:right;">TOTAL AMOUNT</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td></td>`
+                            }
+                        </tr>
                     </tbody>
                 </table>
                 <div class="footer">
@@ -626,6 +640,14 @@ const SalePayment = () => {
 
     const handleExport = (data = transactions, title = "SALES REPORT") => {
         const timestamp = new Date().toLocaleString();
+        const isUsers = title.includes('USERS');
+        const totalAmount = isUsers
+            ? data.reduce((sum, t) => sum + (parseFloat(t.balance_due) || 0), 0)
+            : data.reduce((sum, t) => {
+                const raw = (t.amount || '').toString().replace(/[^0-9.]/g, '');
+                return sum + (parseFloat(raw) || 0);
+              }, 0);
+        const colCount = isUsers ? 6 : 7;
 
         const tableHtml = `
             <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
@@ -638,6 +660,7 @@ const SalePayment = () => {
                     .meta { font-size: 11pt; color: #64748b; padding-bottom: 25px; text-align: left; }
                     .column-header th { background-color: #1a4fba !important; color: #ffffff !important; padding: 12px 10px; font-weight: bold; border: 1px solid #cbd5e1; text-align: center; }
                     .row td { padding: 10px; border: 1px solid #e2e8f0; color: #334155; background-color: #ffffff; text-align: center; }
+                    .total-row td { background-color: #f0f6ff !important; font-weight: bold; color: #1a4fba; border-top: 2px solid #1a4fba; text-align: center; padding: 10px; }
                     .status-success { color: #16a34a; font-weight: bold; }
                     .status-collectable { color: #ea580c; font-weight: bold; }
                 </style>
@@ -647,11 +670,11 @@ const SalePayment = () => {
                     <img src="${logo}" style="width: 80px; height: 80px; border-radius: 12px; margin-bottom: 10px;">
                 </div>
                 <table>
-                    <tr><td colspan="6" class="title">MASTER DRIVING SCHOOL - ${title}</td></tr>
-                    <tr><td colspan="6" class="meta">Period: ${period} | Generated on: ${timestamp}</td></tr>
-                    <tr><td colspan="6" style="height: 10px; background-color: #ffffff;"></td></tr>
+                    <tr><td colspan="${colCount}" class="title">MASTER DRIVING SCHOOL - ${title}</td></tr>
+                    <tr><td colspan="${colCount}" class="meta">Period: ${period} | Generated on: ${timestamp}</td></tr>
+                    <tr><td colspan="${colCount}" style="height: 10px; background-color: #ffffff;"></td></tr>
                     <tr class="column-header">
-                        ${title.includes('USERS') ? `
+                        ${isUsers ? `
                             <th>BOOKING ID</th>
                             <th>STUDENT NAME</th>
                             <th>COURSE</th>
@@ -668,7 +691,7 @@ const SalePayment = () => {
                             <th>STATUS</th>
                         `}
                     </tr>
-                    ${data.map(t => title.includes('USERS') ? `
+                    ${data.map(t => isUsers ? `
                         <tr class="row">
                             <td>BK-${t.id}</td>
                             <td>${t.student_name}</td>
@@ -688,10 +711,14 @@ const SalePayment = () => {
                             <td>${t.status}</td>
                         </tr>
                     `).join('')}
-                    <tr><td colspan="6" style="height: 15px; background-color: #ffffff;"></td></tr>
-                    <tr><td colspan="6" style="height: 15px; background-color: #ffffff;"></td></tr>
-                    <tr><td colspan="6" style="height: 15px; background-color: #ffffff;"></td></tr>
-                    <tr><td colspan="6" style="height: 20px; border-top: 2px solid #1a4fba; padding-top: 10px; font-size: 10pt; color: #94a3b8; text-align: center;">--- Confidential Financial Document ---</td></tr>
+                    <tr class="total-row">
+                        ${isUsers
+                            ? `<td colspan="3" style="text-align:right;">TOTAL AMOUNT DUE</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="2"></td>`
+                            : `<td colspan="5" style="text-align:right;">TOTAL AMOUNT</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td></td>`
+                        }
+                    </tr>
+                    <tr><td colspan="${colCount}" style="height: 15px; background-color: #ffffff;"></td></tr>
+                    <tr><td colspan="${colCount}" style="height: 20px; border-top: 2px solid #1a4fba; padding-top: 10px; font-size: 10pt; color: #94a3b8; text-align: center;">--- Confidential Financial Document ---</td></tr>
                 </table>
             </body>
             </html>
@@ -735,6 +762,21 @@ const SalePayment = () => {
                             <h2>Sales &amp; Financials</h2>
                             <p>Financial overview and transaction history</p>
                         </div>
+                    </div>
+                    <div className="header-right">
+                        <button
+                            onClick={fetchTransactions}
+                            disabled={loading}
+                            className="refresh-btn"
+                            title="Refresh transaction data"
+                        >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                                <polyline points="23 4 23 10 17 10" />
+                                <polyline points="1 20 1 14 7 14" />
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                            </svg>
+                            {loading ? 'Refreshing…' : 'Refresh'}
+                        </button>
                     </div>
                 </div>
             </div>

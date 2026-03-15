@@ -168,14 +168,18 @@ const handleWebhook = async (req, res) => {
                         }
                     }
 
-                    // Handle reschedule fee payment
+                    // Handle reschedule fee payment — only mark fee paid on enrollment.
+                    // The booking record is created later when the student picks a new slot.
                     if (meta.source === 'reschedule_fee' && meta.enrollmentId) {
                         try {
                             await pool.query(
                                 `UPDATE schedule_enrollments
-                                    SET reschedule_fee_paid = TRUE, updated_at = CURRENT_TIMESTAMP
+                                    SET reschedule_fee_paid = TRUE,
+                                        walkin_payment_method = 'StarPay',
+                                        walkin_fee_amount = $2,
+                                        updated_at = CURRENT_TIMESTAMP
                                   WHERE id = $1`,
-                                [meta.enrollmentId]
+                                [meta.enrollmentId, (trxAmount / 100).toFixed(2)]
                             );
                             console.log(`[StarPay] Reschedule fee marked paid for enrollment ${meta.enrollmentId}`);
                         } catch (feeErr) {
@@ -235,12 +239,19 @@ const handleWebhook = async (req, res) => {
             }
         } else {
             // FAIL / REVERSED / CLOSE
+            // Cancel any regular pending booking for this msgId
             await pool.query(
                 `UPDATE bookings SET status='cancelled'
                   WHERE transaction_id=$1 AND status='pending'`,
                 [originalMsgId]
             );
-            console.log(`[StarPay] Order ${originalMsgId} ${trxState} — booking cancelled`);
+            // Also clear the starpay order from the enrollment (so student can retry)
+            await pool.query(
+                `UPDATE schedule_enrollments SET starpay_msgid = NULL, starpay_codeurl = NULL
+                  WHERE starpay_msgid = $1`,
+                [originalMsgId]
+            );
+            console.log(`[StarPay] Order ${originalMsgId} ${trxState} — cancelled/cleared`);
         }
 
         // StarPay expects exactly this response
@@ -259,50 +270,63 @@ const handleWebhook = async (req, res) => {
 const checkStatus = async (req, res) => {
     const { msgId } = req.params;
 
-    // Check local DB first
+    // Check bookings table first (regular payments)
     const { rows } = await pool.query(
         `SELECT id, status, total_amount FROM bookings WHERE transaction_id = $1`,
         [msgId]
     );
 
-    if (!rows.length) {
-        return res.status(404).json({ success: false, message: 'Order not found' });
+    if (rows.length) {
+        const booking = rows[0];
+        if (booking.status !== 'pending') {
+            return res.json({
+                success: true,
+                localStatus: booking.status,
+                starpayState: booking.status === 'paid' ? 'SUCCESS' : 'CLOSE',
+                bookingId: booking.id,
+                amount: booking.total_amount,
+            });
+        }
+        // booking exists and is still pending — query StarPay
+        try {
+            const queryMsgId = `QRY${Date.now()}`;
+            const spResult = await queryRepayment(queryMsgId, msgId);
+            const spResponse = spResult?.response || spResult;
+            return res.json({
+                success: true,
+                localStatus: booking.status,
+                starpayState: spResponse?.trxState || 'UNKNOWN',
+                bookingId: booking.id,
+                amount: booking.total_amount,
+            });
+        } catch {
+            return res.json({ success: true, localStatus: booking.status, starpayState: 'UNKNOWN', bookingId: booking.id, amount: booking.total_amount });
+        }
     }
 
-    const booking = rows[0];
+    // Reschedule fee payments: no booking row — check schedule_enrollments
+    const { rows: enrollRows } = await pool.query(
+        `SELECT id, reschedule_fee_paid FROM schedule_enrollments WHERE starpay_msgid = $1`,
+        [msgId]
+    );
 
-    // If already paid/cancelled in DB, return immediately
-    if (booking.status !== 'pending') {
-        return res.json({
-            success: true,
-            localStatus: booking.status,
-            starpayState: booking.status === 'paid' ? 'SUCCESS' : 'CLOSE',
-            bookingId: booking.id,
-            amount: booking.total_amount,
-        });
+    if (enrollRows.length) {
+        const enroll = enrollRows[0];
+        if (enroll.reschedule_fee_paid) {
+            return res.json({ success: true, localStatus: 'paid', starpayState: 'SUCCESS' });
+        }
+        // Still unpaid — query StarPay live
+        try {
+            const queryMsgId = `QRY${Date.now()}`;
+            const spResult = await queryRepayment(queryMsgId, msgId);
+            const spResponse = spResult?.response || spResult;
+            return res.json({ success: true, localStatus: 'pending', starpayState: spResponse?.trxState || 'UNKNOWN' });
+        } catch {
+            return res.json({ success: true, localStatus: 'pending', starpayState: 'UNKNOWN' });
+        }
     }
 
-    // Else query StarPay for live state
-    try {
-        const queryMsgId = `QRY${Date.now()}`;
-        const spResult = await queryRepayment(queryMsgId, msgId);
-        const spResponse = spResult?.response || spResult;
-        return res.json({
-            success: true,
-            localStatus: booking.status,
-            starpayState: spResponse?.trxState || 'UNKNOWN',
-            bookingId: booking.id,
-            amount: booking.total_amount,
-        });
-    } catch {
-        return res.json({
-            success: true,
-            localStatus: booking.status,
-            starpayState: 'UNKNOWN',
-            bookingId: booking.id,
-            amount: booking.total_amount,
-        });
-    }
+    return res.status(404).json({ success: false, message: 'Order not found' });
 };
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -435,80 +459,46 @@ const initiateGuestPayment = async (req, res) => {
 /* ─────────────────────────────────────────────────────────────────────
    POST /api/starpay/reschedule-fee/:enrollmentId
    Logged-in student pays the ₱1,000 no-show reschedule fee via StarPay.
+   No booking record is created here — it is only created after the
+   student has also selected a new schedule date (rescheduleEnrollment).
  ───────────────────────────────────────────────────────────────────── */
 const initiateRescheduleFeePayment = async (req, res) => {
     const { enrollmentId } = req.params;
     const userId = req.user.id;
 
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-
         // Verify enrollment belongs to this student and is no-show
-        const enrollResult = await client.query(
+        const enrollResult = await pool.query(
             `SELECT se.id, se.student_id, se.enrollment_status, se.reschedule_fee_paid,
-                    ss.branch_id, b.course_id
+                    se.starpay_msgid, se.starpay_codeurl, ss.branch_id
              FROM schedule_enrollments se
              JOIN schedule_slots ss ON ss.id = se.slot_id
-             LEFT JOIN bookings b ON b.user_id = se.student_id AND b.status IN ('pending','paid','collectable')
-             WHERE se.id = $1 AND se.student_id = $2
-             ORDER BY b.created_at DESC NULLS LAST
-             LIMIT 1`,
+             WHERE se.id = $1 AND se.student_id = $2`,
             [enrollmentId, userId]
         );
 
         if (enrollResult.rows.length === 0) {
-            await client.query('ROLLBACK');
             return res.status(404).json({ success: false, message: 'Enrollment not found' });
         }
 
         const enroll = enrollResult.rows[0];
         if (enroll.enrollment_status !== 'no-show') {
-            await client.query('ROLLBACK');
             return res.status(400).json({ success: false, message: 'Enrollment is not marked as no-show' });
         }
         if (enroll.reschedule_fee_paid) {
-            await client.query('ROLLBACK');
             return res.status(400).json({ success: false, message: 'Reschedule fee already paid' });
         }
 
-        // Check if we already have a confirmed pending order in the DB (codeUrl present = StarPay accepted it)
-        const existingResult = await client.query(
-            `SELECT id, transaction_id, notes, created_at FROM bookings
-             WHERE user_id = $1
-               AND payment_type = 'Reschedule Fee'
-               AND status = 'pending'
-               AND (notes::jsonb->>'enrollmentId')::int = $2
-             ORDER BY created_at DESC
-             LIMIT 1`,
-            [userId, parseInt(enrollmentId)]
-        );
-
-        if (existingResult.rows.length > 0) {
-            const existing = existingResult.rows[0];
-            let existingNotes = {};
-            try { existingNotes = JSON.parse(existing.notes || '{}'); } catch {}
-
-            if (existingNotes.codeUrl) {
-                // Reuse the existing StarPay order — no new call needed
-                await client.query('ROLLBACK');
-                return res.json({
-                    success: true,
-                    codeUrl: existingNotes.codeUrl,
-                    msgId: existing.transaction_id,
-                    bookingId: existing.id,
-                });
-            }
-
-            // Record exists but no codeUrl — shouldn't happen with new flow, clean it up
-            const ageMinutes = (Date.now() - new Date(existing.created_at).getTime()) / 60000;
-            await client.query(`DELETE FROM bookings WHERE id=$1`, [existing.id]);
-            console.log(`[StarPay] Cleaned up orphaned reschedule fee booking ${existing.id} (${ageMinutes.toFixed(1)} min old)`);
+        // Reuse existing StarPay order if we already have one stored on the enrollment
+        if (enroll.starpay_codeurl && enroll.starpay_msgid) {
+            return res.json({
+                success: true,
+                codeUrl: enroll.starpay_codeurl,
+                msgId: enroll.starpay_msgid,
+            });
         }
 
-        await client.query('ROLLBACK'); // release transaction — no writes needed yet
-
-        // ── Call StarPay FIRST — only save to DB if it succeeds ──────────────
+        // ── Call StarPay — store msgId/codeUrl on enrollment row (no booking insert) ──
         const msgId = `RFEE${Date.now()}U${userId}`;
         const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
         const notifyUrl = `${backendUrl}/api/starpay/webhook`;
@@ -526,8 +516,6 @@ const initiateRescheduleFeePayment = async (req, res) => {
             console.error('[StarPay] reschedule fee order failed:', spResponse?.code, spResponse?.message);
 
             if (spResponse?.code === '511') {
-                // StarPay still has an active order from a previous session.
-                // Nothing was saved to DB so nothing to clean up.
                 return res.status(409).json({
                     success: false,
                     message: 'A payment session is still active on StarPay. Please wait about 15 minutes for it to expire, then try again.',
@@ -535,47 +523,27 @@ const initiateRescheduleFeePayment = async (req, res) => {
                 });
             }
 
-            // Any other StarPay error — nothing saved, just return the error
             return res.status(502).json({
                 success: false,
                 message: `StarPay error: ${spResponse?.message || 'Order creation failed'}`,
             });
         }
 
-        // ── StarPay succeeded: now save to DB with codeUrl already in notes ──
-        const notesPayload = JSON.stringify({
-            source: 'reschedule_fee',
-            enrollmentId: parseInt(enrollmentId),
+        // Save msgId + codeUrl on the enrollment so we can track status without a booking row
+        await pool.query(
+            `UPDATE schedule_enrollments SET starpay_msgid = $1, starpay_codeurl = $2 WHERE id = $3`,
+            [msgId, spResponse.codeUrl, enrollmentId]
+        );
+
+        return res.json({
+            success: true,
             codeUrl: spResponse.codeUrl,
+            msgId,
         });
 
-        const insertClient = await pool.connect();
-        try {
-            const { rows } = await insertClient.query(
-                `INSERT INTO bookings
-                   (user_id, course_id, branch_id, booking_date, booking_time,
-                    notes, total_amount, payment_type, payment_method, status, transaction_id)
-                 VALUES ($1,$2,$3,CURRENT_DATE,NULL,$4,1000,'Reschedule Fee','StarPay','pending',$5)
-                 RETURNING id`,
-                [userId, enroll.course_id || null, enroll.branch_id || null, notesPayload, msgId]
-            );
-
-            return res.json({
-                success: true,
-                codeUrl: spResponse.codeUrl,
-                msgId,
-                bookingId: rows[0].id,
-            });
-        } finally {
-            insertClient.release();
-        }
-
     } catch (err) {
-        await client.query('ROLLBACK').catch(() => {});
         console.error('[StarPay] initiateRescheduleFeePayment error:', err.message);
         return res.status(500).json({ success: false, message: err.message });
-    } finally {
-        client.release();
     }
 };
 

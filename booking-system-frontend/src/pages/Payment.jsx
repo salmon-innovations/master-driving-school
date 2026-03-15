@@ -17,9 +17,92 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
 
   const isGuestCheckout = localStorage.getItem('isGuestCheckout') === 'true' && !isLoggedIn
 
-  const subtotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0)
-  const downpaymentAmount = subtotal * 0.5
-  const finalAmount = paymentType === "downpayment" ? downpaymentAmount : subtotal
+  const calculateItemTotals = (item) => {
+    let calcBasePrice = parseFloat(item.price) || 0;
+    let calcDiscountRate = 0;
+
+    if (item.hasTypeOption && item.typeOptions) {
+      const activeType = item.typeOptions.find(opt => opt.value === item.type);
+      if (activeType) {
+        calcBasePrice = parseFloat(activeType.price) || calcBasePrice;
+        calcDiscountRate = activeType.discount || parseFloat(item.discount) || 0;
+      }
+    } else {
+      calcDiscountRate = parseFloat(item.discount) || 0;
+    }
+
+    let calcDiscountValue = 0;
+    let hasDiscount = false;
+    if (calcDiscountRate > 0) {
+      hasDiscount = true;
+      calcDiscountValue = calcBasePrice * (calcDiscountRate / 100);
+    }
+
+    const reviewerPrice = item.selectedAddons?.reviewer ? parseFloat(item.addonsConfig?.reviewer || 30) : 0;
+    const vehicleTipsPrice = item.selectedAddons?.vehicleTips ? parseFloat(item.addonsConfig?.vehicleTips || 20) : 0;
+    const advFee = parseFloat(item.addonsConfig?.convenienceFee || 25);
+
+    const finalItemPrice = calcBasePrice - calcDiscountValue + reviewerPrice + vehicleTipsPrice + advFee;
+    
+    return {
+      calcBasePrice,
+      hasDiscount,
+      calcDiscountRate,
+      calcDiscountValue,
+      reviewerPrice,
+      vehicleTipsPrice,
+      advFee,
+      finalItemPrice
+    };
+  };
+
+  const getPaymentTotals = () => {
+    let baseCoursePriceTotal = 0;
+    let reviewerTotal = 0;
+    let vehicleTipsTotal = 0;
+    let convenienceTotal = 0;
+    let discountTotal = 0;
+    let subtotal = 0;
+
+    cart.forEach(item => {
+      const totals = calculateItemTotals(item);
+      const qty = item.quantity;
+      baseCoursePriceTotal += totals.calcBasePrice * qty;
+      reviewerTotal += totals.reviewerPrice * qty;
+      vehicleTipsTotal += totals.vehicleTipsPrice * qty;
+      convenienceTotal += totals.advFee * qty;
+      discountTotal += totals.calcDiscountValue * qty;
+      subtotal += totals.finalItemPrice * qty;
+    });
+    
+    const hasTDC = cart.some(item => (item.category === 'TDC' || (item.name || '').toLowerCase().includes('tdc') || (item.shortName || '').toLowerCase().includes('tdc')));
+    const hasPDC = cart.some(item => (item.category === 'PDC' || (item.name || '').toLowerCase().includes('pdc') || (item.shortName || '').toLowerCase().includes('pdc')));
+    
+    const hasBundleDiscount = hasTDC && hasPDC;
+    const bundleDiscountValue = hasBundleDiscount ? subtotal * 0.03 : 0;
+    const finalTotal = subtotal - bundleDiscountValue;
+
+    return { 
+      baseCoursePriceTotal, 
+      reviewerTotal, 
+      vehicleTipsTotal, 
+      convenienceTotal, 
+      discountTotal, 
+      subtotal, 
+      hasBundleDiscount, 
+      bundleDiscountValue, 
+      finalTotal 
+    };
+  };
+
+  const totalsData = getPaymentTotals();
+  const baseSubtotal = totalsData.subtotal;
+  const hasBundleDiscount = totalsData.hasBundleDiscount;
+  const bundleDiscountValue = totalsData.bundleDiscountValue;
+
+  const subtotal = totalsData.finalTotal;
+  const downpaymentAmount = subtotal * 0.5;
+  const finalAmount = paymentType === "downpayment" ? downpaymentAmount : subtotal;
 
   useEffect(() => {
     const isGuest = localStorage.getItem('isGuestCheckout') === 'true'
@@ -565,31 +648,81 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                     )}
 
                     {/* Cart Items */}
-                    <div className="space-y-3">
-                      {cart.map((item, idx) => (
-                        <div key={idx} className="flex justify-between items-start gap-3 pb-3 border-b border-white/10 last:border-0 last:pb-0">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs sm:text-sm font-bold text-white/95 mb-1 leading-snug">{item.name}</p>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-[11px] text-white/40">{item.duration} × {item.quantity}</span>
-                              {item.type && item.type !== 'standard' && (
-                                <span className="px-1.5 py-0.5 bg-blue-500/20 text-blue-300 rounded-full text-[10px] font-black uppercase border border-blue-400/20">
-                                  {item.type === 'online' ? '💻 Online' : item.type === 'face-to-face' ? '👥 Face to Face' : item.type}
-                                </span>
-                              )}
+                    <div className="space-y-4">
+                      {cart.map((item, idx) => {
+                        const totals = calculateItemTotals(item);
+                        return (
+                          <div key={idx} className="pb-4 border-b border-white/10 last:border-0 last:pb-0">
+                            <div className="flex justify-between items-start gap-3 mb-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs sm:text-sm font-bold text-white/95 mb-1 leading-snug">{item.name}</p>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="text-[11px] text-white/40">{item.duration} × {item.quantity}</span>
+                                  {item.type && item.type !== 'standard' && (
+                                    <span className="px-1.5 py-0.5 bg-blue-500/20 text-blue-300 rounded-full text-[10px] font-black uppercase border border-blue-400/20">
+                                      {item.type === 'online' ? '💻 Online' : item.type === 'face-to-face' ? '👥 Face to Face' : item.type}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                           </div>
-                          <span className="text-xs sm:text-sm font-black text-blue-400 whitespace-nowrap shrink-0">₱{(item.price * item.quantity).toLocaleString()}</span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
 
-                    {/* Totals */}
+                    {/* Detailed Breakdown inside Totals */}
                     <div className="pt-3 border-t border-white/15 space-y-2">
-                      <div className="flex justify-between text-xs text-white/60">
-                        <span className="font-semibold">Subtotal</span>
-                        <span className="font-bold">₱{subtotal.toLocaleString()}</span>
+                      <div className="space-y-1.5 text-xs text-white/60 font-medium mb-3">
+                        <div className="flex justify-between items-center">
+                          <span>Course Price</span>
+                          <span className="font-bold text-white/90">₱{totalsData.baseCoursePriceTotal.toLocaleString()}</span>
+                        </div>
+
+                        {(totalsData.reviewerTotal > 0 || totalsData.vehicleTipsTotal > 0) && (
+                          <div className="flex justify-between items-start">
+                            <div className="flex flex-col">
+                              <span>Add-ons</span>
+                              {totalsData.reviewerTotal > 0 && <span className="text-[10px] text-white/40 ml-2">• Reviewer</span>}
+                              {totalsData.vehicleTipsTotal > 0 && <span className="text-[10px] text-white/40 ml-2">• Vehicle Tips</span>}
+                            </div>
+                            <div className="flex flex-col items-end">
+                              <span className="font-bold text-white/90">₱{(totalsData.reviewerTotal + totalsData.vehicleTipsTotal).toLocaleString()}</span>
+                              {totalsData.reviewerTotal > 0 && <span className="text-[10px] text-white/40">₱{totalsData.reviewerTotal.toLocaleString()}</span>}
+                              {totalsData.vehicleTipsTotal > 0 && <span className="text-[10px] text-white/40">₱{totalsData.vehicleTipsTotal.toLocaleString()}</span>}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex justify-between items-center">
+                          <span>Convenience Fee</span>
+                          <span className="font-bold text-white/90">₱{totalsData.convenienceTotal.toLocaleString()}</span>
+                        </div>
+
+                        {totalsData.discountTotal > 0 && (
+                          <div className="flex justify-between items-center text-green-400">
+                            <span>Discount</span>
+                            <span className="font-bold">- ₱{totalsData.discountTotal.toLocaleString()}</span>
+                          </div>
+                        )}
                       </div>
+
+                      <div className="flex justify-between text-xs text-white/60 border-t border-white/10 pt-2">
+                        <span className="font-semibold">Subtotal</span>
+                        <span className="font-bold">₱{baseSubtotal.toLocaleString()}</span>
+                      </div>
+                      {hasBundleDiscount && (
+                        <div className="flex justify-between text-xs text-green-400 bg-green-500/10 px-2 py-1.5 -mx-2 rounded">
+                          <span className="font-bold">Bundle Discount (3% OFF)</span>
+                          <span className="font-bold">- ₱{bundleDiscountValue.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {subtotal !== baseSubtotal && (
+                         <div className="flex justify-between text-xs text-white/80 pt-1">
+                           <span className="font-semibold">Total after discount</span>
+                           <span className="font-bold">₱{subtotal.toLocaleString()}</span>
+                         </div>
+                      )}
                       {paymentType === "downpayment" && (
                         <div className="flex justify-between text-xs">
                           <span className="font-semibold text-amber-400">Downpayment (50%)</span>

@@ -130,6 +130,25 @@ const createSlot = async (req, res) => {
 
     console.log(`Calculated End Date: ${formattedEndDate}`);
 
+    // Check for an existing slot with the same date, type, session, branch, course_type and transmission
+    const existing = await pool.query(
+      `SELECT id FROM schedule_slots
+       WHERE date = $1
+         AND LOWER(type) = LOWER($2)
+         AND session = $3
+         AND branch_id IS NOT DISTINCT FROM $4
+         AND (course_type IS NOT DISTINCT FROM $5)
+         AND (transmission IS NOT DISTINCT FROM $6)
+       LIMIT 1`,
+      [date, type, session, resolvedBranchId, course_type || null, transmission || null]
+    );
+
+    if (existing.rows.length > 0) {
+      // Return the existing slot instead of creating a duplicate
+      const existingSlot = await pool.query('SELECT * FROM schedule_slots WHERE id = $1', [existing.rows[0].id]);
+      return res.status(200).json(existingSlot.rows[0]);
+    }
+
     const result = await pool.query(
       `INSERT INTO schedule_slots (date, end_date, type, session, time_range, total_capacity, available_slots, branch_id, course_type, transmission)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -378,17 +397,23 @@ const cancelEnrollment = async (req, res) => {
 const markFeePaid = async (req, res) => {
   try {
     const { enrollmentId } = req.params;
+    const { amount, paymentMethod, transactionNumber } = req.body;
     const result = await pool.query(
       `UPDATE schedule_enrollments
-         SET reschedule_fee_paid = TRUE, updated_at = CURRENT_TIMESTAMP
+         SET reschedule_fee_paid = TRUE,
+             walkin_fee_amount = $2,
+             walkin_payment_method = $3,
+             walkin_transaction_number = $4,
+             updated_at = CURRENT_TIMESTAMP
        WHERE id = $1 AND enrollment_status = 'no-show'
-       RETURNING id, reschedule_fee_paid`,
-      [enrollmentId]
+       RETURNING id, reschedule_fee_paid, walkin_fee_amount, walkin_payment_method, walkin_transaction_number`,
+      [enrollmentId, amount || null, paymentMethod || null, transactionNumber || null]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'No-show enrollment not found' });
     }
-    res.json({ success: true, reschedule_fee_paid: true });
+
+    res.json({ success: true, reschedule_fee_paid: true, walkin_fee_amount: result.rows[0].walkin_fee_amount, walkin_payment_method: result.rows[0].walkin_payment_method, walkin_transaction_number: result.rows[0].walkin_transaction_number });
   } catch (error) {
     console.error('Mark fee paid error:', error);
     res.status(500).json({ error: 'Server error while marking fee paid' });
@@ -573,6 +598,43 @@ const rescheduleEnrollment = async (req, res) => {
         `UPDATE schedule_slots SET available_slots = available_slots - 1 WHERE id = $1 AND available_slots > 0`,
         [new_slot_id]
       );
+    }
+
+    // 6. Create a booking record now that fee is paid AND new slot is selected
+    try {
+      const feeRow = await client.query(
+        `SELECT se.student_id, se.walkin_fee_amount, se.walkin_payment_method, se.walkin_transaction_number,
+                ss.branch_id,
+                b.course_id, b.course_type
+         FROM schedule_enrollments se
+         JOIN schedule_slots ss ON ss.id = se.slot_id
+         LEFT JOIN bookings b ON b.user_id = se.student_id
+           AND b.payment_type NOT IN ('Reschedule Fee')
+           AND b.status IN ('paid','collectable','confirmed')
+         WHERE se.id = $1
+         ORDER BY b.created_at DESC NULLS LAST
+         LIMIT 1`,
+        [enrollmentId]
+      );
+      if (feeRow.rows.length > 0) {
+        const f = feeRow.rows[0];
+        const method = f.walkin_payment_method || 'StarPay';
+        const amount = f.walkin_fee_amount || 1000;
+        const txn = f.walkin_transaction_number || null;
+        await client.query(
+          `INSERT INTO bookings
+             (user_id, course_id, branch_id, booking_date, booking_time,
+              notes, total_amount, payment_type, payment_method, status, transaction_id, course_type)
+           VALUES ($1,$2,$3,CURRENT_DATE,NULL,$4,$5,'Reschedule Fee',$6,'paid',$7,$8)`,
+          [
+            f.student_id, f.course_id || null, f.branch_id || null,
+            JSON.stringify({ source: 'reschedule_fee', enrollmentId: parseInt(enrollmentId) }),
+            amount, method, txn, f.course_type || null
+          ]
+        );
+      }
+    } catch (bookingErr) {
+      console.error('Reschedule: booking record creation failed (non-fatal):', bookingErr.message);
     }
 
     await client.query('COMMIT');
@@ -854,6 +916,7 @@ const getNoShowStudents = async (req, res) => {
          ss.time_range,
          ss.type,
          ss.course_type,
+         ss.transmission,
          ss.branch_id,
          b.name           AS branch_name
        FROM schedule_enrollments se

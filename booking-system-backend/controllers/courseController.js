@@ -131,7 +131,7 @@ const getCourseById = async (req, res) => {
 // Admin: Create new course
 const createCourse = async (req, res) => {
   try {
-    const { name, description, price, duration, status, images, category, course_type, pricing_data } = req.body;
+    const { name, description, price, discount, duration, status, images, category, course_type, pricing_data, branch_prices } = req.body;
 
     console.log('Create course request:', {
       name,
@@ -159,20 +159,27 @@ const createCourse = async (req, res) => {
       pricingDataJson = JSON.stringify(pricing_data);
     }
 
+    let branchPricesJson = null;
+    if (branch_prices && branch_prices.length > 0) {
+      branchPricesJson = JSON.stringify(branch_prices);
+    }
+
     const result = await pool.query(
-      `INSERT INTO courses (name, description, price, duration, status, image_url, category, course_type, pricing_data) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+      `INSERT INTO courses (name, description, price, discount, duration, status, image_url, category, course_type, pricing_data, branch_prices) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
        RETURNING *`,
       [
         name,
         description || null,
         parseFloat(price),
+        parseFloat(discount) || 0,
         duration || null,
         status || 'active',
         imageData,
         category || 'Basic',
         course_type || null,
-        pricingDataJson
+        pricingDataJson,
+        branchPricesJson
       ]
     );
 
@@ -197,7 +204,7 @@ const createCourse = async (req, res) => {
 const updateCourse = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, price, duration, status, images, category, course_type, pricing_data } = req.body;
+    const { name, description, price, discount, duration, status, images, category, course_type, pricing_data, branch_prices } = req.body;
 
     console.log('Update course request:', {
       id,
@@ -227,30 +234,39 @@ const updateCourse = async (req, res) => {
       pricingDataJson = JSON.stringify(pricing_data);
     }
 
+    let branchPricesJson = null;
+    if (branch_prices && branch_prices.length > 0) {
+      branchPricesJson = JSON.stringify(branch_prices);
+    }
+
     const result = await pool.query(
       `UPDATE courses SET 
         name = $1, 
         description = $2, 
         price = $3, 
-        duration = $4,
-        status = $5,
-        image_url = $6,
-        category = $7,
-        course_type = $8,
-        pricing_data = $9,
+        discount = $4,
+        duration = $5,
+        status = $6,
+        image_url = $7,
+        category = $8,
+        course_type = $9,
+        pricing_data = $10,
+        branch_prices = $11,
         updated_at = CURRENT_TIMESTAMP
-       WHERE id = $10 
+       WHERE id = $12 
        RETURNING *`,
       [
         name,
         description || null,
         parseFloat(price),
+        parseFloat(discount) || 0,
         duration || null,
         status || 'active',
         imageData,
         category || 'Basic',
         course_type || null,
         pricingDataJson,
+        branchPricesJson,
         id
       ]
     );
@@ -269,6 +285,35 @@ const updateCourse = async (req, res) => {
       error: 'Server error while updating course',
       details: error.message
     });
+  }
+};
+
+// Admin: Update branch prices only (stores ONLY branches that differ from the course default)
+const updateBranchPrices = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { branch_prices } = req.body;
+
+    if (!Array.isArray(branch_prices)) {
+      return res.status(400).json({ error: 'branch_prices must be an array' });
+    }
+
+    const existing = await pool.query('SELECT id FROM courses WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Course not found' });
+    }
+
+    const branchPricesJson = branch_prices.length > 0 ? JSON.stringify(branch_prices) : null;
+
+    const result = await pool.query(
+      `UPDATE courses SET branch_prices = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+      [branchPricesJson, id]
+    );
+
+    res.json({ success: true, message: 'Branch prices updated successfully', course: result.rows[0] });
+  } catch (error) {
+    console.error('Update branch prices error:', error.message);
+    res.status(500).json({ error: 'Server error while updating branch prices' });
   }
 };
 
@@ -300,6 +345,7 @@ module.exports = {
   createCourse,
   updateCourse,
   deleteCourse,
+  updateBranchPrices,
   getCourseConfig,
   updateCourseConfig,
 };

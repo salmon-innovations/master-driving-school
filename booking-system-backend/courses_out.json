@@ -1,12 +1,5 @@
 [
   {
-    "id": 5,
-    "name": "Practical Driving Course(PDC) - (V1 - TRICYCLE)",
-    "category": "PDC",
-    "pricing_data": null,
-    "course_type": "V1-Tricycle"
-  },
-  {
     "id": 4,
     "name": "Practical Driving Course(PDC) - (CAR)",
     "category": "PDC",
@@ -48,5 +41,19 @@
     "category": "PDC",
     "pricing_data": null,
     "course_type": "B1-Van/B2 - L300"
+  },
+  {
+    "id": 5,
+    "name": "Practical Driving Course(PDC) - (A1 - TRICYCLE)",
+    "category": "PDC",
+    "pricing_data": null,
+    "course_type": "V1-Tricycle"
+  },
+  {
+    "id": 8,
+    "name": "TDC + MOTOR",
+    "category": "Promo",
+    "pricing_data": null,
+    "course_type": "F2F+Motorcycle"
   }
 ]

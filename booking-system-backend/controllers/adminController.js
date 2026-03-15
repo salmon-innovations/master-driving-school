@@ -5,6 +5,7 @@ const fs = require('fs');
 const { generateRandomPassword, sendPasswordEmail, generateVerificationCode, sendWalkInEnrollmentEmail, sendPaymentReceiptEmail, reloadEmailContent } = require('../utils/emailService');
 
 const EMAIL_CONTENT_PATH = path.join(__dirname, '../config/emailContent.json');
+const ADDONS_CONFIG_PATH = path.join(__dirname, '../config/addonsConfig.json');
 
 // Get dashboard statistics
 const getDashboardStats = async (req, res) => {
@@ -98,7 +99,7 @@ const getDashboardStats = async (req, res) => {
 // Get all bookings for admin view
 const getAllBookings = async (req, res) => {
   try {
-    const { status, limit = 50 } = req.query;
+    const { status, limit = 50, branchId } = req.query;
     const userRole = req.user.role;
     const userId = req.user.id;
 
@@ -114,10 +115,11 @@ const getAllBookings = async (req, res) => {
     let paramIndex = 1;
     const whereClauses = [];
 
-    // Branch filter: staff only see their branch
-    if (userBranchId) {
+    // Branch filter: staff restricted to their branch; admins can filter by selected branch
+    const effectiveBranchId = userBranchId || (branchId ? parseInt(branchId) : null);
+    if (effectiveBranchId) {
       whereClauses.push(`b.branch_id = $${paramIndex++}`);
-      queryParams.push(userBranchId);
+      queryParams.push(effectiveBranchId);
     }
 
     if (status) {
@@ -150,6 +152,16 @@ const getAllBookings = async (req, res) => {
                FROM schedule_enrollments se
                JOIN schedule_slots ss ON se.slot_id = ss.id
                WHERE se.student_id = b.user_id
+                 AND CASE
+                   WHEN b.payment_type = 'Reschedule Fee' THEN
+                     se.enrollment_status NOT IN ('cancelled', 'no-show')
+                   ELSE
+                     se.id = (
+                       SELECT MIN(se2.id)
+                       FROM schedule_enrollments se2
+                       WHERE se2.student_id = b.user_id
+                     )
+                 END
              ) as schedule_details,
              -- Fallback slot 1 from notes JSON (for pending StarPay bookings not yet enrolled)
              (
@@ -979,7 +991,7 @@ const getAllTransactions = async (req, res) => {
       LEFT JOIN users u ON b.user_id = u.id
       LEFT JOIN courses c ON b.course_id = c.id
       LEFT JOIN branches br ON b.branch_id = br.id
-      WHERE b.status IN ('paid', 'collectable')
+      WHERE b.status IN ('paid', 'collectable', 'confirmed', 'completed')
       ORDER BY b.created_at DESC
       LIMIT $1`,
       [limit]
@@ -987,8 +999,8 @@ const getAllTransactions = async (req, res) => {
 
     const transactions = [];
     for (const row of result.rows) {
-      // Full Payment bookings are always considered paid/Success
-      const isPaid = row.status === 'paid' || row.payment_type === 'Full Payment';
+      // Full Payment bookings, confirmed (StarPay) and directly-paid bookings are Success
+      const isPaid = row.status === 'paid' || row.status === 'confirmed' || row.status === 'completed' || row.payment_type === 'Full Payment';
       transactions.push({
         transaction_id: `TXN-${new Date(row.created_at).getFullYear()}-${String(row.id).padStart(3, '0')}`,
         booking_id: row.id,
@@ -1564,6 +1576,34 @@ module.exports = {
 };
 
 // ─── Student summary detail ────────────────────────────────────────────────
+// ── Add-ons config endpoints ──────────────────────────────────────────────
+const getAddonsConfig = async (req, res) => {
+  try {
+    if (!fs.existsSync(ADDONS_CONFIG_PATH)) {
+      return res.json({ success: true, config: { reviewer: 30, vehicleTips: 20, convenienceFee: 25 } });
+    }
+    const data = JSON.parse(fs.readFileSync(ADDONS_CONFIG_PATH, 'utf8'));
+    res.json({ success: true, config: data });
+  } catch (e) {
+    console.error('Error fetching addons config:', e);
+    res.status(500).json({ error: 'Failed to load add-ons config' });
+  }
+};
+
+const updateAddonsConfig = async (req, res) => {
+  try {
+    const { config } = req.body;
+    if (!config || typeof config !== 'object') {
+      return res.status(400).json({ error: 'Invalid config payload' });
+    }
+    fs.writeFileSync(ADDONS_CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+    res.json({ success: true, message: 'Add-ons config updated successfully', config });
+  } catch (e) {
+    console.error('Error updating addons config:', e);
+    res.status(500).json({ error: 'Failed to update add-ons config' });
+  }
+};
+
 const getStudentDetail = async (req, res) => {
   try {
     const studentId = parseInt(req.params.studentId, 10);
@@ -1638,5 +1678,7 @@ module.exports = {
   updateEmailContent,
   getTodayStudents,
   getStudentDetail,
+  getAddonsConfig,
+  updateAddonsConfig,
 };
 
