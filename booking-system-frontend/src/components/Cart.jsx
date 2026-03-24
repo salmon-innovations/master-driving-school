@@ -7,7 +7,57 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
   const [availabilityLoading, setAvailabilityLoading] = useState(false)
   const [hasAvailableSlots, setHasAvailableSlots] = useState(true)
 
-  // Check availability for the first cart item whenever cart or branch changes\n  useEffect(() => {\n    if (!preSelectedBranch || cart.length === 0) {\n      setHasAvailableSlots(true)\n      return\n    }\n    const primaryCourse = cart[0]\n    const checkAvailability = async () => {\n      setAvailabilityLoading(true)\n      setHasAvailableSlots(true)\n      try {\n        const name = (primaryCourse.name || '').toLowerCase()\n        const shortName = (primaryCourse.shortName || '').toLowerCase()\n        const category = primaryCourse.category || ''\n        const selectedType = primaryCourse.type || ''\n        const isTDC = category === 'TDC' || name.includes('tdc') || shortName.includes('tdc')\n        const slotType = isTDC ? 'TDC' : 'PDC'\n        const slots = await schedulesAPI.getSlotsByDate(null, preSelectedBranch.id, slotType)\n        const today = new Date()\n        today.setHours(0, 0, 0, 0)\n        const minDate = new Date(today)\n        minDate.setDate(today.getDate() + (isTDC ? 1 : 2))\n        // Token-based course_type matcher\n        const stopWords = new Set(['practical', 'driving', 'course', 'pdc', 'tdc', 'theoretical', 'dc', 'a', 'an', 'the', 'and', 'or', 'for', 'of', 'in', 'to'])\n        const extractTokens = (str) => (str || '').toLowerCase().replace(/[()\\[\\]{}'\"]/g, ' ').split(/[\\s\\-\\/,;|&+]+/).filter(t => t.length >= 2 && !stopWords.has(t))\n        const courseTokens = new Set(extractTokens(name + ' ' + shortName))\n        const courseTypeMatches = (slotCourseType) => {\n          if (!slotCourseType) return true\n          const norm = slotCourseType.toLowerCase().trim()\n          if (norm === 'both' || norm === 'any' || norm === 'all') return true\n          const slotTokens = extractTokens(slotCourseType)\n          if (slotTokens.length === 0) return true\n          return slotTokens.some(t => courseTokens.has(t))\n        }\n        const available = Array.isArray(slots) ? slots.filter(s => {\n          const slotDate = new Date((s.date || s.start_date) + 'T00:00:00')\n          if (slotDate < minDate) return false\n          if (isTDC && selectedType && s.course_type && s.course_type.toLowerCase() !== selectedType.toLowerCase()) return false\n          if (!isTDC && !courseTypeMatches(s.course_type)) return false\n          return s.available_slots == null || s.available_slots > 0\n        }) : []\n        setHasAvailableSlots(available.length > 0)\n      } catch (e) {\n        setHasAvailableSlots(true) // fail open on error\n      } finally {\n        setAvailabilityLoading(false)\n      }\n    }\n    checkAvailability()\n  }, [cart.length, preSelectedBranch?.id, cart[0]?.id])
+  // Check availability for the first cart item whenever cart or branch changes
+  useEffect(() => {
+    if (!preSelectedBranch || cart.length === 0) {
+      setHasAvailableSlots(true)
+      return
+    }
+    const primaryCourse = cart[0]
+    const checkAvailability = async () => {
+      setAvailabilityLoading(true)
+      setHasAvailableSlots(true)
+      try {
+        const name = (primaryCourse.name || '').toLowerCase()
+        const shortName = (primaryCourse.shortName || '').toLowerCase()
+        const category = primaryCourse.category || ''
+        const selectedType = primaryCourse.type || ''
+        const isTDC = category === 'TDC' || name.includes('tdc') || shortName.includes('tdc')
+        const slotType = isTDC ? 'TDC' : 'PDC'
+        const slots = await schedulesAPI.getSlotsByDate(null, preSelectedBranch.id, slotType)
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const minDate = new Date(today)
+        minDate.setDate(today.getDate() + (isTDC ? 1 : 2))
+        // Token-based course_type matcher
+        const stopWords = new Set(['practical', 'driving', 'course', 'pdc', 'tdc', 'theoretical', 'dc', 'a', 'an', 'the', 'and', 'or', 'for', 'of', 'in', 'to'])
+        const extractTokens = (str) => (str || '').toLowerCase().replace(/[()\[\]{}'"]/g, ' ').split(/[\s\-\/,;|&+]+/).filter(t => t.length >= 2 && !stopWords.has(t))
+        const courseTokens = new Set(extractTokens(name + ' ' + shortName))
+        const courseTypeMatches = (slotCourseType) => {
+          if (!slotCourseType) return true
+          const norm = slotCourseType.toLowerCase().trim()
+          if (norm === 'both' || norm === 'any' || norm === 'all') return true
+          const slotTokens = extractTokens(slotCourseType)
+          if (slotTokens.length === 0) return true
+          return slotTokens.some(t => courseTokens.has(t))
+        }
+        const available = Array.isArray(slots) ? slots.filter(s => {
+          const slotDate = new Date((s.date || s.start_date) + 'T00:00:00')
+          if (slotDate < minDate) return false
+          if (isTDC && selectedType && s.course_type && s.course_type.toLowerCase() !== selectedType.toLowerCase()) return false
+          if (!isTDC && !courseTypeMatches(s.course_type)) return false
+          return s.available_slots == null || s.available_slots > 0
+        }) : []
+        setHasAvailableSlots(available.length > 0)
+      } catch (e) {
+        setHasAvailableSlots(true) // fail open on error
+      } finally {
+        setAvailabilityLoading(false)
+      }
+    }
+    checkAvailability()
+  }, [cart.length, preSelectedBranch?.id, cart[0]?.id])
+
 
   const removeFromCart = (id) => {
     setCart(cart.filter(item => item.id !== id))
@@ -86,7 +136,8 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
     const hasPDC = cart.some(item => (item.category === 'PDC' || (item.name || '').toLowerCase().includes('pdc') || (item.shortName || '').toLowerCase().includes('pdc')));
     
     const hasBundleDiscount = hasTDC && hasPDC;
-    const bundleDiscountValue = hasBundleDiscount ? subtotal * 0.03 : 0;
+    const promoBundleDiscountPercent = Math.max(0, parseFloat(cart.find(item => item?.addonsConfig?.promoBundleDiscountPercent != null)?.addonsConfig?.promoBundleDiscountPercent ?? 3) || 0);
+    const bundleDiscountValue = hasBundleDiscount ? subtotal * (promoBundleDiscountPercent / 100) : 0;
     const finalTotal = subtotal - bundleDiscountValue;
 
     return { 
@@ -97,6 +148,7 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
       discountTotal, 
       subtotal, 
       hasBundleDiscount, 
+      promoBundleDiscountPercent,
       bundleDiscountValue, 
       finalTotal 
     };
@@ -116,21 +168,67 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
       return
     }
     if (cart.length > 0) {
+      const isGuestCheckout = localStorage.getItem('isGuestCheckout') === 'true'
+
+      // Guests must complete profile first, then continue to schedule/payment with cart preserved.
+      if (!isLoggedIn && !isGuestCheckout) {
+        setShowCart(false)
+        onNavigate('guest-enrollment')
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+        return
+      }
+
       // All courses now require a schedule selection before payment
-      // Default the calendar view to the first course in the cart
-      const primaryCourse = cart[0];
-      // Only carry lightweight fields — cart items no longer contain images so this is already lean
-      setSelectedCourseForSchedule({
-        id: primaryCourse.id,
-        name: primaryCourse.name,
-        shortName: primaryCourse.shortName,
-        duration: primaryCourse.duration,
-        price: primaryCourse.price,
-        category: primaryCourse.category,
-        typeOptions: primaryCourse.typeOptions,
-        hasTypeOption: primaryCourse.hasTypeOption,
-        selectedType: primaryCourse.type || 'standard',
-      });
+      const tdcItem = cart.find(item => (
+        item.category === 'TDC' ||
+        (item.name || '').toLowerCase().includes('tdc') ||
+        (item.shortName || '').toLowerCase().includes('tdc')
+      ))
+      const pdcItem = cart.find(item => (
+        item.category === 'PDC' ||
+        (item.name || '').toLowerCase().includes('pdc') ||
+        (item.shortName || '').toLowerCase().includes('pdc')
+      ))
+
+      // Reuse promo two-step scheduling for a TDC+PDC cart bundle.
+      if (tdcItem && pdcItem) {
+        const tdcTypeRaw = (tdcItem.type || '').toLowerCase()
+        const tdcMode = (tdcTypeRaw.includes('face') || tdcTypeRaw.includes('f2f')) ? 'F2F' : 'Online'
+
+        const pdcText = `${(pdcItem.type || '')} ${(pdcItem.name || '')} ${(pdcItem.shortName || '')}`.toLowerCase()
+        let pdcMode = 'CarMT'
+        if (pdcText.includes('motor')) pdcMode = 'Motorcycle'
+        else if (pdcText.includes('automatic') || pdcText.includes(' at ') || pdcText.endsWith(' at') || pdcText.includes('carat')) pdcMode = 'CarAT'
+
+        setSelectedCourseForSchedule({
+          id: `bundle-${tdcItem.id}-${pdcItem.id}`,
+          name: `${tdcItem.shortName || 'TDC'} + ${pdcItem.shortName || 'PDC'} Bundle`,
+          shortName: 'TDC + PDC Bundle',
+          duration: `${tdcItem.duration || ''} + ${pdcItem.duration || ''}`.trim(),
+          price: 0,
+          category: 'Promo',
+          course_type: `${tdcMode}+${pdcMode}`,
+          fromCartBundle: true,
+          selectedType: tdcItem.type || 'online',
+          typeOptions: tdcItem.typeOptions,
+          hasTypeOption: true,
+        })
+      } else {
+        // Default the calendar view to the first course in the cart.
+        const primaryCourse = cart[0]
+        setSelectedCourseForSchedule({
+          id: primaryCourse.id,
+          name: primaryCourse.name,
+          shortName: primaryCourse.shortName,
+          duration: primaryCourse.duration,
+          price: primaryCourse.price,
+          category: primaryCourse.category,
+          typeOptions: primaryCourse.typeOptions,
+          hasTypeOption: primaryCourse.hasTypeOption,
+          selectedType: primaryCourse.type || 'standard',
+        })
+      }
+
       setShowCart(false);
       onNavigate('schedule');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -269,7 +367,7 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                     </div>
                     {orderTotals.hasBundleDiscount && (
                       <div className="flex justify-between items-center bg-green-50 px-2 py-1.5 -mx-2 rounded text-green-700 font-bold mb-2">
-                        <span>Bundle Discount (3% OFF)</span>
+                        <span>Bundle Discount ({orderTotals.promoBundleDiscountPercent}% OFF)</span>
                         <span>- ₱{orderTotals.bundleDiscountValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
                       </div>
                     )}

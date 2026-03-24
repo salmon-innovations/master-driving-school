@@ -2,10 +2,85 @@ const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
-const { generateRandomPassword, sendPasswordEmail, generateVerificationCode, sendWalkInEnrollmentEmail, sendPaymentReceiptEmail, reloadEmailContent } = require('../utils/emailService');
+const { generateRandomPassword, sendPasswordEmail, generateVerificationCode, sendWalkInEnrollmentEmail, sendPaymentReceiptEmail, reloadEmailContent, sendTestEmail } = require('../utils/emailService');
 
 const EMAIL_CONTENT_PATH = path.join(__dirname, '../config/emailContent.json');
 const ADDONS_CONFIG_PATH = path.join(__dirname, '../config/addonsConfig.json');
+
+let permissionsColumnReady = false;
+
+const PERMISSION_GROUPS = [
+  {
+    id: 'main_menu',
+    permissions: [
+      'operations.schedules.manage',
+      'operations.bookings.manage',
+      'operations.walk_in.manage',
+      'operations.sales.manage',
+      'operations.crm.manage',
+      'operations.news.manage',
+      'operations.analytics.view',
+    ],
+  },
+  {
+    id: 'management_menu',
+    permissions: [
+      'accounts.courses.view',
+      'accounts.config.view',
+    ],
+  },
+  {
+    id: 'account_actions',
+    permissions: [
+      'accounts.users.create',
+      'accounts.users.edit',
+      'accounts.users.status',
+      'accounts.users.reset_password',
+    ],
+  },
+];
+
+const ALL_PERMISSION_KEYS = PERMISSION_GROUPS.flatMap((group) => group.permissions);
+const ALLOWED_PERMISSION_KEYS = new Set(ALL_PERMISSION_KEYS);
+
+const ROLE_PERMISSION_PRESETS = {
+  admin: [...ALL_PERMISSION_KEYS],
+  staff: [
+    'operations.schedules.manage',
+    'operations.bookings.manage',
+    'operations.walk_in.manage',
+    'operations.sales.manage',
+    'operations.crm.manage',
+    'operations.news.manage',
+  ],
+};
+
+const ensureUserPermissionsColumn = async () => {
+  if (permissionsColumnReady) return;
+
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB DEFAULT '[]'::jsonb`);
+  await pool.query(`UPDATE users SET permissions = '[]'::jsonb WHERE permissions IS NULL`);
+
+  permissionsColumnReady = true;
+};
+
+const normalizePermissions = (permissions) => {
+  if (!Array.isArray(permissions)) return [];
+  return [
+    ...new Set(
+      permissions.filter(
+        (permission) => typeof permission === 'string'
+          && permission.trim().length > 0
+          && ALLOWED_PERMISSION_KEYS.has(permission)
+      )
+    )
+  ];
+};
+
+const getRoleDefaultPermissions = (role) => {
+  const normalizedRole = String(role || '').toLowerCase();
+  return [...(ROLE_PERMISSION_PRESETS[normalizedRole] || [])];
+};
 
 // Get dashboard statistics
 const getDashboardStats = async (req, res) => {
@@ -216,6 +291,8 @@ const getAllBookings = async (req, res) => {
 // Get all users
 const getAllUsers = async (req, res) => {
   try {
+    await ensureUserPermissionsColumn();
+
     const { role, limit = 100 } = req.query;
 
     let query = `
@@ -224,6 +301,7 @@ const getAllUsers = async (req, res) => {
              u.status, u.last_login, u.created_at, u.is_verified,
              u.birth_place, u.nationality, u.marital_status, u.zip_code,
              u.emergency_contact_person, u.emergency_contact_number,
+             COALESCE(u.permissions, '[]'::jsonb) as permissions,
              COALESCE(u.branch_id, (
                 SELECT branch_id FROM bookings WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1
              )) as branch_id, 
@@ -418,6 +496,8 @@ const getBestSellingCourses = async (req, res) => {
 // Create new user (Admin/Staff only)
 const createUser = async (req, res) => {
   try {
+    await ensureUserPermissionsColumn();
+
     console.log('📝 CREATE USER REQUEST - Body:', req.body);
 
     const {
@@ -432,7 +512,13 @@ const createUser = async (req, res) => {
       email,
       role,
       branch,
+      permissions,
     } = req.body;
+
+    const providedPermissions = normalizePermissions(permissions);
+    const normalizedPermissions = providedPermissions.length > 0
+      ? providedPermissions
+      : getRoleDefaultPermissions(role);
 
     console.log('📋 Extracted values:', { firstName, middleInitial, lastName, email, role, branch, contactNumber });
 
@@ -471,9 +557,9 @@ const createUser = async (req, res) => {
       `INSERT INTO users (
         first_name, middle_name, last_name, email, password, 
         gender, age, birthday, address, contact_numbers, 
-        role, branch_id, status, is_verified
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-      RETURNING id, first_name, middle_name, last_name, email, role, branch_id, status, created_at`,
+        role, branch_id, permissions, status, is_verified
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      RETURNING id, first_name, middle_name, last_name, email, role, branch_id, permissions, status, created_at`,
       [
         firstName,
         middleInitial || null,
@@ -487,6 +573,7 @@ const createUser = async (req, res) => {
         contactNumber,
         role,
         branchId,
+        JSON.stringify(normalizedPermissions),
         'active',
         true, // Auto-verify admin/staff accounts
       ]
@@ -520,6 +607,8 @@ const createUser = async (req, res) => {
 // Update user
 const updateUser = async (req, res) => {
   try {
+    await ensureUserPermissionsColumn();
+
     const { id } = req.params;
     const {
       firstName,
@@ -536,7 +625,13 @@ const updateUser = async (req, res) => {
       status,
       emailChanged,
       avatar,
+      permissions,
     } = req.body;
+
+    const providedPermissions = normalizePermissions(permissions);
+    const normalizedPermissions = providedPermissions.length > 0
+      ? providedPermissions
+      : getRoleDefaultPermissions(role);
 
     // Get current user email
     const currentUserResult = await pool.query('SELECT email, first_name FROM users WHERE id = $1', [id]);
@@ -583,10 +678,11 @@ const updateUser = async (req, res) => {
           contact_numbers = $10,
           role = $11,
           branch_id = $12,
-          status = $13,
-          avatar = $14
-        WHERE id = $15
-        RETURNING id, first_name, middle_name, last_name, email, role, branch_id, status, avatar`
+          permissions = $13,
+          status = $14,
+          avatar = $15
+        WHERE id = $16
+        RETURNING id, first_name, middle_name, last_name, email, role, branch_id, permissions, status, avatar`
       : `UPDATE users SET
           first_name = $1,
           middle_name = $2,
@@ -598,10 +694,11 @@ const updateUser = async (req, res) => {
           contact_numbers = $8,
           role = $9,
           branch_id = $10,
-          status = $11,
-          avatar = $12
-        WHERE id = $13
-        RETURNING id, first_name, middle_name, last_name, email, role, branch_id, status, avatar`;
+          permissions = $11,
+          status = $12,
+          avatar = $13
+        WHERE id = $14
+        RETURNING id, first_name, middle_name, last_name, email, role, branch_id, permissions, status, avatar`;
 
     const updateParams = isEmailChanged
       ? [
@@ -617,6 +714,7 @@ const updateUser = async (req, res) => {
         contactNumber,
         role,
         branch ? parseInt(branch) : null,
+        JSON.stringify(normalizedPermissions),
         status,
         avatar || null,
         id,
@@ -632,6 +730,7 @@ const updateUser = async (req, res) => {
         contactNumber,
         role,
         branch ? parseInt(branch) : null,
+        JSON.stringify(normalizedPermissions),
         status,
         avatar || null,
         id,
@@ -763,6 +862,8 @@ const walkInEnrollment = async (req, res) => {
       paymentMethod, amountPaid, paymentStatus,
       enrolledBy
     } = req.body;
+
+    console.log('🔍 Walk-in enrollment received - Day2 data:', { scheduleSlotId2, scheduleDate2, courseCategory, courseType });
 
     // Parse branchId to integer (comes as string from frontend select)
     const parsedBranchId = parseInt(branchId, 10);
@@ -1463,6 +1564,23 @@ const updateEmailContent = async (req, res) => {
   }
 };
 
+const sendTestEmailRoute = async (req, res) => {
+  try {
+    const { email, html, subject } = req.body;
+    if (!email || !html) return res.status(400).json({error: 'Missing email or html'});
+    const emailService = require('../utils/emailService');
+    if (emailService.sendTestEmail) {
+      await emailService.sendTestEmail(email, html, subject);
+      res.json({success: true});
+    } else {
+      res.status(500).json({error: 'Test email function not found'});
+    }
+  } catch (e) {
+    console.error('Test email route error:', e);
+    res.status(500).json({error: 'Failed to send test email'});
+  }
+};
+
 const getTodayStudents = async (req, res) => {
   try {
     const dateParam = req.query.date;
@@ -1572,7 +1690,7 @@ module.exports = {
   sendReceiptEmail,
   getEmailContent,
   updateEmailContent,
-  getTodayStudents,
+  sendTestEmailRoute,
 };
 
 // ─── Student summary detail ────────────────────────────────────────────────
@@ -1580,7 +1698,7 @@ module.exports = {
 const getAddonsConfig = async (req, res) => {
   try {
     if (!fs.existsSync(ADDONS_CONFIG_PATH)) {
-      return res.json({ success: true, config: { reviewer: 30, vehicleTips: 20, convenienceFee: 25 } });
+      return res.json({ success: true, config: { reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 3 } });
     }
     const data = JSON.parse(fs.readFileSync(ADDONS_CONFIG_PATH, 'utf8'));
     res.json({ success: true, config: data });
@@ -1676,6 +1794,7 @@ module.exports = {
   sendReceiptEmail,
   getEmailContent,
   updateEmailContent,
+  sendTestEmailRoute,
   getTodayStudents,
   getStudentDetail,
   getAddonsConfig,

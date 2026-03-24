@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import '../css/Dashboard.css';
 import StaffSidebar from './components/StaffSidebar';
 import Schedule from '../Schedule';
@@ -27,14 +27,78 @@ import {
 const logo = '/images/logo.png';
 const cover = '/images/cover.png';
 
+const STAFF_TAB_TO_PATH = {
+    dashboard: '/staff-dashboard/dashboard',
+    schedules: '/staff-dashboard/schedules',
+    bookings: '/staff-dashboard/bookings',
+    'walk-in': '/staff-dashboard/walk-in',
+    sales: '/staff-dashboard/sales',
+    crm: '/staff-dashboard/crm',
+    news: '/staff-dashboard/news',
+    profile: '/staff-dashboard/profile',
+    settings: '/staff-dashboard/settings',
+    notifications: '/staff-dashboard/notifications',
+};
+
+const STAFF_PATH_TO_TAB = Object.entries(STAFF_TAB_TO_PATH).reduce((acc, [tab, path]) => {
+    acc[path] = tab;
+    return acc;
+}, {});
+
+const normalizeStaffPath = (pathname = '/staff-dashboard') => {
+    const clean = pathname.trim();
+    if (!clean || clean === '/') return '/staff-dashboard';
+    return clean.replace(/\/+$/, '') || '/staff-dashboard';
+};
+
+const getStaffTabFromPath = (pathname = '/staff-dashboard') => {
+    const path = normalizeStaffPath(pathname);
+    if (path === '/staff-dashboard') return 'dashboard';
+    return STAFF_PATH_TO_TAB[path] || null;
+};
+
+const getStaffPathForTab = (tab) => STAFF_TAB_TO_PATH[tab] || '/staff-dashboard/dashboard';
+
+const STAFF_DEFAULT_PERMISSIONS = [
+    'operations.schedules.manage',
+    'operations.bookings.manage',
+    'operations.walk_in.manage',
+    'operations.sales.manage',
+    'operations.crm.manage',
+    'operations.news.manage',
+];
+
+const STAFF_TAB_PERMISSION_MAP = {
+    schedules: 'operations.schedules.manage',
+    bookings: 'operations.bookings.manage',
+    'walk-in': 'operations.walk_in.manage',
+    sales: 'operations.sales.manage',
+    crm: 'operations.crm.manage',
+    news: 'operations.news.manage',
+};
+
+const ALWAYS_ALLOWED_STAFF_TABS = new Set(['dashboard', 'profile', 'settings', 'notifications']);
+
+const normalizePermissions = (permissions) => {
+    if (!Array.isArray(permissions)) return [];
+    return permissions.filter((permission) => typeof permission === 'string');
+};
+
+const getDefaultStaffTab = (allowedTabs) => {
+    const priority = ['dashboard', 'schedules', 'bookings', 'walk-in', 'sales', 'crm', 'news', 'profile', 'settings', 'notifications'];
+    return priority.find((tab) => allowedTabs.has(tab)) || 'profile';
+};
+
 
 
 const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
     const { theme, toggleTheme } = useTheme();
     const { showNotification } = useNotification();
-    const [activeTab, setActiveTab] = useState(localStorage.getItem('adminActiveTab') || 'dashboard');
+    const [activeTab, setActiveTab] = useState(() => getStaffTabFromPath(window.location.pathname) || localStorage.getItem('adminActiveTab') || 'dashboard');
+    const hasInitializedStaffPath = useRef(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
     const [loading, setLoading] = useState(true);
+    const [userPermissions, setUserPermissions] = useState([]);
 
     const formatBranchName = (name) => {
         if (!name) return name;
@@ -63,6 +127,25 @@ const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
     const [enrollmentData, setEnrollmentData] = useState([]);
     const [bestSellingCourses, setBestSellingCourses] = useState([]);
     const [enrollees, setEnrollees] = useState([]);
+
+    const allowedStaffTabs = useMemo(() => {
+        const effectivePermissions = normalizePermissions(userPermissions).length > 0
+            ? normalizePermissions(userPermissions)
+            : STAFF_DEFAULT_PERMISSIONS;
+
+        const permissionSet = new Set(effectivePermissions);
+        const allowed = new Set(ALWAYS_ALLOWED_STAFF_TABS);
+
+        Object.entries(STAFF_TAB_PERMISSION_MAP).forEach(([tab, requiredPermission]) => {
+            if (permissionSet.has(requiredPermission)) {
+                allowed.add(tab);
+            }
+        });
+
+        return allowed;
+    }, [userPermissions]);
+
+    const defaultAllowedStaffTab = useMemo(() => getDefaultStaffTab(allowedStaffTabs), [allowedStaffTabs]);
 
     useEffect(() => {
         // Set initial state based on window size
@@ -94,16 +177,42 @@ const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
     }, [isSidebarOpen]);
 
     useEffect(() => {
+        if (!allowedStaffTabs.has(activeTab)) {
+            setActiveTab(defaultAllowedStaffTab);
+        }
+    }, [activeTab, allowedStaffTabs, defaultAllowedStaffTab]);
+
+    useEffect(() => {
         localStorage.setItem('adminActiveTab', activeTab);
+
+        const currentPath = normalizeStaffPath(window.location.pathname);
+        const targetPath = getStaffPathForTab(activeTab);
+
+        if (currentPath !== targetPath) {
+            if (!hasInitializedStaffPath.current) {
+                window.history.replaceState({}, '', targetPath);
+            } else {
+                window.history.pushState({}, '', targetPath);
+            }
+        }
+
+        if (!hasInitializedStaffPath.current) {
+            hasInitializedStaffPath.current = true;
+        }
     }, [activeTab]);
 
-    // Guard: ensure staff only lands on allowed tabs
-    const STAFF_ALLOWED_TABS = ['dashboard', 'schedules', 'bookings', 'walk-in', 'sales', 'crm', 'news', 'profile', 'settings', 'notifications'];
     useEffect(() => {
-        if (!STAFF_ALLOWED_TABS.includes(activeTab)) {
-            setActiveTab('dashboard');
-        }
-    }, []);
+        const handlePopState = () => {
+            const tabFromPath = getStaffTabFromPath(window.location.pathname);
+            if (tabFromPath) {
+                setActiveTab(allowedStaffTabs.has(tabFromPath) ? tabFromPath : defaultAllowedStaffTab);
+            }
+        };
+
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, [allowedStaffTabs, defaultAllowedStaffTab]);
+
     const [showProfileModal, setShowProfileModal] = useState(false);
     const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -208,6 +317,7 @@ const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
                         rawRole: user.role || 'staff',
                         avatar: null
                     });
+                    setUserPermissions(normalizePermissions(user.permissions));
                 }
             } catch (error) {
                 console.error('Error fetching profile:', error);
@@ -449,6 +559,7 @@ const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
                 setActiveTab={setActiveTab}
                 onNavigate={onNavigate}
                 handleLogout={handleLogout}
+                allowedTabs={allowedStaffTabs}
             />
 
             {/* Main Content */}

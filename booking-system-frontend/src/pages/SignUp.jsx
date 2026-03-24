@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { authAPI } from '../services/api'
 import { useNotification } from '../context/NotificationContext'
+import { getZipFromAddress } from '../utils/philippineZipCodes'
 
-function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
+// Zip code lookup is handled by the shared utility: getZipFromAddress(address)
+
+function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSelectedBranch }) {
   const { showNotification } = useNotification()
   const [currentStep, setCurrentStep] = useState(1)
   const steps = [
@@ -30,6 +33,9 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
     password: '',
     confirmPassword: ''
   })
+
+  // We remove the auto-fill on mount to keep the form empty initially (as requested)
+  // Zip code and birthPlace will be filled based on the Address field input later.
 
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -59,10 +65,41 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
       formattedValue = formatPhoneNumber(value)
     }
     
-    setFormData(prev => ({
-      ...prev,
-      [name]: formattedValue
-    }))
+    const calculateAge = (birthday) => {
+      if (!birthday) return '';
+      const birthDate = new Date(birthday);
+      const today = new Date();
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const m = today.getMonth() - birthDate.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+      }
+      return age >= 0 ? age.toString() : '';
+    };
+
+    setFormData(prev => {
+      const updated = {
+        ...prev,
+        [name]: formattedValue
+      };
+
+      // Auto-calculate age based on birthday
+      if (name === 'birthday' && formattedValue) {
+        updated.age = calculateAge(formattedValue);
+        // Clear age error if it was auto-filled
+        if (errors.age) {
+          setErrors(prevErrors => ({ ...prevErrors, age: '' }));
+        }
+      }
+
+      // Auto-fill zip code based on Philippine city/municipality in address
+      if (name === 'address') {
+        updated.zipCode = getZipFromAddress(formattedValue);
+      }
+
+      return updated;
+    });
+
     // Clear error when user starts typing
     if (errors[name]) {
       setErrors(prev => ({
@@ -107,10 +144,11 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
         newErrors.emergencyContactNumber = 'Phone must start with 09 and be exactly 11 digits'
       }
     }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!formData.email) {
       newErrors.email = 'Email is required'
-    } else if (!/@/.test(formData.email)) {
-      newErrors.email = 'Invalid email'
+    } else if (!emailRegex.test(formData.email)) {
+      newErrors.email = 'Invalid email address'
     }
     return newErrors
   }
@@ -234,14 +272,39 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
                     {errors.firstName && <p className="text-xs text-red-500 mt-1">{errors.firstName}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Middle Initial</label>
+                    <div className="flex justify-between items-center mb-2">
+                       <label className="block text-sm font-semibold text-gray-700">Middle Initial</label>
+                       <div className="flex items-center gap-3">
+                         <label className="flex items-center gap-1.5 cursor-pointer text-xs font-medium text-gray-500">
+                           <input 
+                             type="radio" 
+                             name="middleNameType" 
+                             checked={formData.middleName !== 'N/A'} 
+                             onChange={() => setFormData(prev => ({ ...prev, middleName: '' }))}
+                             className="w-3 h-3 text-[#2157da]"
+                           />
+                           Has
+                         </label>
+                         <label className="flex items-center gap-1.5 cursor-pointer text-xs font-medium text-gray-500">
+                           <input 
+                             type="radio" 
+                             name="middleNameType" 
+                             checked={formData.middleName === 'N/A'} 
+                             onChange={() => setFormData(prev => ({ ...prev, middleName: 'N/A' }))}
+                             className="w-3 h-3 text-[#2157da]"
+                           />
+                           None
+                         </label>
+                       </div>
+                    </div>
                     <input
                       type="text"
                       name="middleName"
-                      value={formData.middleName}
+                      value={formData.middleName === 'N/A' ? '' : formData.middleName}
                       onChange={handleChange}
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2157da] outline-none transition-all"
-                      placeholder="Santos"
+                      disabled={formData.middleName === 'N/A'}
+                      className={`w-full px-4 py-3 ${formData.middleName === 'N/A' ? 'bg-gray-200 border-gray-300 cursor-not-allowed' : 'bg-gray-50 border-gray-200'} border rounded-lg focus:ring-2 focus:ring-[#2157da] outline-none transition-all`}
+                      placeholder={formData.middleName === 'N/A' ? 'N/A' : 'Santos'}
                     />
                   </div>
                   <div>
@@ -322,8 +385,8 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
                       name="nationality"
                       value={formData.nationality}
                       onChange={handleChange}
+                      placeholder="e.g. Filipino"
                       className={`w-full px-4 py-3 bg-gray-50 border ${errors.nationality ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:ring-2 focus:ring-[#2157da] outline-none transition-all`}
-                      placeholder="Filipino"
                     />
                     {errors.nationality && <p className="text-xs text-red-500 mt-1">{errors.nationality}</p>}
                   </div>
@@ -559,7 +622,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail }) {
               {steps.map((step, index) => (
                 <div key={step.id} className="relative">
                   {/* Dot on line */}
-                  <div className={`absolute -left-[39px] top-1.5 w-5 h-5 rounded-full border-4 border-[#1e3a8a] transition-all duration-300 ${
+                  <div className={`absolute -left-[43px] top-1.5 w-5 h-5 rounded-full border-4 border-[#1e3a8a] transition-all duration-300 ${
                     currentStep >= step.id ? 'bg-[#4ade80]' : 'bg-blue-800'
                   }`} />
                   

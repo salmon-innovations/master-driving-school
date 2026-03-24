@@ -1,0 +1,1 @@
+const pool = require('./config/db'); async function check() { try { await pool.query('UPDATE schedule_slots SET available_slots = total_capacity WHERE available_slots < total_capacity'); console.log('Successfully reset all schedule slots back to full capacity!'); } catch(e) { console.error(e); } finally { process.exit(); } }; check();

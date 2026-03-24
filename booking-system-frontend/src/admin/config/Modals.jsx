@@ -75,7 +75,7 @@ export const BranchModal = ({ isOpen, onClose, onSubmit, formData, setFormData, 
     );
 };
 
-export const RoleModal = ({ isOpen, onClose, onSubmit, formData, setFormData, isEditing }) => {
+export const RoleModal = ({ isOpen, onClose, onSubmit, formData, setFormData, isEditing, isSystemRole = false }) => {
     if (!isOpen) return null;
     return (
         <div className="cfg-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -104,11 +104,16 @@ export const RoleModal = ({ isOpen, onClose, onSubmit, formData, setFormData, is
                                 <input
                                     type="text"
                                     required
-                                    disabled={isEditing}
+                                    disabled={isEditing && isSystemRole}
                                     placeholder="e.g. branch_manager"
                                     value={formData.name}
-                                    onChange={e => setFormData({ ...formData, name: e.target.value })}
+                                    onChange={e => setFormData({ ...formData, name: e.target.value.toLowerCase().replace(/\s+/g, '_') })}
                                 />
+                                {isEditing && isSystemRole && (
+                                    <small style={{ color: 'var(--secondary-text)', marginTop: '6px', display: 'block' }}>
+                                        Internal code is locked for system roles.
+                                    </small>
+                                )}
                             </div>
                             <div className="cfg-modal-field">
                                 <label>Display Name *</label>

@@ -10,7 +10,9 @@ const {
   resendVerificationCode,
   forgotPassword,
   verifyResetOTP,
-  resetPassword
+  resetPassword,
+  updateProfile,
+  changePassword
 } = require('../controllers/authController');
 const { authenticateToken } = require('../middleware/auth');
 
@@ -27,5 +29,7 @@ router.post('/reset-password', resetPassword);
 // Protected routes
 router.post('/logout', authenticateToken, logout);
 router.get('/profile', authenticateToken, getProfile);
+router.put('/profile', authenticateToken, updateProfile);
+router.put('/change-password', authenticateToken, changePassword);
 
 module.exports = router;

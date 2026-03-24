@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { useNotification } from "../context/NotificationContext"
 import { authAPI, bookingsAPI, schedulesAPI, starpayAPI } from "../services/api"
 
@@ -13,6 +13,8 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
   // StarPay QR state
   const [starpayQR, setStarpayQR] = useState(null) // { codeUrl, msgId, bookingId }
   const [qrStatus, setQrStatus] = useState('pending') // pending|success|failed
+  const [showPaymentSuccess, setShowPaymentSuccess] = useState(false)
+  const [countdown, setCountdown] = useState(5)
   const pollRef = useRef(null)
 
   const isGuestCheckout = localStorage.getItem('isGuestCheckout') === 'true' && !isLoggedIn
@@ -40,9 +42,19 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
 
     const reviewerPrice = item.selectedAddons?.reviewer ? parseFloat(item.addonsConfig?.reviewer || 30) : 0;
     const vehicleTipsPrice = item.selectedAddons?.vehicleTips ? parseFloat(item.addonsConfig?.vehicleTips || 20) : 0;
+    
+    let customAddonsPriceTotal = 0;
+    if (item.addonsConfig?.customAddons) {
+      item.addonsConfig.customAddons.forEach(addon => {
+        if (item.selectedAddons && item.selectedAddons[addon.id]) {
+          customAddonsPriceTotal += parseFloat(addon.price || 0);
+        }
+      });
+    }
+
     const advFee = parseFloat(item.addonsConfig?.convenienceFee || 25);
 
-    const finalItemPrice = calcBasePrice - calcDiscountValue + reviewerPrice + vehicleTipsPrice + advFee;
+    const finalItemPrice = calcBasePrice - calcDiscountValue + reviewerPrice + vehicleTipsPrice + customAddonsPriceTotal + advFee;
     
     return {
       calcBasePrice,
@@ -51,6 +63,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       calcDiscountValue,
       reviewerPrice,
       vehicleTipsPrice,
+      customAddonsPriceTotal,
       advFee,
       finalItemPrice
     };
@@ -60,6 +73,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     let baseCoursePriceTotal = 0;
     let reviewerTotal = 0;
     let vehicleTipsTotal = 0;
+    let customAddonsTotal = 0;
     let convenienceTotal = 0;
     let discountTotal = 0;
     let subtotal = 0;
@@ -70,6 +84,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       baseCoursePriceTotal += totals.calcBasePrice * qty;
       reviewerTotal += totals.reviewerPrice * qty;
       vehicleTipsTotal += totals.vehicleTipsPrice * qty;
+      customAddonsTotal += totals.customAddonsPriceTotal * qty;
       convenienceTotal += totals.advFee * qty;
       discountTotal += totals.calcDiscountValue * qty;
       subtotal += totals.finalItemPrice * qty;
@@ -79,17 +94,20 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     const hasPDC = cart.some(item => (item.category === 'PDC' || (item.name || '').toLowerCase().includes('pdc') || (item.shortName || '').toLowerCase().includes('pdc')));
     
     const hasBundleDiscount = hasTDC && hasPDC;
-    const bundleDiscountValue = hasBundleDiscount ? subtotal * 0.03 : 0;
+    const promoBundleDiscountPercent = Math.max(0, parseFloat(cart.find(item => item?.addonsConfig?.promoBundleDiscountPercent != null)?.addonsConfig?.promoBundleDiscountPercent ?? 3) || 0);
+    const bundleDiscountValue = hasBundleDiscount ? subtotal * (promoBundleDiscountPercent / 100) : 0;
     const finalTotal = subtotal - bundleDiscountValue;
 
     return { 
       baseCoursePriceTotal, 
       reviewerTotal, 
       vehicleTipsTotal, 
+      customAddonsTotal,
       convenienceTotal, 
       discountTotal, 
       subtotal, 
       hasBundleDiscount, 
+      promoBundleDiscountPercent,
       bundleDiscountValue, 
       finalTotal 
     };
@@ -111,15 +129,15 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       onNavigate("signin")
       return
     }
-    if (cart.length === 0) {
+    if (cart.length === 0 && !showPaymentSuccess) {
       onNavigate("courses")
     }
-  }, [cart, onNavigate, isLoggedIn])
+  }, [cart, onNavigate, isLoggedIn, showPaymentSuccess])
 
   // Auto-select StarPay — it's the only payment method
-  useEffect(() => {
+  /* useEffect(() => {
     setPaymentMethod('starpay')
-  }, [])
+  }, []) */
 
   // Always allow the checkbox to be ticked — don't gate on scroll
   useEffect(() => {
@@ -127,6 +145,29 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       setHasScrolledToBottom(true);
     }
   }, [showTermsModal]);
+
+  // Timer for auto-redirect after success
+  useEffect(() => {
+    let timer;
+    if (showPaymentSuccess && countdown > 0) {
+      timer = setInterval(() => {
+        setCountdown(prev => prev - 1);
+      }, 1000);
+    } else if (showPaymentSuccess && countdown === 0) {
+      onNavigate('home');
+    }
+    return () => clearInterval(timer);
+  }, [showPaymentSuccess, countdown, onNavigate]);
+
+  // Ensure polling is always cleaned up when leaving the page
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+    }
+  }, [])
 
   const handleOpenTermsModal = () => {
     if (!paymentType || !paymentMethod) {
@@ -146,182 +187,127 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     setShowTermsModal(false)
     setIsProcessing(true)
 
-    // ── StarPay: create QR order, show QR modal, poll for status ──────────────────
-    if (paymentMethod === 'starpay') {
-      try {
-        if (!scheduleSelection?.slot) {
-          showNotification('Please select a schedule slot before paying.', 'error')
-          setIsProcessing(false)
-          return
-        }
-
-        const isGuest = localStorage.getItem('isGuestCheckout') === 'true'
-        const guestDataStr = localStorage.getItem('guestEnrollmentData')
-
-        let result
-        if (isGuest && guestDataStr) {
-          // Guest StarPay: send personal info + booking details to the no-auth endpoint
-          const guestData = JSON.parse(guestDataStr)
-          const formatDate = (d) => {
-            if (!d) return null
-            const dt = new Date(d)
-            return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`
-          }
-          result = await starpayAPI.createGuestPayment({
-            ...guestData,
-            courseId:        cart[0]?.id,
-            branchId:        preSelectedBranch?.id || guestData.branchId,
-            courseCategory:  cart[0]?.category,
-            courseType:      cart[0]?.type,
-            scheduleSlotId:  scheduleSelection.slot,
-            scheduleSlotId2: scheduleSelection.slot2 || null,
-            scheduleDate:    formatDate(scheduleSelection.date),
-            amount:          finalAmount,
-            paymentType:     paymentType === 'full' ? 'Full Payment' : 'Downpayment',
-            attach:          `MDS ${cart[0]?.name || 'Course'}`.slice(0, 92),
-          })
-        } else {
-          // Logged-in StarPay: use authenticated endpoint
-          result = await starpayAPI.createPayment({
-            courseId:        cart[0]?.id,
-            branchId:        preSelectedBranch?.id,
-            courseCategory:  cart[0]?.category,
-            courseType:      cart[0]?.type,
-            amount:          finalAmount,
-            paymentType:     paymentType === 'full' ? 'Full Payment' : 'Downpayment',
-            attach:          `MDS ${cart[0]?.name || 'Course'}`.slice(0, 92),
-            scheduleSlotId:  scheduleSelection.slot,
-            scheduleSlotId2: scheduleSelection.slot2 || null,
-          })
-        }
-        if (!result.success || !result.codeUrl) {
-          showNotification(result.message || 'Failed to create StarPay order', 'error')
-          setIsProcessing(false)
-          return
-        }
-        setIsProcessing(false)
-        setQrStatus('pending')
-        setStarpayQR({ codeUrl: result.codeUrl, msgId: result.msgId, bookingId: result.bookingId })
-        // Poll every 3 seconds for payment confirmation
-        pollRef.current = setInterval(async () => {
-          try {
-            const status = await starpayAPI.checkStatus(result.msgId)
-            const state = status.starpayState || status.localStatus
-            if (state === 'SUCCESS' || status.localStatus === 'paid') {
-              clearInterval(pollRef.current)
-              setQrStatus('success')
-              setTimeout(() => {
-                setStarpayQR(null)
-                setCart([])
-                localStorage.removeItem('isGuestCheckout')
-                localStorage.removeItem('guestEnrollmentData')
-                showNotification('Payment successful! 🎉 Check your email for confirmation.', 'success')
-                onNavigate('home')
-              }, 2000)
-            } else if (['FAIL', 'REVERSED', 'CLOSE'].includes(state)) {
-              clearInterval(pollRef.current)
-              setQrStatus('failed')
-            }
-          } catch { /* ignore poll errors */ }
-        }, 3000)
-      } catch (err) {
-        showNotification(err.message || 'StarPay error', 'error')
-        setIsProcessing(false)
-      }
-      return
-    }
-
-    showNotification(`Processing ${paymentMethod} payment for ₱${finalAmount.toLocaleString()}...`, "info")
+    const formatDate = (dateInput) => {
+      if (!dateInput) return null;
+      const d = new Date(dateInput);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
 
     const handleSuccess = () => {
-      showNotification("Payment successful! Redirecting to home...", "success")
-      setCart([]) // Clear cart
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+      setStarpayQR(null)
+      setQrStatus('pending')
+      setCart([]) 
       setIsProcessing(false)
-      // Cleanup guest session flags
       localStorage.removeItem('isGuestCheckout')
       localStorage.removeItem('guestEnrollmentData')
-      onNavigate("home")
+      setShowPaymentSuccess(true)
     }
 
     const isGuest = localStorage.getItem('isGuestCheckout') === 'true'
     const guestDataStr = localStorage.getItem('guestEnrollmentData')
 
     try {
-      const formatDate = (dateInput) => {
-        if (!dateInput) return null;
-        const d = new Date(dateInput);
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-      };
+      if (paymentMethod !== 'starpay') {
+        showNotification('Only StarPay is supported right now.', 'error')
+        setIsProcessing(false)
+        return
+      }
 
-      if (isGuest && guestDataStr && scheduleSelection && cart.length > 0) {
-        // Prepare guest checkout payload
-        const guestData = JSON.parse(guestDataStr)
-        const checkoutPayload = {
-          ...guestData,
-          courseId: cart[0].id,
-          courseCategory: cart[0].category,
-          courseType: cart[0].type,
-          branchId: preSelectedBranch?.id || guestData.branchId,
-          scheduleSlotId: scheduleSelection.slot,
-          scheduleDate: formatDate(scheduleSelection.date),
-          scheduleSlotId2: scheduleSelection.slot2,
-          scheduleDate2: formatDate(scheduleSelection.date2),
-          paymentMethod: paymentMethod,
-          amountPaid: finalAmount,
-          paymentStatus: paymentType === 'full' ? 'Full Payment' : 'Downpayment'
-        }
-
-        // Hit our new backend endpoint
-        await authAPI.guestCheckout(checkoutPayload)
-      } else if (isLoggedIn && scheduleSelection && cart.length > 0) {
-        // Standard logged-in user flow
-        const authDataStr = localStorage.getItem('user');
-        const user = authDataStr ? JSON.parse(authDataStr) : null;
-        const studentId = user?.id;
-
-        // 1. Create booking
-
-        const checkoutPayload = {
-          courseId: cart[0].id,
-          courseCategory: cart[0].category,
-          courseType: cart[0].type,
-          branchId: preSelectedBranch?.id,
-          bookingDate: formatDate(scheduleSelection.date),
-          bookingTime: scheduleSelection.slotDetails?.time || 'N/A',
-          notes: 'Standard Enrollment',
-          paymentMethod: paymentMethod,
-          totalAmount: finalAmount,
-          paymentType: paymentType === 'full' ? 'Full Payment' : 'Downpayment'
-        };
-
-        await bookingsAPI.create(checkoutPayload);
-
-        // 2. Enroll in schedule slot (deducts available_slots automatically)
-        if (scheduleSelection.slot) {
-          await schedulesAPI.enrollStudent(scheduleSelection.slot, {
-            student_id: studentId,
-            enrollment_status: 'enrolled'
-          });
-        }
-
-        // 3. Enroll in Day 2 schedule slot if applicable
-        if (scheduleSelection.slot2) {
-          await schedulesAPI.enrollStudent(scheduleSelection.slot2, {
-            student_id: studentId,
-            enrollment_status: 'enrolled'
-          });
-        }
-      } else {
-        // Safety net: neither branch matched — session data may be missing
+      if (!scheduleSelection || cart.length === 0) {
         showNotification('Session expired. Please restart the enrollment process.', 'error')
         setIsProcessing(false)
         return
       }
 
-      handleSuccess();
+      let paymentResponse
+      if (isLoggedIn) {
+        paymentResponse = await starpayAPI.createPayment({
+          courseId: cart[0].id,
+          branchId: preSelectedBranch?.id,
+          courseCategory: cart[0].category,
+          courseType: cart[0].type,
+          amount: finalAmount,
+          paymentType: paymentType === 'full' ? 'Full Payment' : 'Downpayment',
+          scheduleSlotId: scheduleSelection.slot,
+          scheduleSlotId2: scheduleSelection.slot2,
+          hasReviewer: totalsData.reviewerTotal > 0,
+          hasVehicleTips: totalsData.vehicleTipsTotal > 0,
+          attach: `${cart[0].shortName || cart[0].name} | ${paymentType === 'full' ? 'Full' : 'Downpayment'}`,
+        })
+      } else if (isGuest && guestDataStr) {
+        const guestData = JSON.parse(guestDataStr)
+        paymentResponse = await starpayAPI.createGuestPayment({
+          ...guestData,
+          courseId: cart[0].id,
+          branchId: preSelectedBranch?.id || guestData.branchId,
+          courseCategory: cart[0].category,
+          courseType: cart[0].type,
+          scheduleSlotId: scheduleSelection.slot,
+          scheduleDate: formatDate(scheduleSelection.date),
+          scheduleSlotId2: scheduleSelection.slot2,
+          scheduleDate2: formatDate(scheduleSelection.date2),
+          scheduleTime: scheduleSelection.slotDetails?.time || 'N/A',
+          amount: finalAmount,
+          paymentType: paymentType === 'full' ? 'Full Payment' : 'Downpayment',
+          hasReviewer: totalsData.reviewerTotal > 0,
+          hasVehicleTips: totalsData.vehicleTipsTotal > 0,
+          attach: `${cart[0].shortName || cart[0].name} | Guest | ${paymentType === 'full' ? 'Full' : 'Downpayment'}`,
+        })
+      } else {
+        showNotification('Guest profile is missing. Please complete guest enrollment first.', 'error')
+        setIsProcessing(false)
+        return
+      }
+
+      const msgId = paymentResponse?.msgId
+      const codeUrl = paymentResponse?.codeUrl
+      const bookingId = paymentResponse?.bookingId
+
+      if (!msgId || !codeUrl) {
+        throw new Error('Failed to initialize StarPay QR payment.')
+      }
+
+      setStarpayQR({ codeUrl, msgId, bookingId })
+      setQrStatus('pending')
+      setIsProcessing(false)
+
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+
+      pollRef.current = setInterval(async () => {
+        try {
+          const statusRes = await starpayAPI.checkStatus(msgId)
+          const localStatus = (statusRes?.localStatus || '').toLowerCase()
+          const trxState = (statusRes?.starpayState || '').toUpperCase()
+
+          if (localStatus === 'paid' || trxState === 'SUCCESS') {
+            clearInterval(pollRef.current)
+            pollRef.current = null
+            setQrStatus('success')
+            setTimeout(() => {
+              handleSuccess()
+            }, 1200)
+            return
+          }
+
+          if (localStatus === 'cancelled' || ['FAIL', 'CLOSE', 'REVERSED', 'CANCEL'].includes(trxState)) {
+            clearInterval(pollRef.current)
+            pollRef.current = null
+            setQrStatus('failed')
+          }
+        } catch (pollErr) {
+          // Keep polling unless we get explicit paid/failed state.
+        }
+      }, 4000)
     } catch (error) {
       console.error('Checkout error:', error)
       showNotification(error.message || 'Enrollment failed. Please try again.', 'error')
@@ -679,17 +665,19 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                           <span className="font-bold text-white/90">₱{totalsData.baseCoursePriceTotal.toLocaleString()}</span>
                         </div>
 
-                        {(totalsData.reviewerTotal > 0 || totalsData.vehicleTipsTotal > 0) && (
+                        {(totalsData.reviewerTotal > 0 || totalsData.vehicleTipsTotal > 0 || totalsData.customAddonsTotal > 0) && (
                           <div className="flex justify-between items-start">
                             <div className="flex flex-col">
                               <span>Add-ons</span>
                               {totalsData.reviewerTotal > 0 && <span className="text-[10px] text-white/40 ml-2">• Reviewer</span>}
                               {totalsData.vehicleTipsTotal > 0 && <span className="text-[10px] text-white/40 ml-2">• Vehicle Tips</span>}
+                              {totalsData.customAddonsTotal > 0 && <span className="text-[10px] text-white/40 ml-2">• Custom Add-ons</span>}
                             </div>
                             <div className="flex flex-col items-end">
-                              <span className="font-bold text-white/90">₱{(totalsData.reviewerTotal + totalsData.vehicleTipsTotal).toLocaleString()}</span>
+                              <span className="font-bold text-white/90">₱{(totalsData.reviewerTotal + totalsData.vehicleTipsTotal + totalsData.customAddonsTotal).toLocaleString()}</span>
                               {totalsData.reviewerTotal > 0 && <span className="text-[10px] text-white/40">₱{totalsData.reviewerTotal.toLocaleString()}</span>}
                               {totalsData.vehicleTipsTotal > 0 && <span className="text-[10px] text-white/40">₱{totalsData.vehicleTipsTotal.toLocaleString()}</span>}
+                              {totalsData.customAddonsTotal > 0 && <span className="text-[10px] text-white/40">₱{totalsData.customAddonsTotal.toLocaleString()}</span>}
                             </div>
                           </div>
                         )}
@@ -713,7 +701,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                       </div>
                       {hasBundleDiscount && (
                         <div className="flex justify-between text-xs text-green-400 bg-green-500/10 px-2 py-1.5 -mx-2 rounded">
-                          <span className="font-bold">Bundle Discount (3% OFF)</span>
+                          <span className="font-bold">Bundle Discount ({totalsData.promoBundleDiscountPercent}% OFF)</span>
                           <span className="font-bold">- ₱{bundleDiscountValue.toLocaleString()}</span>
                         </div>
                       )}
@@ -904,7 +892,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
             <div className="p-6 flex flex-col items-center">
               {qrStatus === 'pending' && (
                 <>
-                  <div className="p-2 border-4 border-[#2157da] rounded-xl mb-4">
+                  <div className="p-2 bg-white border-4 border-[#2157da] rounded-xl mb-4 shadow-sm">
                     <img
                       src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(starpayQR.codeUrl)}&size=220x220&format=png`}
                       alt="StarPay QR"
@@ -932,7 +920,14 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                   <p className="text-xl font-black text-red-600">Payment Failed</p>
                   <p className="text-sm text-gray-500 mt-2">Please try again or use a different payment method.</p>
                   <button
-                    onClick={() => { clearInterval(pollRef.current); setStarpayQR(null) }}
+                    onClick={() => {
+                      if (pollRef.current) {
+                        clearInterval(pollRef.current)
+                        pollRef.current = null
+                      }
+                      setIsProcessing(false)
+                      setStarpayQR(null)
+                    }}
                     className="mt-4 px-6 py-2 bg-gray-100 rounded-xl font-bold text-sm text-gray-700 hover:bg-gray-200"
                   >
                     Close
@@ -944,7 +939,14 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
             {qrStatus === 'pending' && (
               <div className="px-6 pb-5">
                 <button
-                  onClick={() => { clearInterval(pollRef.current); setStarpayQR(null) }}
+                  onClick={() => {
+                    if (pollRef.current) {
+                      clearInterval(pollRef.current)
+                      pollRef.current = null
+                    }
+                    setIsProcessing(false)
+                    setStarpayQR(null)
+                  }}
                   className="w-full py-2.5 rounded-xl border-2 border-gray-200 text-gray-500 font-bold text-sm hover:bg-gray-50"
                 >
                   Cancel Payment
@@ -952,6 +954,83 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
               </div>
             )}
           </div>
+        </div>
+      )}
+      {/* ── Payment Success Modal ── */}
+      {showPaymentSuccess && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl relative overflow-hidden" style={{ animation: 'bounce-in 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55)' }}>
+            
+            {/* Subtle glow effects in background */}
+            <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20"></div>
+            <div className="absolute -top-24 -left-24 w-48 h-48 bg-teal-300 rounded-full mix-blend-multiply filter blur-3xl opacity-20"></div>
+
+            <div className="relative z-10 p-8 pt-10 flex flex-col items-center text-center">
+              
+              {/* Premium Animated Icon */}
+              <div className="relative mb-6">
+                <div className="absolute inset-0 bg-emerald-100 rounded-full animate-ping opacity-30"></div>
+                <div className="w-20 h-20 bg-gradient-to-tr from-[#10b981] to-[#34d399] rounded-full flex items-center justify-center shadow-xl shadow-emerald-500/20 relative z-10 ring-4 ring-emerald-50">
+                  <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" style={{ strokeDasharray: 50, animation: 'checkmark 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards' }} />
+                  </svg>
+                </div>
+              </div>
+
+              <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight mb-2">Payment Successful!</h2>
+              <p className="text-slate-500 mb-8 font-medium leading-relaxed">
+                Your enrollment has been successfully processed. You're all set to begin your journey with us.
+              </p>
+
+              {/* Action Buttons */}
+              <div className="w-full flex gap-3 mb-6">
+                <button
+                  onClick={() => onNavigate('profile')}
+                  className="flex-1 bg-white border border-slate-200 text-slate-700 font-semibold py-3.5 px-4 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm active:scale-95 flex items-center justify-center gap-2 text-sm"
+                >
+                  <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                  My Profile
+                </button>
+
+                <button
+                  onClick={() => onNavigate('home')}
+                  className="flex-1 bg-gradient-to-r from-[#2157da] to-[#1e4ebf] text-white font-semibold py-3.5 px-4 rounded-xl hover:from-[#1e4ebf] hover:to-[#1a45ab] transition-all shadow-md hover:shadow-lg active:scale-95 flex items-center justify-center gap-2 text-sm"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                  </svg>
+                  Go to Home
+                </button>
+              </div>
+
+              {/* Status Footer */}
+              <div className="w-full bg-slate-50 rounded-xl p-4 flex items-center justify-between border border-slate-100">
+                <div className="flex items-center gap-3">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping bg-emerald-400 absolute inline-flex h-full w-full rounded-full opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                  </span>
+                  <span className="text-sm font-semibold text-slate-600">Redirecting...</span>
+                </div>
+                <div className="flex bg-blue-50 text-[#2157da] px-3 py-1 rounded-lg font-bold text-sm border border-blue-100 items-center justify-center w-12 text-center shadow-inner">
+                  {countdown}s
+                </div>
+              </div>
+
+            </div>
+          </div>
+          <style>{`
+            @keyframes bounce-in {
+              0% { transform: scale(0.9); opacity: 0; }
+              100% { transform: scale(1); opacity: 1; }
+            }
+            @keyframes checkmark {
+              0% { stroke-dashoffset: 50; }
+              100% { stroke-dashoffset: 0; }
+            }
+          `}</style>
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import './css/Dashboard.css';
 import Sidebar from './components/Sidebar';
 import Schedule from './Schedule';
@@ -31,14 +31,121 @@ import {
 const logo = '/images/logo.png';
 const cover = '/images/cover.png';
 
+const ADMIN_TAB_TO_PATH = {
+    dashboard: '/admin/dashboard',
+    schedules: '/admin/schedules',
+    bookings: '/admin/bookings',
+    'walk-in': '/admin/walk-in',
+    sales: '/admin/sales',
+    crm: '/admin/crm',
+    analytics: '/admin/analytics',
+    users: '/admin/users',
+    courses: '/admin/courses',
+    branches: '/admin/branches',
+    news: '/admin/news',
+    profile: '/admin/profile',
+    settings: '/admin/settings',
+    notifications: '/admin/notifications',
+};
+
+const ADMIN_PATH_TO_TAB = Object.entries(ADMIN_TAB_TO_PATH).reduce((acc, [tab, path]) => {
+    acc[path] = tab;
+    return acc;
+}, {});
+
+const normalizeAdminPath = (pathname = '/admin') => {
+    const clean = pathname.trim();
+    if (!clean || clean === '/') return '/admin';
+    return clean.replace(/\/+$/, '') || '/admin';
+};
+
+const getAdminTabFromPath = (pathname = '/admin') => {
+    const path = normalizeAdminPath(pathname);
+    if (path === '/admin') return 'dashboard';
+    return ADMIN_PATH_TO_TAB[path] || null;
+};
+
+const getAdminPathForTab = (tab) => ADMIN_TAB_TO_PATH[tab] || '/admin/dashboard';
+
+const ADMIN_DEFAULT_PERMISSIONS_BY_ROLE = {
+    admin: [
+        'operations.schedules.manage',
+        'operations.bookings.manage',
+        'operations.walk_in.manage',
+        'operations.sales.manage',
+        'operations.crm.manage',
+        'operations.news.manage',
+        'operations.analytics.view',
+        'accounts.users.view',
+    ],
+    staff: [
+        'operations.schedules.manage',
+        'operations.bookings.manage',
+        'operations.walk_in.manage',
+        'operations.sales.manage',
+        'operations.crm.manage',
+        'operations.news.manage',
+    ],
+};
+
+const ADMIN_TAB_PERMISSION_MAP = {
+    schedules: 'operations.schedules.manage',
+    bookings: 'operations.bookings.manage',
+    'walk-in': 'operations.walk_in.manage',
+    sales: 'operations.sales.manage',
+    crm: 'operations.crm.manage',
+    analytics: 'operations.analytics.view',
+    news: 'operations.news.manage',
+    users: [
+        'accounts.users.create',
+        'accounts.users.edit',
+        'accounts.users.status',
+        'accounts.users.reset_password',
+    ],
+    courses: 'accounts.courses.view',
+    branches: 'accounts.config.view',
+};
+
+const ALWAYS_ALLOWED_ADMIN_TABS = new Set(['dashboard', 'profile', 'settings', 'notifications']);
+
+const normalizePermissions = (permissions) => {
+    if (!Array.isArray(permissions)) return [];
+    return permissions.filter((permission) => typeof permission === 'string');
+};
+
+const hasRequiredPermission = (permissionSet, requiredPermission) => {
+    if (Array.isArray(requiredPermission)) {
+        return requiredPermission.some((permission) => permissionSet.has(permission));
+    }
+    return permissionSet.has(requiredPermission);
+};
+
+const getDefaultAdminTab = (allowedTabs) => {
+    const priority = ['dashboard', 'schedules', 'bookings', 'walk-in', 'sales', 'crm', 'news', 'analytics', 'users', 'courses', 'branches', 'profile', 'settings', 'notifications'];
+    return priority.find((tab) => allowedTabs.has(tab)) || 'profile';
+};
+
 
 
 const Admin = ({ onNavigate, setIsLoggedIn }) => {
     const { theme, toggleTheme } = useTheme();
     const { showNotification } = useNotification();
-    const [activeTab, setActiveTab] = useState(localStorage.getItem('adminActiveTab') || 'dashboard');
+    const [activeTab, setActiveTab] = useState(() => getAdminTabFromPath(window.location.pathname) || localStorage.getItem('adminActiveTab') || 'dashboard');
+    const hasInitializedAdminPath = useRef(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
     const [loading, setLoading] = useState(true);
+    const [userPermissions, setUserPermissions] = useState([]);
+
+    // Admin Profile State
+    const [adminProfile, setAdminProfile] = useState({
+        name: 'Admin User',
+        email: 'admin@masterschool.edu',
+        phone: '+63 912 345 6789',
+        branch: 'Main Office',
+        role: 'Admin',
+        rawRole: 'admin',
+        avatar: null
+    });
 
     // Dashboard stats state
     const [stats, setStats] = useState({
@@ -53,6 +160,35 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     const [enrollmentData, setEnrollmentData] = useState([]);
     const [bestSellingCourses, setBestSellingCourses] = useState([]);
     const [enrollees, setEnrollees] = useState([]);
+
+    const allowedAdminTabs = useMemo(() => {
+        const role = String(adminProfile.rawRole || '').toLowerCase();
+        const fallbackPermissions = ADMIN_DEFAULT_PERMISSIONS_BY_ROLE[role] || [];
+        const effectivePermissions = normalizePermissions(userPermissions).length > 0
+            ? normalizePermissions(userPermissions)
+            : fallbackPermissions;
+
+        const permissionSet = new Set(effectivePermissions);
+        const allowed = new Set(ALWAYS_ALLOWED_ADMIN_TABS);
+
+        Object.entries(ADMIN_TAB_PERMISSION_MAP).forEach(([tab, requiredPermission]) => {
+            if (hasRequiredPermission(permissionSet, requiredPermission)) {
+                allowed.add(tab);
+            }
+        });
+
+        return allowed;
+    }, [adminProfile.rawRole, userPermissions]);
+
+    const effectiveAdminPermissions = useMemo(() => {
+        const role = String(adminProfile.rawRole || '').toLowerCase();
+        const fallbackPermissions = ADMIN_DEFAULT_PERMISSIONS_BY_ROLE[role] || [];
+        return normalizePermissions(userPermissions).length > 0
+            ? normalizePermissions(userPermissions)
+            : fallbackPermissions;
+    }, [adminProfile.rawRole, userPermissions]);
+
+    const defaultAllowedAdminTab = useMemo(() => getDefaultAdminTab(allowedAdminTabs), [allowedAdminTabs]);
 
     useEffect(() => {
         // Set initial state based on window size
@@ -84,20 +220,43 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     }, [isSidebarOpen]);
 
     useEffect(() => {
+        if (!allowedAdminTabs.has(activeTab)) {
+            setActiveTab(defaultAllowedAdminTab);
+        }
+    }, [activeTab, allowedAdminTabs, defaultAllowedAdminTab]);
+
+    useEffect(() => {
         localStorage.setItem('adminActiveTab', activeTab);
+
+        const currentPath = normalizeAdminPath(window.location.pathname);
+        const targetPath = getAdminPathForTab(activeTab);
+
+        if (currentPath !== targetPath) {
+            if (!hasInitializedAdminPath.current) {
+                window.history.replaceState({}, '', targetPath);
+            } else {
+                window.history.pushState({}, '', targetPath);
+            }
+        }
+
+        if (!hasInitializedAdminPath.current) {
+            hasInitializedAdminPath.current = true;
+        }
     }, [activeTab]);
+
+    useEffect(() => {
+        const handlePopState = () => {
+            const tabFromPath = getAdminTabFromPath(window.location.pathname);
+            if (tabFromPath) {
+                setActiveTab(allowedAdminTabs.has(tabFromPath) ? tabFromPath : defaultAllowedAdminTab);
+            }
+        };
+
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, [allowedAdminTabs, defaultAllowedAdminTab]);
     const [showProfileModal, setShowProfileModal] = useState(false);
     const [currentTime, setCurrentTime] = useState(new Date());
-
-    // Admin Profile State
-    const [adminProfile, setAdminProfile] = useState({
-        name: 'Admin User',
-        email: 'admin@masterschool.edu',
-        phone: '+63 912 345 6789',
-        branch: 'Main Office',
-        role: 'Admin',
-        avatar: null
-    });
 
     // Notifications State
     const NOTIF_READ_KEY  = 'admin_notif_read';
@@ -192,6 +351,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         rawRole: user.role || 'staff',
                         avatar: null
                     });
+                    setUserPermissions(normalizePermissions(user.permissions));
                 }
             } catch (error) {
                 console.error('Error fetching profile:', error);
@@ -278,8 +438,8 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     };
 
     const [showEditProfileModal, setShowEditProfileModal] = useState(false);
-    const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
-
+    const [editProfileTab, setEditProfileTab] = useState('personal');
+    
     const [profileFormData, setProfileFormData] = useState({ ...adminProfile });
     const [passwordData, setPasswordData] = useState({
         currentPassword: '',
@@ -330,7 +490,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
             showNotification('Passwords do not match!', 'error');
             return;
         }
-        setShowChangePasswordModal(false);
+        setShowEditProfileModal(false);
         setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
         showNotification('Password changed successfully!', 'success');
     };
@@ -433,6 +593,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                 setActiveTab={setActiveTab}
                 onNavigate={onNavigate}
                 handleLogout={handleLogout}
+                allowedTabs={allowedAdminTabs}
             />
 
             {/* Main Content */}
@@ -1038,6 +1199,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                 </div>
                                 <button className="edit-profile-btn" onClick={() => {
                                     setProfileFormData({ ...adminProfile });
+                                    setEditProfileTab('personal');
                                     setShowEditProfileModal(true);
                                 }}>Edit Profile</button>
                             </div>
@@ -1072,7 +1234,10 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                     <div className="info-item">
                                         <label>Password</label>
                                         <p>••••••••••••</p>
-                                        <button className="change-btn" onClick={() => setShowChangePasswordModal(true)}>Change</button>
+                                        <button className="change-btn" onClick={() => {
+                                            setEditProfileTab('security');
+                                            setShowEditProfileModal(true);
+                                        }}>Change</button>
                                     </div>
                                     <div className="info-item">
                                         <label>2FA Status</label>
@@ -1089,7 +1254,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                 ) : activeTab === 'settings' ? (
                     <Configuration initialTab="settings" />
                 ) : activeTab === 'users' ? (
-                    <UserManagement />
+                    <UserManagement currentUserPermissions={effectiveAdminPermissions} />
                 ) : activeTab === 'courses' ? (
                     <CourseManagement />
                 ) : activeTab === 'branches' ? (
@@ -1108,7 +1273,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         clearAll={clearAllNotifications}
                     />
                 ) : null}
-                {/* Edit Profile Modal */}
+                {/* Unified Edit Profile & Settings Modal */}
                 {showEditProfileModal && (
                     <div className="modal-overlay">
                         <div className="modal-container">
@@ -1118,7 +1283,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
                                     </div>
                                     <div>
-                                        <h2>Edit Profile</h2>
+                                        <h2>{editProfileTab === "personal" ? "Edit Profile" : "Change Password"}</h2>
                                     </div>
                                 </div>
                                 <div className="modal-header-right">
@@ -1127,113 +1292,109 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                     </button>
                                 </div>
                             </div>
-                            <form onSubmit={handleUpdateProfile}>
-                                <div className="modal-body">
-                                    <div className="form-group">
-                                        <label>Full Name</label>
-                                        <input
-                                            type="text"
-                                            value={profileFormData.name}
-                                            onChange={(e) => setProfileFormData({ ...profileFormData, name: e.target.value })}
-                                            required
-                                        />
-                                    </div>
-                                    <div className="form-group">
-                                        <label>Email Address</label>
-                                        <input
-                                            type="email"
-                                            value={profileFormData.email}
-                                            onChange={(e) => setProfileFormData({ ...profileFormData, email: e.target.value })}
-                                            required
-                                        />
-                                    </div>
-                                    <div className="form-row">
-                                        <div className="form-group" style={{ flex: 1 }}>
-                                            <label>Phone Number</label>
-                                            <input
-                                                type="text"
-                                                value={profileFormData.phone}
-                                                onChange={(e) => setProfileFormData({ ...profileFormData, phone: e.target.value })}
-                                                required
-                                            />
-                                        </div>
-                                        <div className="form-group" style={{ flex: 1 }}>
-                                            <label>Branch</label>
-                                            <input
-                                                type="text"
-                                                value={profileFormData.branch}
-                                                onChange={(e) => setProfileFormData({ ...profileFormData, branch: e.target.value })}
-                                                required
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="modal-footer">
-                                    <button type="button" className="cancel-btn" onClick={() => setShowEditProfileModal(false)}>Cancel</button>
-                                    <button type="submit" className="confirm-btn">Save Changes</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )}
-
-                {/* Change Password Modal */}
-                {showChangePasswordModal && (
-                    <div className="modal-overlay">
-                        <div className="modal-container">
-                            <div className="modal-header">
-                                <div className="modal-header-left">
-                                    <div className="modal-header-icon">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                                    </div>
-                                    <div>
-                                        <h2>Change Password</h2>
-                                    </div>
-                                </div>
-                                <div className="modal-header-right">
-                                    <button className="close-modal" onClick={() => setShowChangePasswordModal(false)}>
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                                    </button>
-                                </div>
+                            
+                            <div className="modal-tabs" style={{ display: "flex", borderBottom: "1px solid var(--border-color)", margin: "0 25px" }}>
+                                <button 
+                                    style={{ padding: "15px 20px", background: "none", border: "none", borderBottom: editProfileTab === "personal" ? "2px solid var(--primary-color)" : "2px solid transparent", color: editProfileTab === "personal" ? "var(--primary-color)" : "var(--secondary-text)", fontWeight: editProfileTab === "personal" ? "600" : "500", cursor: "pointer", outline: "none" }}
+                                    onClick={() => setEditProfileTab("personal")}
+                                >
+                                    Personal Details
+                                </button>
+                                <button 
+                                    style={{ padding: "15px 20px", background: "none", border: "none", borderBottom: editProfileTab === "security" ? "2px solid var(--primary-color)" : "2px solid transparent", color: editProfileTab === "security" ? "var(--primary-color)" : "var(--secondary-text)", fontWeight: editProfileTab === "security" ? "600" : "500", cursor: "pointer", outline: "none" }}
+                                    onClick={() => setEditProfileTab("security")}
+                                >
+                                    Account Security
+                                </button>
                             </div>
-                            <form onSubmit={handleChangePassword}>
-                                <div className="modal-body">
-                                    <div className="form-group">
-                                        <label>Current Password</label>
-                                        <input
-                                            type="password"
-                                            value={passwordData.currentPassword}
-                                            onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
-                                            placeholder="Enter current password"
-                                            required
-                                        />
+
+                            {editProfileTab === "personal" ? (
+                                <form onSubmit={handleUpdateProfile}>
+                                    <div className="modal-body">
+                                        <div className="form-group">
+                                            <label>Full Name</label>
+                                            <input
+                                                type="text"
+                                                value={profileFormData.name}
+                                                onChange={(e) => setProfileFormData({ ...profileFormData, name: e.target.value })}
+                                                required
+                                            />
+                                        </div>
+                                        <div className="form-group">
+                                            <label>Email Address</label>
+                                            <input
+                                                type="email"
+                                                value={profileFormData.email}
+                                                onChange={(e) => setProfileFormData({ ...profileFormData, email: e.target.value })}
+                                                required
+                                            />
+                                        </div>
+                                        <div className="form-row">
+                                            <div className="form-group" style={{ flex: 1 }}>
+                                                <label>Phone Number</label>
+                                                <input
+                                                    type="text"
+                                                    value={profileFormData.phone}
+                                                    onChange={(e) => setProfileFormData({ ...profileFormData, phone: e.target.value })}
+                                                    required
+                                                />
+                                            </div>
+                                            <div className="form-group" style={{ flex: 1 }}>
+                                                <label>Branch</label>
+                                                <input
+                                                    type="text"
+                                                    value={profileFormData.branch}
+                                                    onChange={(e) => setProfileFormData({ ...profileFormData, branch: e.target.value })}
+                                                    required
+                                                />
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="form-group">
-                                        <label>New Password</label>
-                                        <input
-                                            type="password"
-                                            value={passwordData.newPassword}
-                                            onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                                            placeholder="Enter new password"
-                                            required
-                                        />
+                                    <div className="modal-footer">
+                                        <button type="button" className="cancel-btn" onClick={() => setShowEditProfileModal(false)}>Cancel</button>
+                                        <button type="submit" className="confirm-btn">Save Changes</button>
                                     </div>
-                                    <div className="form-group">
-                                        <label>Confirm New Password</label>
-                                        <input
-                                            type="password"
-                                            value={passwordData.confirmPassword}
-                                            onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-                                            placeholder="Repeat new password"
-                                            required
-                                        />
+                                </form>
+                            ) : (
+                                <form onSubmit={handleChangePassword}>
+                                    <div className="modal-body">
+                                        <div className="form-group">
+                                            <label>Current Password</label>
+                                            <input
+                                                type="password"
+                                                value={passwordData.currentPassword}
+                                                onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
+                                                placeholder="Enter current password"
+                                                required
+                                            />
+                                        </div>
+                                        <div className="form-group">
+                                            <label>New Password</label>
+                                            <input
+                                                type="password"
+                                                value={passwordData.newPassword}
+                                                onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                                                placeholder="Enter new password"
+                                                required
+                                            />
+                                        </div>
+                                        <div className="form-group">
+                                            <label>Confirm New Password</label>
+                                            <input
+                                                type="password"
+                                                value={passwordData.confirmPassword}
+                                                onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                                                placeholder="Repeat new password"
+                                                required
+                                            />
+                                        </div>
                                     </div>
-                                </div>
-                                <div className="modal-footer">
-                                    <button type="button" className="cancel-btn" onClick={() => setShowChangePasswordModal(false)}>Cancel</button>
-                                    <button type="submit" className="confirm-btn red">Update Password</button>
-                                </div>
-                            </form>
+                                    <div className="modal-footer">
+                                        <button type="button" className="cancel-btn" onClick={() => setShowEditProfileModal(false)}>Cancel</button>
+                                        <button type="submit" className="confirm-btn red">Update Password</button>
+                                    </div>
+                                </form>
+                            )}
                         </div>
                     </div>
                 )}

@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
-const { generateVerificationCode, sendVerificationEmail, sendGuestEnrollmentEmail } = require('../utils/emailService');
+const { generateVerificationCode, sendVerificationEmail, sendGuestEnrollmentEmail, sendAddonsEmail } = require('../utils/emailService');
 
 // Generate JWT token
 const generateToken = (userId, role = 'student', branchId = null) => {
@@ -168,8 +168,8 @@ const guestCheckout = async (req, res) => {
       courseId, courseCategory, courseType, branchId,
       scheduleSlotId, scheduleDate,
       scheduleSlotId2, scheduleDate2,
-      paymentMethod, amountPaid, paymentStatus
-    } = req.body;
+      paymentMethod, amountPaid, paymentStatus, hasReviewer, hasVehicleTips
+      } = req.body;
 
     if (!firstName || !lastName || !email || !contactNumbers || !courseId) {
       return res.status(400).json({ error: 'Please provide all required fields.' });
@@ -271,6 +271,7 @@ const guestCheckout = async (req, res) => {
       scheduleDate2Email = scheduleDate2;
     }
 
+    
     try {
       await sendGuestEnrollmentEmail(email, firstName, lastName, {
         courseName: courseResult.rows[0]?.name || 'N/A',
@@ -287,7 +288,7 @@ const guestCheckout = async (req, res) => {
         paymentMethod,
         amountPaid,
         paymentStatus
-      });
+      }, hasReviewer, hasVehicleTips);
     } catch (e) {
       console.error('Email failed (proceeding):', e);
     }
@@ -408,7 +409,7 @@ const getProfile = async (req, res) => {
     const result = await pool.query(
       `SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.address, u.age, u.gender,
        u.birthday, u.birth_place, u.nationality, u.marital_status, u.contact_numbers, u.zip_code,
-       u.emergency_contact_person, u.emergency_contact_number, u.created_at, u.role, u.branch_id,
+       u.emergency_contact_person, u.emergency_contact_number, u.created_at, u.role, u.branch_id, u.permissions,
        b.name as branch_name
        FROM users u
        LEFT JOIN branches b ON u.branch_id = b.id
@@ -421,6 +422,10 @@ const getProfile = async (req, res) => {
     }
 
     const user = result.rows[0];
+    const permissions = Array.isArray(user.permissions)
+      ? user.permissions.filter((permission) => typeof permission === 'string')
+      : [];
+
     res.json({
       success: true,
       user: {
@@ -444,6 +449,7 @@ const getProfile = async (req, res) => {
         role: user.role,
         branchId: user.branch_id,
         branchName: user.branch_name,
+        permissions,
       },
     });
   } catch (error) {
@@ -718,6 +724,96 @@ const logout = async (req, res) => {
   }
 };
 
+const updateProfile = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const {
+      firstName,
+      middleName,
+      lastName,
+      address,
+      age,
+      gender,
+      birthday,
+      birthPlace,
+      nationality,
+      maritalStatus,
+      contactNumbers,
+      zipCode,
+      emergencyContactPerson,
+      emergencyContactNumber
+    } = req.body;
+
+    const result = await pool.query(
+      `UPDATE users SET
+        first_name = $1,
+        middle_name = $2,
+        last_name = $3,
+        address = $4,
+        age = $5,
+        gender = $6,
+        birthday = $7,
+        birth_place = $8,
+        nationality = $9,
+        marital_status = $10,
+        contact_numbers = $11,
+        zip_code = $12,
+        emergency_contact_person = $13,
+        emergency_contact_number = $14
+       WHERE id = $15
+       RETURNING *`,
+      [
+        firstName, middleName, lastName, address, age, gender, birthday,
+        birthPlace, nationality, maritalStatus, contactNumbers, zipCode,
+        emergencyContactPerson, emergencyContactNumber, userId
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Only return non-sensitive fields to the client
+    const updatedUser = { ...result.rows[0] };
+    delete updatedUser.password;
+    delete updatedUser.verification_code;
+
+    res.json({ message: 'Profile updated successfully', user: updatedUser });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+};
+
+const changePassword = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { currentPassword, newPassword } = req.body;
+
+    const result = await pool.query('SELECT password FROM users WHERE id = $1', [userId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = result.rows[0];
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    
+    if (!isPasswordValid) {
+      return res.status(400).json({ error: 'Invalid current password' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashedPassword, userId]);
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ error: 'Failed to update password' });
+  }
+};
+
 module.exports = {
   register,
   guestCheckout,
@@ -729,4 +825,6 @@ module.exports = {
   forgotPassword,
   verifyResetOTP,
   resetPassword,
+  updateProfile,
+  changePassword,
 };

@@ -1,333 +1,447 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { emailContentAPI } from '../../services/api';
+const IconClose = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M18 6L6 18M6 6l12 12"/></svg>;
+const IconMail = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>;
+const IconLink = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>;
 
-/* ─────────────────────────────────────────────────────────────
-   Tiny field helpers
-───────────────────────────────────────────────────────────── */
-const TextField = ({ label, hint, value, onChange }) => (
-    <div className="cfg-form-field">
-        <label>{label}</label>
-        <input
-            type="text"
-            value={value || ''}
-            onChange={e => onChange(e.target.value)}
-            className="cfg-input"
+const TextField = ({ label, value, onChange, hint, icon }) => (
+    <div className="mb-5">
+        <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1">
+            {icon} {label}
+        </label>
+        <input 
+            type="text" 
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            value={value || ''} 
+            onChange={e => onChange(e.target.value)} 
         />
-        {hint && <span className="cfg-field-hint">{hint}</span>}
+        {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
     </div>
 );
 
-const TextAreaField = ({ label, hint, value, onChange, rows = 3 }) => (
-    <div className="cfg-form-field">
-        <label>{label}</label>
-        <textarea
-            rows={rows}
-            value={value || ''}
-            onChange={e => onChange(e.target.value)}
-            className="cfg-input cfg-textarea"
+const TextAreaField = ({ label, value, onChange, hint }) => (
+    <div className="mb-5">
+        <label className="block text-sm font-semibold text-gray-700 mb-1">{label}</label>
+        <textarea 
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm leading-relaxed"
+            rows={4}
+            value={value || ''} 
+            onChange={e => onChange(e.target.value)} 
         />
-        {hint && <span className="cfg-field-hint">{hint}</span>}
+        {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
     </div>
 );
 
-/* Editable list of strings */
-const ListEditor = ({ label, hint, items = [], onChange }) => {
-    const update = (i, val) => { const next = [...items]; next[i] = val; onChange(next); };
-    const remove = (i) => onChange(items.filter((_, idx) => idx !== i));
-    const add    = () => onChange([...items, '']);
+const interp = (str, vars) => String(str||'').replace(/\{(\w+)\}/g, (_,v) => vars[v] ? vars[v] : `{${v}}`);
 
-    return (
-        <div className="cfg-form-field">
-            <label>{label}</label>
-            {items.map((item, i) => (
-                <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                    <input
-                        type="text"
-                        value={item}
-                        onChange={e => update(i, e.target.value)}
-                        className="cfg-input"
-                        style={{ flex: 1 }}
-                    />
-                    <button
-                        type="button"
-                        onClick={() => remove(i)}
-                        className="cfg-btn-icon cfg-btn-danger"
-                        title="Remove item"
-                    >✕</button>
-                </div>
-            ))}
-            <button type="button" onClick={add} className="cfg-btn-add">+ Add item</button>
-            {hint && <span className="cfg-field-hint">{hint}</span>}
+const EmailPreviewWrapper = ({ schoolName, title, copyrightYear, footerTagline, children, brandColor = '#2157da' }) => (
+    <div style={{ fontFamily: 'Arial, sans-serif', lineHeight: 1.6, color: '#333', maxWidth: 600, margin: '0 auto', border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden', backgroundColor:'#fff', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
+        <div style={{ backgroundColor: brandColor, color: 'white', padding: '25px 20px', textAlign: 'center', background: `linear-gradient(135deg, ${brandColor} 0%, #3b82f6 100%)` }}>
+            <h1 style={{ color: 'white', margin: 0, fontSize: '24px' }}>{schoolName}</h1>
+            <h2 style={{ color: 'white', margin: '10px 0 0', fontSize: '16px', fontWeight: 'normal', opacity: 0.9 }}>{title}</h2>
         </div>
-    );
+        <div style={{ padding: '30px', backgroundColor: '#f9f9f9', fontSize: '15px' }}>
+            {children}
+        </div>
+        <div style={{ textAlign: 'center', padding: '20px', fontSize: '12px', color: '#9ca3af', borderTop: '1px solid #e2e8f0', backgroundColor:'#f1f5f9' }}>
+            {footerTagline && <p style={{ margin: '0 0 5px 0' }}>{footerTagline}</p>}
+            <p style={{ margin: 0 }}>&copy; {copyrightYear} {schoolName}. All rights reserved.</p>
+        </div>
+    </div>
+);
+
+
+const Icons = {
+    walkIn: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/></svg>,
+    guest: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+    noShow: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>,
+    news: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg>,
+    receipt: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17V7"/></svg>,
+    newAccount: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>,
+    verification: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+    online: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
 };
 
-/* Collapsible section card */
-const AccordionCard = ({ icon, title, isOpen, onToggle, children }) => (
-    <div className="cfg-settings-card" style={{ marginBottom: 12 }}>
-        <div
-            className="cfg-settings-card-header"
-            onClick={onToggle}
-            style={{ cursor: 'pointer', userSelect: 'none' }}
-        >
-            <div className="cfg-settings-header-icon cfg-icon-blue" style={{ fontSize: 18 }}>{icon}</div>
-            <h3 style={{ flex: 1 }}>{title}</h3>
-            <span style={{ fontSize: 18, color: '#6b7280', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>▾</span>
-        </div>
-        {isOpen && <div className="cfg-settings-card-body">{children}</div>}
-    </div>
-);
-
-/* ─────────────────────────────────────────────────────────────
-   Main component
-───────────────────────────────────────────────────────────── */
 const EmailContentSection = () => {
     const [content, setContent] = useState(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
-    const [saveMsg, setSaveMsg] = useState('');
-    const [openSection, setOpenSection] = useState('branding');
+    const [selectedEmail, setSelectedEmail] = useState(null);
+    const [testEmail, setTestEmail] = useState('');
+    const [sendingTest, setSendingTest] = useState(false);
+    const [previewCourse, setPreviewCourse] = useState('TDC');
+    const [previewType, setPreviewType] = useState('Face-to-Face');
 
     useEffect(() => {
-        emailContentAPI.get()
-            .then(data => {
-                if (data?.content) setContent(data.content);
-            })
-            .catch(() => {})
-            .finally(() => setLoading(false));
+        emailContentAPI.get().then(data => {
+            if (data?.content) setContent(data.content);
+            setLoading(false);
+        }).catch(err => {
+            console.error(err);
+            setLoading(false);
+        });
     }, []);
 
-    /* Field change helpers */
-    const set = useCallback((section, key, value) => {
-        setContent(prev => ({ ...prev, [section]: { ...prev[section], [key]: value } }));
+    const handleChange = (section, field, value) => {
+        setContent(prev => ({
+            ...prev,
+            [section]: {
+                ...prev[section],
+                [field]: value
+            }
+        }));
         setIsDirty(true);
-    }, []);
-
-    const setTop = useCallback((key, value) => {
-        setContent(prev => ({ ...prev, [key]: value }));
-        setIsDirty(true);
-    }, []);
-
-    const toggle = (key) => setOpenSection(prev => prev === key ? null : key);
+    };
 
     const handleSave = async () => {
-        setSaving(true);
         try {
+            setSaving(true);
             await emailContentAPI.update(content);
-            setSaveMsg('Saved!');
             setIsDirty(false);
-            setTimeout(() => setSaveMsg(''), 2500);
-        } catch {
-            setSaveMsg('Save failed — please try again.');
-            setTimeout(() => setSaveMsg(''), 4000);
+            alert('Saved successfully!');
+        } catch (err) {
+            console.error(err);
+            alert('Failed to save');
         } finally {
             setSaving(false);
         }
     };
 
-    if (loading) return <div className="cfg-section-enter" style={{ padding: 32, textAlign: 'center', color: '#6b7280' }}>Loading email content…</div>;
-    if (!content) return <div className="cfg-section-enter" style={{ padding: 32, color: '#ef4444' }}>Failed to load email content.</div>;
+    const handleSendTest = async () => {
+        if (!testEmail) return alert('Enter a test email address.');
+        try {
+            setSendingTest(true);
+            const p = document.getElementById('preview-container');
+            const html = p ? p.innerHTML : '';
+            await emailContentAPI.testEmail({ email: testEmail, subject: `Test Preview: ${selectedEmail}`, html });
+            alert('Test email sent successfully!');
+        } catch (err) {
+            console.error(err);
+            alert('Failed to send test email.');
+        } finally {
+            setSendingTest(false);
+        }
+    };
 
-    const C = content;
+    if (loading) return <div className="p-8 text-center text-gray-500 flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mr-3"></div> Loading configurations...</div>;
+    if (!content) return <div className="p-8 text-center text-red-500">Error loading content</div>;
+
+    const emailTypes = [
+        { id: 'online', title: 'Online Student', desc: 'Sent to online students enrolling themselves.', color: 'cyan', icon: Icons?.online },
+        { id: 'walkIn', title: 'Walk-In Enrollment', desc: 'Sent to walk-in students with credentials.', color: 'emerald', icon: Icons?.walkIn },
+        { id: 'guest', title: 'Guest Enrollment', desc: 'Sent to guests enrolling themselves.', color: 'blue', icon: Icons?.guest },
+        { id: 'noShow', title: 'No-Show / Missed', desc: 'Sent when a student misses a session.', color: 'rose', icon: Icons?.noShow },
+        { id: 'news', title: 'News & Promos', desc: 'Promotional broadcast emails.', color: 'purple', icon: Icons?.news },
+        { id: 'receipt', title: 'Payment Receipt', desc: 'Sent after successful transactions.', color: 'amber', icon: Icons?.receipt },
+        { id: 'newAccount', title: 'New Admin Account', desc: 'Sent to new staff members.', color: 'indigo', icon: Icons?.newAccount },
+        { id: 'verification', title: 'Verification & OTP', desc: 'Sent when users register or reset passwords.', color: 'slate', icon: Icons?.verification }
+    ];
+
+    const renderEditorInputs = () => {
+        if (!selectedEmail) return null;
+        const c = content[selectedEmail];
+        
+        return (
+            <div className="space-y-4">
+                {(c.subject !== undefined || c.subjectVerify !== undefined) && (
+                    <TextField label="Email Subject" value={c.subject || c.subjectVerify} onChange={v => { handleChange(selectedEmail, 'subject', v); if(c.subjectVerify !== undefined) handleChange(selectedEmail, 'subjectVerify', v); }} />
+                )}
+                
+                {(c.headerTitle || c.headerSubtitle || c.titleVerify) && (
+                    <TextField label="Header Title / Subtitle" value={c.headerTitle || c.headerSubtitle || c.titleVerify} onChange={v => { 
+                        if(c.headerTitle !== undefined) handleChange(selectedEmail, 'headerTitle', v); 
+                        if(c.headerSubtitle !== undefined) handleChange(selectedEmail, 'headerSubtitle', v); 
+                        if(c.titleVerify !== undefined) handleChange(selectedEmail, 'titleVerify', v); 
+                    }} />
+                )}
+
+                {c.greeting !== undefined && <TextField label="Greeting" value={c.greeting} onChange={v => handleChange(selectedEmail, 'greeting', v)} hint="Variables: {first}, {last}" />}
+                
+                {c.intro !== undefined && <TextAreaField label="Intro Section" value={c.intro} onChange={v => handleChange(selectedEmail, 'intro', v)} hint={selectedEmail === 'noShow' ? "Variables: {courseName}, {session}, {date}" : "Main introductory text"} />}
+                
+                {c.messageVerify !== undefined && <TextAreaField label="Verification Message" value={c.messageVerify} onChange={v => handleChange(selectedEmail, 'messageVerify', v)} />}
+
+                {(c.visitButton !== undefined || c.verifyButtonText !== undefined || c.loginButtonText !== undefined || c.viewAccountButton !== undefined) && (
+                    <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg mt-6 shadow-sm">
+                        <h4 className="font-bold text-blue-900 text-sm mb-3">Call to Action Button</h4>
+                        <TextField label="Button Text" value={c.visitButton || c.verifyButtonText || c.loginButtonText || c.viewAccountButton} onChange={v => {
+                            if(c.visitButton !== undefined) handleChange(selectedEmail, 'visitButton', v);
+                            if(c.verifyButtonText !== undefined) handleChange(selectedEmail, 'verifyButtonText', v);
+                            if(c.loginButtonText !== undefined) handleChange(selectedEmail, 'loginButtonText', v);
+                            if(c.viewAccountButton !== undefined) handleChange(selectedEmail, 'viewAccountButton', v);
+                        }} />
+                        <TextField icon={<IconLink />} label="Button Link (URL)" value={c.buttonUrl || ''} onChange={v => handleChange(selectedEmail, 'buttonUrl', v)} hint="Enter full HTTPS URL. Leave blank for default." />
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const renderPreviewHTML = () => {
+        const c = content[selectedEmail];
+        const btnUrl = c.buttonUrl || '#';
+        
+        switch (selectedEmail) {
+            case 'news': return (
+                <div>
+                    <h2 style={{ marginTop: 0 }}>{interp(c.greeting, {first:'John'})}</h2>
+                    <p style={{ whiteSpace: 'pre-wrap' }}>{c.intro}</p>
+                    <div style={{ background: 'white', borderRadius: '8px', padding: '20px', margin: '15px 0', border: '1px solid #e5e7eb' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold', background: '#e0f2fe', color: '#0284c7', marginBottom: '10px' }}>PROMO</span>
+                            <span style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '1px' }}>NEWS/PROMO</span>
+                        </div>
+                        <h3 style={{ color: '#1a4fba', margin: '10px 0' }}>Super Summer Sale 2026</h3>
+                        <p style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>Get 20% off on all driving courses this summer! Limited slots available.</p>
+                    </div>
+                    <div style={{ textAlign: 'center', marginTop: '25px' }}>
+                        <a href={btnUrl} style={{ display: 'inline-block', padding: '12px 24px', backgroundColor: '#1a4fba', color: 'white', textDecoration: 'none', borderRadius: '6px', fontWeight: 'bold' }}>{c.visitButton || 'Enroll Now'}</a>
+                    </div>
+                </div>
+            );
+            case 'walkIn':
+            case 'guest':
+            case 'online': return (
+                <div>
+                    <h2 style={{ marginTop: 0 }}>{interp(c.greeting, {first:'John', last:'Doe'})}</h2>
+                    <p style={{ whiteSpace: 'pre-wrap' }}>{c.intro}</p>
+                    
+                    <h3 style={{ borderBottom: '2px solid #e5e7eb', paddingBottom: '10px', color: '#1f2937', marginTop: '30px' }}>{c.scheduleHeading || 'Your Training Schedule'}</h3>
+                    <div style={{ background: '#fff', border: '1px solid #e5e7eb', padding: '15px', borderRadius: '6px', marginBottom: '20px' }}>
+                        <p style={{ margin: '5px 0' }}><strong>Course:</strong> TDC (Theoretical Driving Course)</p>
+                        <p style={{ margin: '5px 0' }}><strong>Schedule:</strong> Aug 12, 13, 14</p>
+                        <p style={{ margin: '5px 0' }}><strong>Time:</strong> 08:00 AM - 10:00 AM</p>
+                    </div>
+
+                    <h3 style={{ borderBottom: '2px solid #e5e7eb', paddingBottom: '10px', color: '#1f2937' }}>{c.credentialsHeading || 'Login Credentials'}</h3>
+                    {c.credentialsIntro && <p>{c.credentialsIntro}</p>}
+                    <div style={{ background: '#f3f4f6', padding: '15px', borderRadius: '6px', fontFamily: 'monospace', marginBottom: '10px', fontSize: '15px', border: '1px solid #e5e7eb' }}>
+                        <strong>Email:</strong> john.doe@example.com<br/>
+                        <strong>Password:</strong> samplepass123
+                    </div>
+                    <p style={{ color: '#dc2626', fontSize: '13px', fontWeight: 'bold', margin: '15px 0' }}>{c.passwordWarning}</p>
+
+                    <div style={{ textAlign: 'center', marginTop: '30px' }}>
+                        <a href={btnUrl} style={{ display: 'inline-block', padding: '14px 28px', backgroundColor: '#2157da', color: '#ffffff', textDecoration: 'none', borderRadius: '6px', fontWeight: 'bold' }}>{c.verifyButtonText || c.loginButtonText || 'Button'}</a>
+                    </div>
+                </div>
+            );
+            case 'noShow': return (
+                <div>
+                    <h2 style={{ marginTop: 0, color: '#dc2626' }}>{interp(c.greeting, {first:'John', last:'Doe'})}</h2>
+                    <p>{interp(c.intro, {courseName: 'PDC - Manual', date: 'August 12, 2026', session: 'Session 2'})}</p>
+                    
+                    <h3 style={{ color: '#111827', marginTop: '25px' }}>{c.howToHeading}</h3>
+                    <div style={{ background: 'white', padding: '20px', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                        <ol style={{ margin: 0, paddingLeft: '20px', color: '#4b5563' }}>
+                            {c.howToSteps?.map((s,i) => <li key={i} style={{marginBottom: '10px'}}>{s}</li>)}
+                        </ol>
+                    </div>
+
+                    <div style={{ textAlign: 'center', marginTop: '30px' }}>
+                        <a href={btnUrl} style={{ display: 'inline-block', padding: '12px 24px', backgroundColor: '#dc2626', color: '#ffffff', textDecoration: 'none', borderRadius: '5px', fontWeight: 'bold' }}>{c.loginButtonText}</a>
+                    </div>
+                </div>
+            );
+            case 'receipt': return (
+                <div>
+                    <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                        <span style={{ display: 'inline-block', background: '#dcfce7', color: '#166534', padding: '6px 12px', borderRadius: '20px', fontSize: '14px', fontWeight: 'bold' }}>
+                            ✓ {c.headerSubtitle || 'Payment Receipt'}
+                        </span>
+                    </div>
+                    <h2 style={{ marginTop: 0 }}>{interp(c.greeting, {first:'John', last:'Doe'})}</h2>
+                    <p>{c.intro}</p>
+                    <div style={{ background: '#eff6ff', padding: '20px', borderRadius: '8px', margin: '25px 0', border: '1px solid #bfdbfe' }}>
+                        <h1 style={{ color: '#1e3a8a', textAlign: 'center', margin: '0 0 10px 0', fontSize: '32px' }}>₱ 2,500.00</h1>
+                        <p style={{ textAlign: 'center', margin: 0, color: '#1d4ed8', fontSize: '15px' }}>{c.successNote || 'Payment Processed Successfully'}</p>
+                    </div>
+
+                    {c.pdfNote && <p style={{ fontSize: '13px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '5px' }}>📎 {interp(c.pdfNote, {filename: 'receipt_123.pdf'})}</p>}
+
+                    <div style={{ textAlign: 'center', marginTop: '30px' }}>
+                        <a href={btnUrl} style={{ display: 'inline-block', padding: '14px 32px', background: 'linear-gradient(135deg, #1a4fba, #3b82f6)', color: '#fff', textDecoration: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '16px', boxShadow: '0 4px 6px -1px rgba(59, 130, 246, 0.4)' }}>
+                            {c.viewAccountButton || 'View Account'}
+                        </a>
+                    </div>
+                </div>
+            );
+            case 'newAccount': return (
+                <div>
+                    <h2 style={{marginTop:0}}>{c.headerTitle}</h2>
+                    <h3 style={{ borderBottom: '2px solid #e5e7eb', paddingBottom: '10px', marginTop: '25px' }}>{c.credentialsHeading}</h3>
+                    <div style={{ background: '#f3f4f6', padding: '20px', borderRadius: '8px', fontFamily: 'monospace', marginBottom: '15px', border: '1px solid #e5e7eb', fontSize: '15px' }}>
+                        <strong>Role:</strong> Staff<br/>
+                        <strong>Email:</strong> admin@school.com<br/>
+                        <strong>Password:</strong> staffpass123
+                    </div>
+                    <p style={{ marginTop: '25px', padding: '15px', backgroundColor: '#fef2f2', color: '#b91c1c', borderLeft: '4px solid #ef4444', borderRadius: '4px' }}>
+                        <strong>{c.securityHeading}</strong><br/>
+                        <ul style={{ margin: '10px 0 0 0', paddingLeft: '20px' }}>
+                            {c.securityPoints?.map((p,i) => <li key={i}>{p}</li>)}
+                        </ul>
+                    </p>
+                    <p style={{marginTop:'25px'}}>{c.loginPrompt}</p>
+                    <div style={{ textAlign: 'center', marginTop: '30px' }}>
+                        <a href={btnUrl} style={{ display: 'inline-block', padding: '12px 28px', backgroundColor: '#2157da', color: '#ffffff', textDecoration: 'none', borderRadius: '6px', fontWeight: 'bold' }}>{c.loginButtonText}</a>
+                    </div>
+                </div>
+            );
+            case 'verification': return (
+                <div>
+                    <h2 style={{ marginTop: 0 }}>Hello John Doe!</h2>
+                    <p>{c.messageVerify}</p>
+                    <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#2157da', textAlign: 'center', padding: '25px', backgroundColor: '#fff', border: '2px dashed #2157da', margin: '25px 0', letterSpacing: '8px', borderRadius: '8px' }}>
+                        804912
+                    </div>
+                    <p style={{ color: '#4b5563' }}>{c.expiry}</p>
+                    <p style={{ color: '#4b5563', fontSize: '13px' }}>{c.notRequested}</p>
+                </div>
+            );
+            default: return (
+                <div>
+                    <h2 style={{ fontSize: '18px', color: '#1f2937' }}>{interp(c.greeting || 'Hello {first}!', {first:'John', last:'Doe'})}</h2>
+                    <p style={{ color: '#4b5563' }}>{c.intro || c.messageVerify || 'Here is your sample notification email.'}</p>
+                </div>
+            );
+        }
+    };
 
     return (
-        <div className="cfg-section-enter">
-            {/* Page header + save bar */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+        <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 font-sans">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
                 <div>
-                    <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1e293b', margin: 0 }}>Email Content Configuration</h2>
-                    <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '4px 0 0' }}>
-                        Edit the text sent in student emails. Use <code style={{ background: '#f1f5f9', padding: '1px 4px', borderRadius: 3 }}>{'{placeholder}'}</code> values where shown.
-                    </p>
+                    <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">Email Content Configuration</h1>
+                    <p className="text-gray-500 text-sm mt-2">Design your emails with rich text and dynamic placeholders. Click a card below to edit.</p>
                 </div>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    {saveMsg && <span style={{ fontSize: '0.82rem', color: saveMsg.startsWith('Saved') ? '#16a34a' : '#dc2626' }}>{saveMsg}</span>}
-                    <button
-                        onClick={handleSave}
-                        disabled={saving || !isDirty}
-                        className="cfg-save-btn"
-                        style={{ opacity: (saving || !isDirty) ? 0.5 : 1 }}
-                    >
-                        {saving ? 'Saving…' : 'Save Changes'}
+                {isDirty && (
+                    <button onClick={handleSave} disabled={saving} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-semibold transition shadow-md flex items-center gap-2">
+                         {saving ? 'Saving Changes...' : 'Save All Changes'}
                     </button>
+                )}
+            </div>
+
+            {/* Global Settings */}
+            <div className="mb-10 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+                <h2 className="text-lg font-bold text-gray-800 mb-5 border-b border-gray-100 pb-3 flex items-center gap-2">
+                    Branding & Global Settings
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <TextField label="School Name" value={content.schoolName} onChange={v => { setContent(p => ({...p, schoolName: v})); setIsDirty(true); }} />
+                    <TextField label="Footer Tagline" value={content.footerTagline} onChange={v => { setContent(p => ({...p, footerTagline: v})); setIsDirty(true); }} />
+                    <TextField label="Copyright Year" value={content.copyrightYear} onChange={v => { setContent(p => ({...p, copyrightYear: v})); setIsDirty(true); }} />
                 </div>
             </div>
 
-            {isDirty && (
-                <div style={{ background: '#fefce8', border: '1px solid #fde047', borderRadius: 8, padding: '8px 14px', marginBottom: 14, fontSize: '0.82rem', color: '#854d0e' }}>
-                    ⚠ You have unsaved changes
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {emailTypes.map(type => {
+                const Icon = type.icon || (() => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>);
+                const colors = {
+                    emerald: 'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white hover:border-emerald-300',
+                    blue: 'bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white hover:border-blue-300',
+                    rose: 'bg-rose-50 text-rose-600 group-hover:bg-rose-600 group-hover:text-white hover:border-rose-300',
+                    purple: 'bg-purple-50 text-purple-600 group-hover:bg-purple-600 group-hover:text-white hover:border-purple-300',
+                    amber: 'bg-amber-50 text-amber-600 group-hover:bg-amber-600 group-hover:text-white hover:border-amber-300',
+                    indigo: 'bg-indigo-50 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white hover:border-indigo-300',
+                    slate: 'bg-slate-50 text-slate-600 group-hover:bg-slate-600 group-hover:text-white hover:border-slate-300',
+                    cyan: 'bg-cyan-50 text-cyan-600 group-hover:bg-cyan-600 group-hover:text-white hover:border-cyan-300',
+                }[type.color] || 'bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white';
+                
+                const textH = {
+                    emerald: 'group-hover:text-emerald-700', blue: 'group-hover:text-blue-700',
+                    rose: 'group-hover:text-rose-700', purple: 'group-hover:text-purple-700',
+                    amber: 'group-hover:text-amber-700', indigo: 'group-hover:text-indigo-700',
+                    slate: 'group-hover:text-slate-700', cyan: 'group-hover:text-cyan-700',
+                }[type.color] || 'group-hover:text-blue-700';
+
+                return (
+                    <div key={type.id} onClick={() => setSelectedEmail(type.id)} className={`bg-white border border-gray-200 rounded-2xl p-6 flex flex-col cursor-pointer hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 block ${colors.split(' ').pop()}`}>
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-5 transition-all duration-300 shadow-sm ${colors.split(' ').slice(0, 4).join(' ')}`}>
+                            <Icon />
+                        </div>
+                        <h3 className={`font-bold text-gray-800 text-lg mb-2 transition-colors ${textH}`}>{type.title}</h3>
+                        <p className="text-sm text-gray-500 leading-relaxed flex-1 mb-4">{type.desc}</p>
+                        
+                        <div className="flex items-center justify-between font-semibold text-sm opacity-0 group-hover:opacity-100 transition-all translate-y-2 group-hover:translate-y-0 duration-300 pt-3 border-t border-gray-100/0 group-hover:border-gray-100/50">
+                            <span className={textH}>Configure Template</span>
+                            <span className={textH}>&rarr;</span>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+
+            {/* Email Edit Modal */}
+            {selectedEmail && (
+                <div className="fixed inset-0 z-[1050] flex items-center justify-center p-3 sm:p-6 bg-gray-900/70 backdrop-blur-md transition-opacity">
+                    <div className="bg-gray-50 w-full max-w-[1300px] h-[95vh] sm:h-[88vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200 border border-gray-200">
+                        {/* Header */}
+                        <div className="bg-white px-6 py-4 border-b border-gray-200 flex justify-between items-center shrink-0">
+                            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-3">
+                                <span className="bg-blue-100 text-blue-700 p-2 rounded-lg"><IconMail /></span>
+                                Editing: {emailTypes.find(t=>t.id === selectedEmail)?.title}
+                            </h2>
+                            <button onClick={() => setSelectedEmail(null)} className="p-2 hover:bg-red-50 hover:text-red-600 rounded-full text-gray-400 transition-colors">
+                                <IconClose />
+                            </button>
+                        </div>
+                        
+                        {/* Split Body */}
+                        <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
+                            {/* Editor Column */}
+                            <div className="w-full md:w-[400px] lg:w-[480px] bg-white border-b md:border-b-0 md:border-r border-gray-200 overflow-y-auto p-6 lg:p-8 flex flex-col shrink-0 relative">
+                                <div className="flex-1">
+                                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6">Template Fields</h3>
+                                    {renderEditorInputs()}
+                                </div>
+                                <div className="mt-8 pt-6 border-t border-gray-200 shrink-0 sticky bottom-0 bg-white pb-2">
+                                    <button onClick={handleSave} disabled={saving} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold transition shadow-md mb-3 flex justify-center items-center gap-2">
+                                        {saving ? 'Saving...' : 'Save All Changes'}
+                                    </button>
+                                    <button onClick={() => setSelectedEmail(null)} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-lg font-medium transition">Close Editor</button>
+                                </div>
+                            </div>
+
+                            {/* Preview Column */}
+                            <div className="flex-1 bg-gray-100 overflow-y-auto p-6 sm:p-8 flex flex-col items-center">
+                                <div className="w-full max-w-[650px] mb-4 flex justify-between items-center bg-white px-4 py-3 rounded-lg shadow-sm border border-gray-200">
+                                    <h3 className="text-sm font-bold text-gray-600 uppercase tracking-widest flex items-center gap-2">
+                                        <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse ring-4 ring-green-500/20"></div> 
+                                        Live Mail Preview
+                                    </h3>
+                                    <div className="text-xs text-gray-400">Updates instantly</div>
+                                </div>
+                                
+                                <div className="w-full max-w-[650px] flex-1">
+                                    <div id="preview-container" className="shadow-xl rounded-lg overflow-hidden border border-gray-200 transition-all">
+                                        <EmailPreviewWrapper 
+                                            schoolName={content.schoolName}
+                                            copyrightYear={content.copyrightYear}
+                                            footerTagline={content.footerTagline}
+                                            title={content[selectedEmail]?.headerTitle || content[selectedEmail]?.headerSubtitle || content[selectedEmail]?.titleVerify || 'Notification'}
+                                        >
+                                            {renderPreviewHTML()}
+                                        </EmailPreviewWrapper>
+                                    </div>
+                                </div>
+
+                                {/* Send Test Box */}
+                                <div className="mt-8 bg-white p-6 rounded-xl border border-gray-200 shadow-md w-full max-w-[650px]">
+                                    <label className="block text-sm font-semibold text-gray-800 mb-3">Test this Email Layout</label>
+                                    <div className="flex gap-3">
+                                        <input type="email" value={testEmail} onChange={e=>setTestEmail(e.target.value)} placeholder="Enter email address (e.g. you@example.com)" className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                        <button onClick={handleSendTest} disabled={sendingTest} className="bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-lg font-semibold transition shadow-sm whitespace-nowrap min-w-[130px] flex justify-center items-center">
+                                            {sendingTest ? 'Sending...' : 'Send Test'}
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-3">This will send an actual email to verify the design in your email client.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
-
-            {/* ── Branding ─────────────────────────────────── */}
-            <AccordionCard icon="🏫" title="Branding" isOpen={openSection === 'branding'} onToggle={() => toggle('branding')}>
-                <TextField label="School Name" value={C.schoolName} onChange={v => setTop('schoolName', v)} />
-                <TextField label="Copyright Year" value={C.copyrightYear} onChange={v => setTop('copyrightYear', v)} />
-                <TextField label="Default Footer Tagline" value={C.footerTagline} onChange={v => setTop('footerTagline', v)} />
-            </AccordionCard>
-
-            {/* ── Verification / OTP ───────────────────────── */}
-            <AccordionCard icon="🔐" title="Verification & OTP Email" isOpen={openSection === 'verification'} onToggle={() => toggle('verification')}>
-                <TextField label="Subject — Email Verification" value={C.verification?.subjectVerify} onChange={v => set('verification', 'subjectVerify', v)} />
-                <TextField label="Subject — Password Reset" value={C.verification?.subjectReset} onChange={v => set('verification', 'subjectReset', v)} />
-                <TextField label="Email Title — Verification" value={C.verification?.titleVerify} onChange={v => set('verification', 'titleVerify', v)} />
-                <TextField label="Email Title — Reset" value={C.verification?.titleReset} onChange={v => set('verification', 'titleReset', v)} />
-                <TextAreaField label="Message — Verification" value={C.verification?.messageVerify} onChange={v => set('verification', 'messageVerify', v)} />
-                <TextAreaField label="Message — Password Reset" value={C.verification?.messageReset} onChange={v => set('verification', 'messageReset', v)} />
-                <TextField label="Code Expiry Note" value={C.verification?.expiry} onChange={v => set('verification', 'expiry', v)} />
-                <TextField label="Not Requested Notice" value={C.verification?.notRequested} onChange={v => set('verification', 'notRequested', v)} />
-            </AccordionCard>
-
-            {/* ── New Account ──────────────────────────────── */}
-            <AccordionCard icon="👤" title="New Account Email (Staff / Admin)" isOpen={openSection === 'newAccount'} onToggle={() => toggle('newAccount')}>
-                <TextField label="Subject" value={C.newAccount?.subject} onChange={v => set('newAccount', 'subject', v)} />
-                <TextField label="Header Title" value={C.newAccount?.headerTitle} onChange={v => set('newAccount', 'headerTitle', v)} />
-                <TextField label="Credentials Heading" value={C.newAccount?.credentialsHeading} onChange={v => set('newAccount', 'credentialsHeading', v)} />
-                <TextField label="Password Reveal Hint" value={C.newAccount?.passwordRevealHint} onChange={v => set('newAccount', 'passwordRevealHint', v)} />
-                <TextField label="Security Heading" value={C.newAccount?.securityHeading} onChange={v => set('newAccount', 'securityHeading', v)} />
-                <ListEditor label="Security Points" items={C.newAccount?.securityPoints} onChange={v => set('newAccount', 'securityPoints', v)} />
-                <TextAreaField label="Login Prompt" value={C.newAccount?.loginPrompt} onChange={v => set('newAccount', 'loginPrompt', v)} />
-                <TextField label="Login Button Text" value={C.newAccount?.loginButtonText} onChange={v => set('newAccount', 'loginButtonText', v)} />
-                <TextField label="Unexpected Email Footer" value={C.newAccount?.unexpectedFooter} onChange={v => set('newAccount', 'unexpectedFooter', v)} />
-            </AccordionCard>
-
-            {/* ── Walk-In Enrollment ───────────────────────── */}
-            <AccordionCard icon="🚶" title="Walk-In Enrollment Email" isOpen={openSection === 'walkIn'} onToggle={() => toggle('walkIn')}>
-                <TextField label="Subject" value={C.walkIn?.subject} onChange={v => set('walkIn', 'subject', v)} />
-                <TextField label="Header Subtitle" value={C.walkIn?.headerSubtitle} onChange={v => set('walkIn', 'headerSubtitle', v)} />
-                <TextField label="Greeting" value={C.walkIn?.greeting} onChange={v => set('walkIn', 'greeting', v)}
-                    hint="Placeholders: {first}, {last}" />
-                <TextAreaField label="Intro Paragraph" value={C.walkIn?.intro} onChange={v => set('walkIn', 'intro', v)} />
-                <TextField label="Schedule Heading" value={C.walkIn?.scheduleHeading} onChange={v => set('walkIn', 'scheduleHeading', v)} />
-                <TextField label="Details Heading" value={C.walkIn?.detailsHeading} onChange={v => set('walkIn', 'detailsHeading', v)} />
-                <TextField label="Credentials Heading" value={C.walkIn?.credentialsHeading} onChange={v => set('walkIn', 'credentialsHeading', v)} />
-                <TextAreaField label="Credentials Intro" value={C.walkIn?.credentialsIntro} onChange={v => set('walkIn', 'credentialsIntro', v)} />
-                <TextField label="Password Warning" value={C.walkIn?.passwordWarning} onChange={v => set('walkIn', 'passwordWarning', v)} />
-                <TextField label="Verify Email Heading" value={C.walkIn?.verifyHeading} onChange={v => set('walkIn', 'verifyHeading', v)} />
-                <TextAreaField label="Verify Email Intro" value={C.walkIn?.verifyIntro} onChange={v => set('walkIn', 'verifyIntro', v)} />
-                <TextField label="Verify Expiry Note" value={C.walkIn?.verifyExpiry} onChange={v => set('walkIn', 'verifyExpiry', v)} />
-                <TextField label="Verify Button Text" value={C.walkIn?.verifyButtonText} onChange={v => set('walkIn', 'verifyButtonText', v)} />
-                <TextField label="Footer Tagline" value={C.walkIn?.footerTagline} onChange={v => set('walkIn', 'footerTagline', v)} />
-            </AccordionCard>
-
-            {/* ── Guest Enrollment ─────────────────────────── */}
-            <AccordionCard icon="👥" title="Guest Enrollment Email" isOpen={openSection === 'guest'} onToggle={() => toggle('guest')}>
-                <TextField label="Subject" value={C.guest?.subject} onChange={v => set('guest', 'subject', v)} />
-                <TextField label="Header Subtitle" value={C.guest?.headerSubtitle} onChange={v => set('guest', 'headerSubtitle', v)} />
-                <TextField label="Greeting" value={C.guest?.greeting} onChange={v => set('guest', 'greeting', v)}
-                    hint="Placeholders: {first}, {last}" />
-                <TextAreaField label="Intro Paragraph" value={C.guest?.intro} onChange={v => set('guest', 'intro', v)} />
-                <TextField label="Schedule Heading" value={C.guest?.scheduleHeading} onChange={v => set('guest', 'scheduleHeading', v)} />
-                <TextField label="Details Heading" value={C.guest?.detailsHeading} onChange={v => set('guest', 'detailsHeading', v)} />
-                <TextField label="Thank You Message" value={C.guest?.thankYou} onChange={v => set('guest', 'thankYou', v)} />
-                <TextField label="Footer Tagline" value={C.guest?.footerTagline} onChange={v => set('guest', 'footerTagline', v)} />
-            </AccordionCard>
-
-            {/* ── No-Show ──────────────────────────────────── */}
-            <AccordionCard icon="⚠️" title="No-Show / Missed Session Email" isOpen={openSection === 'noShow'} onToggle={() => toggle('noShow')}>
-                <TextField label="Subject" value={C.noShow?.subject} onChange={v => set('noShow', 'subject', v)} />
-                <TextField label="Header Subtitle" value={C.noShow?.headerSubtitle} onChange={v => set('noShow', 'headerSubtitle', v)} />
-                <TextField label="Greeting" value={C.noShow?.greeting} onChange={v => set('noShow', 'greeting', v)}
-                    hint="Placeholders: {first}, {last}" />
-                <TextAreaField label="Intro Paragraph" value={C.noShow?.intro} onChange={v => set('noShow', 'intro', v)}
-                    hint="Placeholders: {courseName}, {date}, {session}. HTML allowed (e.g. <strong>)." rows={4} />
-                <TextField label="Fee Heading" value={C.noShow?.feeHeading} onChange={v => set('noShow', 'feeHeading', v)} />
-                <TextAreaField label="Fee Note" value={C.noShow?.feeNote} onChange={v => set('noShow', 'feeNote', v)}
-                    hint="HTML allowed." />
-                <TextField label="How To Reschedule Heading" value={C.noShow?.howToHeading} onChange={v => set('noShow', 'howToHeading', v)} />
-                <ListEditor label="Reschedule Steps" items={C.noShow?.howToSteps} onChange={v => set('noShow', 'howToSteps', v)} />
-                <TextField label="Login Button Text" value={C.noShow?.loginButtonText} onChange={v => set('noShow', 'loginButtonText', v)} />
-            </AccordionCard>
-
-            {/* ── Payment Receipt ──────────────────────────── */}
-            <AccordionCard icon="💳" title="Payment Receipt Email" isOpen={openSection === 'receipt'} onToggle={() => toggle('receipt')}>
-                <TextField label="Subject — Full Payment" value={C.receipt?.subjectFull} onChange={v => set('receipt', 'subjectFull', v)} />
-                <TextField label="Subject — Downpayment" value={C.receipt?.subjectDown} onChange={v => set('receipt', 'subjectDown', v)} />
-                <TextField label="Header — Full Payment" value={C.receipt?.headerFull} onChange={v => set('receipt', 'headerFull', v)} />
-                <TextField label="Header — Downpayment" value={C.receipt?.headerDown} onChange={v => set('receipt', 'headerDown', v)} />
-                <TextField label="Greeting" value={C.receipt?.greeting} onChange={v => set('receipt', 'greeting', v)}
-                    hint="Placeholders: {first}, {last}" />
-                <TextAreaField label="Intro — Full Payment" value={C.receipt?.introFull} onChange={v => set('receipt', 'introFull', v)} />
-                <TextAreaField label="Intro — Downpayment" value={C.receipt?.introDown} onChange={v => set('receipt', 'introDown', v)} />
-                <TextAreaField label="PDF Attachment Note" value={C.receipt?.pdfNote} onChange={v => set('receipt', 'pdfNote', v)}
-                    hint="Placeholder: {filename}. HTML allowed." />
-                <TextField label="Details Heading" value={C.receipt?.detailsHeading} onChange={v => set('receipt', 'detailsHeading', v)} />
-                <TextField label="Paid In Full Label" value={C.receipt?.paidInFull} onChange={v => set('receipt', 'paidInFull', v)} />
-                <TextField label="Amount Paid Label" value={C.receipt?.amountPaid} onChange={v => set('receipt', 'amountPaid', v)} />
-                <TextField label="Balance Heading" value={C.receipt?.balanceHeading} onChange={v => set('receipt', 'balanceHeading', v)} />
-                <TextAreaField label="Balance Note" value={C.receipt?.balanceNote} onChange={v => set('receipt', 'balanceNote', v)}
-                    hint="Placeholder: {amount} (auto-formatted with ₱). HTML allowed." />
-                <TextField label="Balance Steps Heading" value={C.receipt?.balanceStepsHeading} onChange={v => set('receipt', 'balanceStepsHeading', v)} />
-                <ListEditor label="Balance Payment Steps" items={C.receipt?.balanceSteps} onChange={v => set('receipt', 'balanceSteps', v)}
-                    hint="HTML allowed in items (e.g. <strong>)." />
-                <TextField label="Success Badge" value={C.receipt?.successBadge} onChange={v => set('receipt', 'successBadge', v)} />
-                <TextField label="Success Heading" value={C.receipt?.successHeading} onChange={v => set('receipt', 'successHeading', v)} />
-                <TextField label="Success Note" value={C.receipt?.successNote} onChange={v => set('receipt', 'successNote', v)} />
-                <TextField label="View Account Button Text" value={C.receipt?.viewAccountButton} onChange={v => set('receipt', 'viewAccountButton', v)} />
-                <TextField label="Footer Tagline" value={C.receipt?.footerTagline} onChange={v => set('receipt', 'footerTagline', v)} />
-            </AccordionCard>
-
-            {/* ── Downpayment Reminder ─────────────────────── */}
-            <AccordionCard icon="💰" title="Downpayment Reminder Block" isOpen={openSection === 'downpaymentReminder'} onToggle={() => toggle('downpaymentReminder')}>
-                <TextField label="Heading" value={C.downpaymentReminder?.heading} onChange={v => set('downpaymentReminder', 'heading', v)} />
-                <TextAreaField label="Note" value={C.downpaymentReminder?.note} onChange={v => set('downpaymentReminder', 'note', v)}
-                    hint="HTML allowed (e.g. <strong>)." />
-            </AccordionCard>
-
-            {/* ── Vehicle Rental ───────────────────────────── */}
-            <AccordionCard icon="🚗" title="Vehicle Rental Notices" isOpen={openSection === 'vehicleRental'} onToggle={() => toggle('vehicleRental')}>
-                <TextField label="Heading" value={C.vehicleRental?.heading} onChange={v => set('vehicleRental', 'heading', v)} />
-                <TextAreaField label="B1/B2 (Van/L300) Note" value={C.vehicleRental?.b1b2Note} onChange={v => set('vehicleRental', 'b1b2Note', v)} rows={4} />
-                <TextAreaField label="A1 Tricycle Note" value={C.vehicleRental?.tricycleNote} onChange={v => set('vehicleRental', 'tricycleNote', v)} rows={4} />
-            </AccordionCard>
-
-            {/* ── Requirements ─────────────────────────────── */}
-            <AccordionCard icon="📋" title="Requirements Checklist" isOpen={openSection === 'requirements'} onToggle={() => toggle('requirements')}>
-                <TextField label="Section Heading" value={C.requirements?.heading} onChange={v => set('requirements', 'heading', v)} />
-                <ListEditor label="TDC Requirements" items={C.requirements?.tdc} onChange={v => set('requirements', 'tdc', v)} />
-                <ListEditor label="PDC Requirements" items={C.requirements?.pdc} onChange={v => set('requirements', 'pdc', v)} />
-            </AccordionCard>
-
-            {/* ── Terms & Conditions ───────────────────────── */}
-            <AccordionCard icon="📜" title="Terms & Conditions" isOpen={openSection === 'terms'} onToggle={() => toggle('terms')}>
-                <TextField label="Section Heading" value={C.terms?.heading} onChange={v => set('terms', 'heading', v)} />
-                <ListEditor label="Terms Items" items={C.terms?.items} onChange={v => set('terms', 'items', v)} />
-            </AccordionCard>
-
-            {/* ── News / Promo ─────────────────────────────── */}
-            <AccordionCard icon="📣" title="News & Promo Blast Email" isOpen={openSection === 'news'} onToggle={() => toggle('news')}>
-                <TextField label="Header Subtitle" value={C.news?.headerSubtitle} onChange={v => set('news', 'headerSubtitle', v)} />
-                <TextField label="Greeting" value={C.news?.greeting} onChange={v => set('news', 'greeting', v)}
-                    hint="Placeholder: {first} (falls back to 'Student')." />
-                <TextAreaField label="Intro Paragraph" value={C.news?.intro} onChange={v => set('news', 'intro', v)} />
-                <TextField label="Visit Button Text" value={C.news?.visitButton} onChange={v => set('news', 'visitButton', v)} />
-                <TextAreaField label="Unsubscribe/Footer Note" value={C.news?.unsubNote} onChange={v => set('news', 'unsubNote', v)} />
-            </AccordionCard>
-
-            {/* ── PDF Receipt ──────────────────────────────── */}
-            <AccordionCard icon="📄" title="PDF Receipt Text" isOpen={openSection === 'pdf'} onToggle={() => toggle('pdf')}>
-                <TextField label="School Name (PDF)" value={C.pdf?.schoolName} onChange={v => set('pdf', 'schoolName', v)} />
-                <TextField label="Title — Full Payment" value={C.pdf?.titleFull} onChange={v => set('pdf', 'titleFull', v)} />
-                <TextField label="Title — Downpayment" value={C.pdf?.titleDown} onChange={v => set('pdf', 'titleDown', v)} />
-                <TextField label="Receipt Title Label" value={C.pdf?.receiptTitle} onChange={v => set('pdf', 'receiptTitle', v)} />
-                <TextField label="Footer Line 1" value={C.pdf?.footerLine1} onChange={v => set('pdf', 'footerLine1', v)} />
-                <TextAreaField label="Footer Line 2" value={C.pdf?.footerLine2} onChange={v => set('pdf', 'footerLine2', v)} />
-                <TextField label="Balance Note" value={C.pdf?.balanceNote} onChange={v => set('pdf', 'balanceNote', v)} />
-            </AccordionCard>
-
-            {/* Bottom save button */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20, gap: 10, alignItems: 'center' }}>
-                {saveMsg && <span style={{ fontSize: '0.82rem', color: saveMsg.startsWith('Saved') ? '#16a34a' : '#dc2626' }}>{saveMsg}</span>}
-                <button
-                    onClick={handleSave}
-                    disabled={saving || !isDirty}
-                    className="cfg-save-btn"
-                    style={{ opacity: (saving || !isDirty) ? 0.5 : 1 }}
-                >
-                    {saving ? 'Saving…' : 'Save Changes'}
-                </button>
-            </div>
         </div>
     );
 };

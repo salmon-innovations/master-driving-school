@@ -1,0 +1,1 @@
+const pool = require('./config/db'); async function test() { const c = await pool.query(\SELECT conname, pg_get_constraintdef(c.oid) FROM pg_constraint c WHERE conname = 'bookings_payment_method_check'\); console.log(c.rows); process.exit(); } test();

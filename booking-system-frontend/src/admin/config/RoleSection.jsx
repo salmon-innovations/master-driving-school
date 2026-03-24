@@ -79,11 +79,16 @@ const getRoleColor = (name = '') => ROLE_COLORS[name.toLowerCase()] || ROLE_COLO
 const RoleSection = ({ roles, loading, onAdd, onEdit, onDelete }) => {
     const [search, setSearch] = useState('');
 
-    const filtered = useMemo(() => roles.filter(r =>
-        r.display_name.toLowerCase().includes(search.toLowerCase()) ||
-        r.name.toLowerCase().includes(search.toLowerCase()) ||
-        (r.description && r.description.toLowerCase().includes(search.toLowerCase()))
-    ), [roles, search]);
+    const filtered = useMemo(() => roles
+        .filter((r) => {
+            const roleName = String(r.name || '').toLowerCase();
+            return roleName !== 'student' && roleName !== 'walk_in_student' && roleName !== 'walkin_student';
+        })
+        .filter(r =>
+            r.display_name.toLowerCase().includes(search.toLowerCase()) ||
+            r.name.toLowerCase().includes(search.toLowerCase()) ||
+            (r.description && r.description.toLowerCase().includes(search.toLowerCase()))
+        ), [roles, search]);
 
     return (
         <div className="cfg-section-enter">

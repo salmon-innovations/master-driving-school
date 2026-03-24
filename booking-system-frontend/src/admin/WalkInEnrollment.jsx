@@ -2,8 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { useNotification } from '../context/NotificationContext';
 import { branchesAPI, coursesAPI, schedulesAPI, adminAPI } from '../services/api';
 import './css/walkInEnrollment.css';
+import { getZipFromAddress } from '../utils/philippineZipCodes';
 
 const logo = '/images/logo.png';
+
+const CONVENIENCE_FEE = 25;
+const DEFAULT_ADDONS = [
+    { id: 'addon-reviewer', name: 'Driving School Reviewer', price: 30, icon: '📖' },
+    { id: 'addon-tips', name: 'Vehicle Maintenance Tips', price: 20, icon: '🔧' }
+];
+
+// getZipFromAddress handles zip lookup — imported from '../utils/philippineZipCodes'
+// For branch auto-fill, reuse getZipFromAddress since branch names
+// (e.g. 'Manila', 'Antipolo') are included in the comprehensive city map.
+const getZipForBranch = (name) => getZipFromAddress(name);
+
 
 const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const { showNotification } = useNotification();
@@ -78,7 +91,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
         scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '',
         promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: '',
-        paymentMethod: 'Cash', amountPaid: '', paymentStatus: 'Full Payment', transactionNo: ''
+        paymentMethod: 'Cash', amountPaid: '', paymentStatus: 'Full Payment', transactionNo: '',
+        addons: []
     };
 
     const [formData, setFormData] = useState(() => {
@@ -104,22 +118,47 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         // Build type options array
         const typeOptions = [];
 
+        const discount = parseFloat(course.discount) || 0;
+
+        // Price enforcement logic to match requested rates
+        const getEnforcedPrice = (name, type, dbPrice) => {
+            const n = (name || '').toLowerCase();
+            const t = (type || '').toLowerCase();
+            if (n.includes('tdc')) {
+                if (t.includes('online')) return 1200;
+                return 800; // Face-to-Face
+            }
+            if (n.includes('van') || n.includes('l300')) return 5000;
+            if (n.includes('car')) return 4000;
+            if (n.includes('motorcycle')) return 2500;
+            if (n.includes('tricycle')) return 2500;
+            return dbPrice;
+        };
+
+        const enforcedBasePrice = getEnforcedPrice(course.name, course.course_type, branchEffectivePrice);
+
         // Add main course type with its price (branch-adjusted)
         if (course.course_type) {
             typeOptions.push({
                 value: course.course_type.toLowerCase().replace(/\s+/g, '-'),
                 label: course.course_type.toUpperCase(),
-                price: branchEffectivePrice
+                price: enforcedBasePrice - discount,
+                originalPrice: enforcedBasePrice,
+                discount: discount
             });
         }
 
         // Add pricing variations as additional type options
         if (course.pricing_data && Array.isArray(course.pricing_data)) {
             course.pricing_data.forEach(variation => {
+                const varPrice = parseFloat(variation.price) || 0;
+                const enforcedVarPrice = getEnforcedPrice(course.name, variation.type, varPrice);
                 typeOptions.push({
                     value: variation.type.toLowerCase().replace(/\s+/g, '-'),
                     label: variation.type.toUpperCase(),
-                    price: parseFloat(variation.price)
+                    price: enforcedVarPrice - discount,
+                    originalPrice: enforcedVarPrice,
+                    discount: discount
                 });
             });
         }
@@ -129,7 +168,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             typeOptions.push({
                 value: 'standard',
                 label: 'STANDARD',
-                price: branchEffectivePrice
+                price: enforcedBasePrice - discount,
+                originalPrice: enforcedBasePrice,
+                discount: discount
             });
         }
 
@@ -180,12 +221,13 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             name: displayName,
             shortName: shortName,
             duration: `${course.duration || 8} Hours`,
-            price: branchEffectivePrice,
             image: courseImages.length > 0 ? courseImages[0] : '/images/default-course.jpg',
             features: features,
             hasTypeOption: true,
             typeOptions: typeOptions,
             category: course.category || 'Basic',
+            price: enforcedBasePrice - discount,
+            originalPrice: enforcedBasePrice,
             course_type: course.course_type || '',
             description: course.description || 'Professional driving course with comprehensive training'
         };
@@ -200,27 +242,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         try { sessionStorage.setItem('walkin_formData', JSON.stringify(formData)); } catch { }
     }, [formData]);
 
-    // Lifecycle: distinguish page reload (keep state) vs SPA navigation away (reset state)
+    // Lifecycle: keep state during SPA navigation (sidebar click)
+    // Only clear if the user explicitly refreshes or closes the tab if desired, 
+    // but the user wants it to stay when clicking sidebar.
     useEffect(() => {
-        // Clear the reload flag left from a previous reload
-        sessionStorage.removeItem('walkin_reloading');
-
-        // On a real browser reload/close, set the flag BEFORE React unmounts
-        const handleBeforeUnload = () => {
-            sessionStorage.setItem('walkin_reloading', 'true');
-        };
-        window.addEventListener('beforeunload', handleBeforeUnload);
-
-        return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload);
-            // If walkin_reloading is NOT set, this unmount is from SPA navigation → reset
-            if (!sessionStorage.getItem('walkin_reloading')) {
-                try {
-                    sessionStorage.removeItem('walkin_step');
-                    sessionStorage.removeItem('walkin_formData');
-                } catch { }
-            }
-        };
+        // We no longer clear the state on unmount.
+        // This ensures that navigating to other admin pages and back preserves progress.
     }, []);
 
     useEffect(() => {
@@ -236,18 +263,26 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     if (adminProfile?.rawRole === 'staff' && adminProfile?.branchId) {
                         const userBranch = branchResponse.branches.find(b => b.id === adminProfile.branchId);
                         if (userBranch) {
-                            setFormData(prev => ({
-                                ...prev,
-                                branchId: String(userBranch.id),
-                                branchName: userBranch.name
-                            }));
+                            setFormData(prev => {
+                                if (prev.branchId) return prev; // Keep existing saved branch
+                                return {
+                                    ...prev,
+                                    branchId: String(userBranch.id),
+                                    branchName: userBranch.name,
+                                    zipCode: prev.zipCode || getZipForBranch(userBranch.name)
+                                };
+                            });
                         }
                     } else if (branchResponse.branches.length > 0) {
-                        setFormData(prev => ({
-                            ...prev,
-                            branchId: String(branchResponse.branches[0].id),
-                            branchName: branchResponse.branches[0].name
-                        }));
+                        setFormData(prev => {
+                            if (prev.branchId) return prev; // Keep existing saved branch
+                            return {
+                                ...prev,
+                                branchId: String(branchResponse.branches[0].id),
+                                branchName: branchResponse.branches[0].name,
+                                zipCode: prev.zipCode || getZipForBranch(branchResponse.branches[0].name)
+                            };
+                        });
                     }
                 }
 
@@ -316,7 +351,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         session: `${slot.session} ${slot.type.toUpperCase()}`,
                         students: slot.enrollments || []
                     };
-                }).filter(slot => slot.available_slots > 0);
+                }).filter(slot => slot); // Keep all slots to show 'FULL' status in calendar
 
                 setScheduleSlots(transformedSlots);
             } catch (err) {
@@ -341,7 +376,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         const startDate = fmt(slot.date);
         const endDate = slot.end_date ? fmt(slot.end_date) : startDate;
         return { ...slot, date: startDate, end_date: endDate, session: `${slot.session} ${slot.type.toUpperCase()}`, students: slot.enrollments || [] };
-    }).filter(s => s.available_slots > 0);
+    }); // removed .filter(available_slots > 0) to allow showing FULL in calendar
 
     const isTDC = formData.course?.category === 'TDC';
     const isPromo = formData.course?.category === 'Promo';
@@ -438,9 +473,13 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     ct.includes('b1') || ct.includes('b2')) return false;
             }
             // Transmission match — strictly applied to ALL vehicle types when a type is chosen
-            if (wantsAT) return tx === 'automatic' || tx.includes('automatic') || tx === 'at';
-            if (wantsMT) return tx === 'manual' || tx.includes('manual') || tx === 'mt';
-            // No type chosen yet — show all slots for this course's vehicle category
+            const slotTx = (s.transmission || '').toLowerCase();
+            const isUniversalTx = slotTx === 'both' || slotTx === 'any' || slotTx === 'all' || !slotTx;
+            
+            if (wantsAT) return isUniversalTx || slotTx.includes('automatic') || slotTx === 'at';
+            if (wantsMT) return isUniversalTx || slotTx.includes('manual') || slotTx === 'mt';
+            
+            // No specific transmission preference or type not explicitly AT/MT (e.g. car generic)
             return true;
         });
         setPdcCalendarSlots(filtered);
@@ -583,7 +622,51 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
+        
+        if (name === 'birthday') {
+            const birthDate = new Date(value);
+            const today = new Date();
+            let age = today.getFullYear() - birthDate.getFullYear();
+            const m = today.getMonth() - birthDate.getMonth();
+            if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                age--;
+            }
+            
+            const ageStr = age >= 0 ? age.toString() : '';
+            
+            setFormData(prev => ({ 
+                ...prev, 
+                [name]: value,
+                age: ageStr
+            }));
+
+            // Validate age
+            if (ageStr && (parseInt(ageStr) < 16 || parseInt(ageStr) > 100)) {
+                setFormErrors(prev => ({ 
+                    ...prev, 
+                    [name]: '', 
+                    age: 'Age must be between 16 and 100' 
+                }));
+            } else {
+                setFormErrors(prev => ({ 
+                    ...prev, 
+                    [name]: '', 
+                    age: '' 
+                }));
+            }
+            return;
+        }
+
+        setFormData(prev => {
+            const updated = { ...prev, [name]: value };
+
+            // Auto-fill zip code based on Philippine city/municipality in address
+            if (name === 'address') {
+                updated.zipCode = getZipFromAddress(value);
+            }
+            return updated;
+        });
+
         // Clear error for the field when user types
         if (formErrors[name]) {
             setFormErrors(prev => ({ ...prev, [name]: '' }));
@@ -609,11 +692,37 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
     const handleAge = (e) => {
         const digits = e.target.value.replace(/\D/g, '').slice(0, 3);
-        setFormData(prev => ({ ...prev, age: digits }));
+        const ageVal = digits ? parseInt(digits) : null;
+        
+        setFormData(prev => {
+            const updates = { age: digits };
+            
+            if (ageVal !== null && ageVal >= 1 && ageVal <= 100) {
+                const currentYear = new Date().getFullYear();
+                const birthYear = currentYear - ageVal;
+                
+                if (prev.birthday) {
+                    const parts = prev.birthday.split('-');
+                    if (parts.length === 3) {
+                        updates.birthday = `${birthYear}-${parts[1]}-${parts[2]}`;
+                    } else {
+                        updates.birthday = `${birthYear}-01-01`;
+                    }
+                } else {
+                    updates.birthday = `${birthYear}-01-01`;
+                }
+            }
+            
+            return { ...prev, ...updates };
+        });
+
         if (digits && (parseInt(digits) < 16 || parseInt(digits) > 100)) {
             setFormErrors(prev => ({ ...prev, age: 'Age must be between 16 and 100' }));
         } else if (formErrors.age) {
             setFormErrors(prev => ({ ...prev, age: '' }));
+            if (digits) {
+                setFormErrors(prev => ({ ...prev, birthday: '' }));
+            }
         }
     };
 
@@ -640,9 +749,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
     const handleEmailChange = (value) => {
         setFormData(prev => ({ ...prev, email: value }));
-        if (value && !value.endsWith('@gmail.com')) {
-            setFormErrors(prev => ({ ...prev, email: 'Email must end with @gmail.com' }));
-        } else if (value && value.split('@')[0].length === 0) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (value && !emailRegex.test(value)) {
             setFormErrors(prev => ({ ...prev, email: 'Please enter a valid email address' }));
         } else {
             setFormErrors(prev => ({ ...prev, email: '' }));
@@ -682,8 +790,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         if (!contactDigits || contactDigits.length !== 11 || !contactDigits.startsWith('09')) {
             errors.contactNumbers = 'Contact number must be 11 digits starting with 09';
         }
-        if (!formData.email || !formData.email.endsWith('@gmail.com') || formData.email.split('@')[0].length === 0) {
-            errors.email = 'Email must be a valid @gmail.com address';
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!formData.email || !emailRegex.test(formData.email)) {
+            errors.email = 'Please enter a valid email address';
         }
 
         // Emergency Contact
@@ -772,7 +881,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             courseType: '',
             scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
             scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '',
-            promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: ''
+            promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: '',
+            addons: [...DEFAULT_ADDONS]
         }));
         setSelectedScheduleDate('');
         setScheduleSlots([]);
@@ -794,6 +904,17 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const nextStep = () => setStep(prev => Math.min(prev + 1, 5));
     const prevStep = () => setStep(prev => Math.max(prev - 1, 1));
 
+    const toggleAddon = (addon) => {
+        setFormData(prev => {
+            const exists = prev.addons.find(a => a.id === addon.id);
+            if (exists) {
+                return { ...prev, addons: prev.addons.filter(a => a.id !== addon.id) };
+            } else {
+                return { ...prev, addons: [...prev.addons, addon] };
+            }
+        });
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
 
@@ -802,7 +923,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
             const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
             const selectedPrice = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType)?.price || dynamicCourse?.price || 0;
-            const requiredAmount = formData.paymentStatus === 'Downpayment' ? selectedPrice * 0.5 : selectedPrice;
+            const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
+            const isBundle = formData.course?.category === 'Promo';
+            const bundleDiscount = isBundle ? (selectedPrice + addonsTotal) * 0.03 : 0;
+            const subtotal = (selectedPrice + addonsTotal - bundleDiscount) + CONVENIENCE_FEE;
+            
+            const requiredAmount = formData.paymentStatus === 'Downpayment' ? subtotal * 0.5 : subtotal;
             const changeAmount = formData.amountPaid ? Math.max(0, Number(formData.amountPaid) - requiredAmount) : 0;
             const actualAmountToRecord = Number(formData.amountPaid) - changeAmount;
 
@@ -847,6 +973,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 amountPaid: actualAmountToRecord,
                 paymentStatus: formData.paymentStatus,
                 transactionNo: formData.transactionNo,
+                addons: formData.addons || [],
+                convenienceFee: CONVENIENCE_FEE,
 
                 // Metadata
                 enrollmentType: 'walk-in',
@@ -886,7 +1014,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 course: null, courseType: '', branchId: formData.branchId, branchName: formData.branchName,
                 scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
                 scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '',
-                paymentMethod: 'Cash', amountPaid: '', paymentStatus: 'Full Payment', transactionNo: ''
+                paymentMethod: 'Cash', amountPaid: '', paymentStatus: 'Full Payment', transactionNo: '',
+                addons: []
             });
         } catch (error) {
             console.error('Enrollment error:', error);
@@ -897,136 +1026,278 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     };
 
     const renderStep1 = () => (
-        <div className="step-content animate-fadeIn">
-            <div className="form-section">
-                <div className="section-title">
-                    <span className="step-badge">1</span>
-                    <h3>Personal Information</h3>
+        <div className="step-content animate-fadeIn space-y-8">
+            {/* Personal Information Card */}
+            <div className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex items-center gap-3 mb-8 pb-4 border-b border-gray-50">
+                    <div className="w-10 h-10 bg-[#2157da] text-white rounded-xl flex items-center justify-center font-black shadow-lg shadow-blue-500/20">1</div>
+                    <div>
+                        <h3 className="text-xl font-black text-gray-900 leading-tight">Personal Information</h3>
+                        <p className="text-sm text-gray-500">Provide the basic details of the student</p>
+                    </div>
                 </div>
-                <div className="form-grid">
-                    <div className="form-group">
-                        <label>First Name <span style={{ color: 'red' }}>*</span></label>
-                        <input type="text" name="firstName" value={formData.firstName} onChange={handleLettersOnly} required style={{ borderColor: formErrors.firstName ? '#dc2626' : undefined }} />
-                        {formErrors.firstName && <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.firstName}</span>}
+
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                    {/* First Name */}
+                    <div className="md:col-span-4 flex flex-col gap-2">
+                        <label className="text-sm font-bold text-gray-700 flex items-center gap-1">
+                            First Name <span className="text-red-500">*</span>
+                        </label>
+                        <input 
+                            type="text" 
+                            name="firstName" 
+                            value={formData.firstName} 
+                            onChange={handleLettersOnly} 
+                            required 
+                            placeholder="e.g. Juan"
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.firstName ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`} 
+                        />
+                        {formErrors.firstName && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.firstName}</span>}
                     </div>
-                    <div className="form-group">
-                        <label>Middle Initial</label>
-                        <input type="text" name="middleName" value={formData.middleName} onChange={handleLettersOnly} />
+
+                    {/* Middle Initial */}
+                    <div className="md:col-span-4 flex flex-col justify-end gap-2">
+                        <div className="flex flex-wrap justify-between items-center gap-2">
+                           <label className="text-sm font-bold text-gray-700 leading-none">Middle Initial</label>
+                           <div className="flex items-center gap-2">
+                             <label className="flex items-center gap-1 cursor-pointer text-xs font-medium text-gray-500 hover:text-[#2157da] transition-colors">
+                               <input 
+                                 type="radio" 
+                                 name="middleNameType" 
+                                 checked={formData.middleName !== 'N/A'} 
+                                 onChange={() => setFormData(prev => ({ ...prev, middleName: '' }))}
+                                 className="w-3 h-3 text-[#2157da]"
+                               />
+                               Has
+                             </label>
+                             <label className="flex items-center gap-1 cursor-pointer text-xs font-medium text-gray-500 hover:text-[#2157da] transition-colors">
+                               <input 
+                                 type="radio" 
+                                 name="middleNameType" 
+                                 checked={formData.middleName === 'N/A'} 
+                                 onChange={() => setFormData(prev => ({ ...prev, middleName: 'N/A' }))}
+                                 className="w-3 h-3 text-[#2157da]"
+                               />
+                               None
+                             </label>
+                           </div>
+                        </div>
+                        <input 
+                            type="text" 
+                            name="middleName" 
+                            value={formData.middleName === 'N/A' ? '' : formData.middleName} 
+                            onChange={handleLettersOnly} 
+                            disabled={formData.middleName === 'N/A'}
+                            placeholder={formData.middleName === 'N/A' ? 'N/A' : 'Initial'}
+                            className={`w-full px-3 py-3.5 bg-gray-50 border-2 rounded-2xl text-center outline-none transition-all ${formData.middleName === 'N/A' ? 'bg-gray-100 border-gray-200 opacity-50 cursor-not-allowed' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`} 
+                        />
                     </div>
-                    <div className="form-group">
-                        <label>Last Name <span style={{ color: 'red' }}>*</span></label>
-                        <input type="text" name="lastName" value={formData.lastName} onChange={handleLettersOnly} required style={{ borderColor: formErrors.lastName ? '#dc2626' : undefined }} />
-                        {formErrors.lastName && <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.lastName}</span>}
+
+                    {/* Last Name */}
+                    <div className="md:col-span-4 flex flex-col gap-2">
+                        <label className="text-sm font-bold text-gray-700 flex items-center gap-1">
+                            Last Name <span className="text-red-500">*</span>
+                        </label>
+                        <input 
+                            type="text" 
+                            name="lastName" 
+                            value={formData.lastName} 
+                            onChange={handleLettersOnly} 
+                            required 
+                            placeholder="e.g. Dela Cruz"
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.lastName ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`} 
+                        />
+                        {formErrors.lastName && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.lastName}</span>}
                     </div>
-                    <div className="form-group">
-                        <label>Age <span style={{ color: 'red' }}>*</span> <span style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', fontWeight: '400' }}>(16-100)</span></label>
-                        <input type="text" name="age" value={formData.age} onChange={handleAge} required style={{ borderColor: formErrors.age ? '#dc2626' : undefined }} />
-                        {formErrors.age && <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.age}</span>}
+
+                    {/* Row 2: Birthday, Age, Gender */}
+                    <div className="md:col-span-5 flex flex-col gap-2">
+                        <label className="text-sm font-bold text-gray-700">Birthday <span className="text-red-500">*</span></label>
+                        <input 
+                            type="date" 
+                            name="birthday" 
+                            value={formData.birthday} 
+                            onChange={handleChange} 
+                            required 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.birthday ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`} 
+                        />
+                        {formErrors.birthday && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.birthday}</span>}
                     </div>
-                    <div className="form-group">
-                        <label>Gender <span style={{ color: 'red' }}>*</span></label>
-                        <select name="gender" value={formData.gender} onChange={handleChange} required style={{ borderColor: formErrors.gender ? '#dc2626' : undefined }}>
+
+                    <div className="md:col-span-3 flex flex-col gap-2">
+                        <label className="text-sm font-bold text-gray-700">Age (16-100) <span className="text-red-500">*</span></label>
+                        <input 
+                            type="text" 
+                            name="age" 
+                            value={formData.age} 
+                            onChange={handleAge} 
+                            required 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.age ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`} 
+                        />
+                        {formErrors.age && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.age}</span>}
+                    </div>
+
+                    <div className="md:col-span-4 flex flex-col gap-2">
+                        <label className="text-sm font-bold text-gray-700">Gender <span className="text-red-500">*</span></label>
+                        <select 
+                            name="gender" 
+                            value={formData.gender} 
+                            onChange={handleChange} 
+                            required 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.gender ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`}
+                        >
                             <option value="">Select Gender</option>
                             <option value="Male">Male</option>
                             <option value="Female">Female</option>
                             <option value="Other">Other</option>
                         </select>
-                        {formErrors.gender && <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.gender}</span>}
+                        {formErrors.gender && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.gender}</span>}
                     </div>
-                    <div className="form-group">
-                        <label>Birthday <span style={{ color: 'red' }}>*</span></label>
-                        <input type="date" name="birthday" value={formData.birthday} onChange={handleChange} required style={{ borderColor: formErrors.birthday ? '#dc2626' : undefined }} />
-                        {formErrors.birthday && <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.birthday}</span>}
+
+                    {/* Row 3: Nationality, Status */}
+                    <div className="md:col-span-6 flex flex-col gap-2 text-left">
+                        <label className="text-sm font-bold text-gray-700">Nationality <span className="text-red-500">*</span></label>
+                        <input 
+                            type="text"
+                            name="nationality" 
+                            value={formData.nationality} 
+                            onChange={handleChange} 
+                            required 
+                            placeholder="e.g. Filipino"
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.nationality ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`}
+                        />
+                        {formErrors.nationality && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.nationality}</span>}
                     </div>
-                </div>
-                <div className="form-grid mt-4">
-                    <div className="form-group">
-                        <label>Nationality <span style={{ color: 'red' }}>*</span></label>
-                        <input type="text" name="nationality" value={formData.nationality} onChange={handleLettersOnly} required style={{ borderColor: formErrors.nationality ? '#dc2626' : undefined }} />
-                        {formErrors.nationality && <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.nationality}</span>}
-                    </div>
-                    <div className="form-group">
-                        <label>Marital Status <span style={{ color: 'red' }}>*</span></label>
-                        <select name="maritalStatus" value={formData.maritalStatus} onChange={handleChange} required style={{ borderColor: formErrors.maritalStatus ? '#dc2626' : undefined }}>
+
+                    <div className="md:col-span-6 flex flex-col gap-2 text-left">
+                        <label className="text-sm font-bold text-gray-700">Marital Status <span className="text-red-500">*</span></label>
+                        <select 
+                            name="maritalStatus" 
+                            value={formData.maritalStatus} 
+                            onChange={handleChange} 
+                            required 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.maritalStatus ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`}
+                        >
                             <option value="">Select Status</option>
                             <option value="Single">Single</option>
                             <option value="Married">Married</option>
                             <option value="Widowed">Widowed</option>
                             <option value="Separated">Separated</option>
                         </select>
-                        {formErrors.maritalStatus && <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.maritalStatus}</span>}
+                        {formErrors.maritalStatus && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.maritalStatus}</span>}
                     </div>
                 </div>
             </div>
 
-            <div className="form-section mt-8">
-                <div className="section-title">
-                    <span className="step-badge">2</span>
-                    <h3>Contact Details</h3>
+            {/* Contact Details Card */}
+            <div className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex items-center gap-3 mb-8 pb-4 border-b border-gray-50">
+                    <div className="w-10 h-10 bg-green-500 text-white rounded-xl flex items-center justify-center font-black shadow-lg shadow-green-500/20">2</div>
+                    <div>
+                        <h3 className="text-xl font-black text-gray-900 leading-tight">Contact Details</h3>
+                        <p className="text-sm text-gray-500">How can we reach the student?</p>
+                    </div>
                 </div>
-                <div className="form-grid">
-                    <div className="form-group full-width">
-                        <label>Complete Address <span style={{ color: 'red' }}>*</span></label>
-                        <input type="text" name="address" value={formData.address} onChange={handleChange} placeholder="Street, Barangay, City, Province" required style={{ borderColor: formErrors.address ? '#dc2626' : undefined }} />
-                        {formErrors.address && <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.address}</span>}
+
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                    <div className="md:col-span-12 flex flex-col gap-2">
+                        <label className="text-sm font-bold text-gray-700">Complete Address <span className="text-red-500">*</span></label>
+                        <input 
+                            type="text" 
+                            name="address" 
+                            value={formData.address} 
+                            onChange={handleChange} 
+                            required 
+                            placeholder="Street, Barangay, City, Province"
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.address ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
+                        />
+                        {formErrors.address && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.address}</span>}
                     </div>
-                    <div className="form-group">
-                        <label>Zip Code <span style={{ color: 'red' }}>*</span> <span style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', fontWeight: '400' }}>(4 digits)</span></label>
-                        <input type="text" name="zipCode" value={formData.zipCode} onChange={handleZipCode} placeholder="e.g., 1600" maxLength={4} required style={{ borderColor: formErrors.zipCode ? '#dc2626' : undefined }} />
-                        {formErrors.zipCode && <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.zipCode}</span>}
+
+                    <div className="md:col-span-3 flex flex-col gap-2">
+                        <label className="text-sm font-bold text-gray-700">Zip Code <span className="text-sm font-normal text-gray-400">(4 digits)</span> <span className="text-red-500">*</span></label>
+                        <input 
+                            type="text" 
+                            name="zipCode" 
+                            value={formData.zipCode} 
+                            onChange={handleZipCode} 
+                            maxLength={4}
+                            required 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all font-mono font-bold ${formErrors.zipCode ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
+                        />
+                        {formErrors.zipCode && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.zipCode}</span>}
                     </div>
-                    <div className="form-group">
-                        <label>Birth Place <span style={{ color: 'red' }}>*</span></label>
-                        <input type="text" name="birthPlace" value={formData.birthPlace} onChange={handleChange} placeholder="City/Municipality" required style={{ borderColor: formErrors.birthPlace ? '#dc2626' : undefined }} />
-                        {formErrors.birthPlace && <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.birthPlace}</span>}
+
+                    <div className="md:col-span-3 flex flex-col gap-2">
+                        <label className="text-sm font-bold text-gray-700">Birth Place <span className="text-red-500">*</span></label>
+                        <input 
+                            type="text" 
+                            name="birthPlace" 
+                            value={formData.birthPlace} 
+                            onChange={handleChange} 
+                            required 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.birthPlace ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
+                        />
+                        {formErrors.birthPlace && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.birthPlace}</span>}
                     </div>
-                    <div className="form-group">
-                        <label>Contact Number <span style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', fontWeight: '400' }}>(09XX XXX XXXX)</span></label>
-                        <input
-                            type="tel"
-                            name="contactNumbers"
-                            value={formData.contactNumbers}
-                            onChange={(e) => handlePhoneChange('contactNumbers', e.target.value)}
-                            placeholder="09XX XXX XXXX"
+
+                    <div className="md:col-span-3 flex flex-col gap-2">
+                        <label className="text-sm font-bold text-gray-700">Contact Number <span className="text-red-500">*</span></label>
+                        <input 
+                            type="tel" 
+                            name="contactNumbers" 
+                            value={formData.contactNumbers} 
+                            onChange={(e) => handlePhoneChange('contactNumbers', e.target.value)} 
                             maxLength={13}
-                            required
-                            style={{ borderColor: formErrors.contactNumbers ? '#dc2626' : undefined }}
+                            required 
+                            placeholder="09XX XXX XXXX"
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.contactNumbers ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
                         />
-                        {formErrors.contactNumbers && (
-                            <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.contactNumbers}</span>
-                        )}
+                        {formErrors.contactNumbers && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.contactNumbers}</span>}
                     </div>
-                    <div className="form-group">
-                        <label>Email Address <span style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', fontWeight: '400' }}>(@gmail.com)</span></label>
-                        <input
-                            type="email"
-                            name="email"
-                            value={formData.email}
-                            onChange={(e) => handleEmailChange(e.target.value)}
+
+                    <div className="md:col-span-3 flex flex-col gap-2">
+                        <label className="text-sm font-bold text-gray-700">Email Address <span className="text-red-500">*</span></label>
+                        <input 
+                            type="email" 
+                            name="email" 
+                            value={formData.email} 
+                            onChange={(e) => handleEmailChange(e.target.value)} 
+                            required 
                             placeholder="example@gmail.com"
-                            required
-                            style={{ borderColor: formErrors.email ? '#dc2626' : undefined }}
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.email ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
                         />
-                        {formErrors.email && (
-                            <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.email}</span>
-                        )}
+                        {formErrors.email && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.email}</span>}
                     </div>
                 </div>
             </div>
 
-            <div className="form-section mt-8">
-                <div className="section-title">
-                    <span className="step-badge">3</span>
-                    <h3>Emergency Contact</h3>
-                </div>
-                <div className="form-grid">
-                    <div className="form-group">
-                        <label>Contact Person Name <span style={{ color: 'red' }}>*</span></label>
-                        <input type="text" name="emergencyContactPerson" value={formData.emergencyContactPerson} onChange={handleLettersOnly} placeholder="Full name of emergency contact" required style={{ borderColor: formErrors.emergencyContactPerson ? '#dc2626' : undefined }} />
-                        {formErrors.emergencyContactPerson && <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.emergencyContactPerson}</span>}
+            {/* Emergency Contact Card */}
+            <div className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex items-center gap-3 mb-8 pb-4 border-b border-gray-50">
+                    <div className="w-10 h-10 bg-red-500 text-white rounded-xl flex items-center justify-center font-black shadow-lg shadow-red-500/20">3</div>
+                    <div>
+                        <h3 className="text-xl font-black text-gray-900 leading-tight">Emergency Contact</h3>
+                        <p className="text-sm text-gray-500">In case of any emergency, who should we call?</p>
                     </div>
-                    <div className="form-group">
-                        <label>Emergency Contact Number <span style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', fontWeight: '400' }}>(09XX XXX XXXX)</span></label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="flex flex-col gap-2">
+                        <label className="text-sm font-bold text-gray-700">Contact Person Name <span className="text-red-500">*</span></label>
+                        <input 
+                            type="text" 
+                            name="emergencyContactPerson" 
+                            value={formData.emergencyContactPerson} 
+                            onChange={handleLettersOnly} 
+                            placeholder="Full name of emergency contact" 
+                            required 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.emergencyContactPerson ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
+                        />
+                        {formErrors.emergencyContactPerson && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.emergencyContactPerson}</span>}
+                    </div>
+                    <div className="flex flex-col gap-2">
+                        <label className="text-sm font-bold text-gray-700">Emergency Contact Number <span className="text-red-500">*</span></label>
                         <input
                             type="tel"
                             name="emergencyContactNumber"
@@ -1035,20 +1306,22 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             placeholder="09XX XXX XXXX"
                             maxLength={13}
                             required
-                            style={{ borderColor: formErrors.emergencyContactNumber ? '#dc2626' : undefined }}
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all font-mono font-bold ${formErrors.emergencyContactNumber ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
                         />
-                        {formErrors.emergencyContactNumber && (
-                            <span style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '4px', display: 'block' }}>{formErrors.emergencyContactNumber}</span>
-                        )}
+                        {formErrors.emergencyContactNumber && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.emergencyContactNumber}</span>}
                     </div>
                 </div>
             </div>
 
-            <div className="step-actions">
-                <button type="button" onClick={() => { if (validateStep1()) nextStep(); }} className="next-btn">
+            <div className="flex justify-end pt-4">
+                <button 
+                    type="button" 
+                    onClick={() => { if (validateStep1()) nextStep(); }} 
+                    className="flex items-center justify-center gap-3 px-10 py-4 bg-[#2157da] text-white rounded-2xl font-black text-lg hover:bg-[#1a3a8a] transform hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-blue-500/30"
+                >
                     Next: Select Course
-                    <svg className="ml-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
                     </svg>
                 </button>
             </div>
@@ -1080,8 +1353,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     )}
                     {packages.map((pkg) => {
                         // Get the minimum price from all type options
-                        const minPrice = Math.min(...pkg.typeOptions.map(opt => opt.price));
-                        const maxPrice = Math.max(...pkg.typeOptions.map(opt => opt.price));
+                        const minPrice = Math.min(...pkg.typeOptions.map(opt => opt.price)) + CONVENIENCE_FEE;
+                        const maxPrice = Math.max(...pkg.typeOptions.map(opt => opt.price)) + CONVENIENCE_FEE;
                         const priceDisplay = minPrice === maxPrice
                             ? `₱${minPrice.toLocaleString()}`
                             : `₱${minPrice.toLocaleString()} - ₱${maxPrice.toLocaleString()}`;
@@ -1337,20 +1610,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 
                 return (
                     <div className="schedule-calendar-wrap">
-                        {(!promoPdcSelectingDay2) && (
-                            <div className="session-filter-bar mb-4">
-                                {['All', 'Whole Day', 'Morning Class', 'Afternoon Class'].map(filter => (
-                                    <button
-                                        key={filter}
-                                        type="button"
-                                        className={`session-filter-btn${pdcSessionFilter === filter ? ' active' : ''}`}
-                                        onClick={() => setPdcSessionFilter(filter)}
-                                    >
-                                        {filter}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
+                        {/* Session filter removed as requested */}
                         <div className="month-nav-bar">
                             <button className="month-nav-btn-icon" onClick={() => setCalMonth(new Date(cy, cm - 1, 1))}>
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
@@ -1378,41 +1638,100 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 let daySlots = isDisabled ? [] : slotsData.filter(s => dateStr >= s.date && dateStr <= (s.end_date || s.date));
                                 
                                 // Apply Session Filter for Promo PDC
-                                if (!promoPdcSelectingDay2 && pdcSessionFilter !== 'All') {
-                                    daySlots = daySlots.filter(s => {
-                                        const sn = (s.session || '').toLowerCase();
-                                        if (pdcSessionFilter === 'Whole Day') return sn.includes('whole');
-                                        if (pdcSessionFilter === 'Morning Class') return sn.includes('morning');
-                                        if (pdcSessionFilter === 'Afternoon Class') return sn.includes('afternoon');
-                                        return true;
-                                    });
+                                // Show all sessions without filter
+                                if (false) { // Condition disabled
                                 }
 
                                 const slotStatus = isDisabled ? '' : daySlots.length === 0 ? ' no-slots' : daySlots.every(s => s.available_slots === 0) ? ' full-slots' : ' has-slots';
                                 let cls = 'cal-day' + slotStatus;
                                 if (isDisabled) cls += ' cal-day--disabled';
-                                else if (isSelected) cls += ' cal-day--selected';
                                 if (isToday) cls += ' cal-day--today';
                                 
                                 return (
                                     <div key={d} className={cls} title={isLockedDay1 ? 'Day 1 date' : undefined} onClick={() => !isDisabled && onDateClick(new Date(cy, cm, d))}>
-                                        <span className="cal-day-num">{d}</span>
-                                        {isToday && <span className="cal-day--today-dot" />}
-                                        {!isDisabled && daySlots.length > 0 && (
+                                        <div className="cal-day-header-mini">
+                                            <span className="cal-day-num">{d}</span>
+                                            {isToday && <span className="cal-day--today-dot" />}
+                                        </div>
+                                        {!isDisabled && (
                                             <div className="day-slots-container">
-                                                {daySlots.map(slot => {
-                                                    const sn = (slot.session || '').toLowerCase();
-                                                    const sessionLabel = sn.includes('morning') ? 'Morning Class' : sn.includes('afternoon') ? 'Afternoon Class' : sn.includes('whole') ? 'Whole Day' : 'PDC';
+                                                {(() => {
+                                                    const morningSlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('morning'));
+                                                    const afternoonSlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('afternoon'));
+                                                    const wholeDaySlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('whole'));
+
+                                                    const renderSubBox = (label, slots, type) => {
+                                                        const hasSlots = slots.length > 0;
+                                                        const anySelected = hasSlots && slots.some(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id || formData.promoPdcSlotId2 === s.id);
+                                                        const isFull = hasSlots && slots.every(s => s.available_slots === 0);
+                                                        const hasMultiple = slots.length > 1;
+
+                                                        const statusClass = !hasSlots ? ' empty' : isFull ? ' full' : '';
+                                                        const selectedSlotId = hasSlots ? slots.find(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id || formData.promoPdcSlotId2 === s.id)?.id || "" : "";
+                                                        
+                                                        return (
+                                                                <div 
+                                                                    key={type} 
+                                                                    className={`session-sub-box ${type}${anySelected ? ' selected' : ''}${statusClass}`}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        onDateClick(new Date(cy, cm, d));
+                                                                        if (!hasSlots || isFull) return;
+                                                                        if (promoStep === 2 && !formData.scheduleSlotId2) {
+                                                                            handlePromoPdcDay1Select(slots[0]);
+                                                                        } else if (promoPdcSelectingDay2) {
+                                                                            handlePromoPdcDay2Select(slots[0]);
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    <div className="session-sub-label">
+                                                                        <span>{label}</span>
+                                                                    </div>
+                                                                    {!hasSlots && <span className="no-slot-tag">NO SLOT</span>}
+                                                                    {hasSlots && isFull && <span className="full-tag">FULL</span>}
+                                                                    {hasSlots && (
+                                                                        hasMultiple ? (
+                                                                            <select 
+                                                                                className="session-mini-select"
+                                                                                value={selectedSlotId}
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                                onChange={(e) => {
+                                                                                    const id = parseInt(e.target.value);
+                                                                                    const s = slots.find(x => x.id === id);
+                                                                                    if (anySelected) return;
+                                                                                    if (s) {
+                                                                                        onDateClick(new Date(cy, cm, d));
+                                                                                        if (promoStep === 2 && !formData.scheduleSlotId2) {
+                                                                                            handlePromoPdcDay1Select(s);
+                                                                                        } else if (promoPdcSelectingDay2) {
+                                                                                            handlePromoPdcDay2Select(s);
+                                                                                        }
+                                                                                    }
+                                                                                }}
+                                                                            >
+                                                                                <option value="" disabled>Pick Time</option>
+                                                                                {slots.map(s => (
+                                                                                    <option key={s.id} value={s.id} disabled={s.available_slots === 0}>
+                                                                                        {s.time_range} ({s.available_slots === 0 ? 'FULL' : `${s.available_slots}S`})
+                                                                                    </option>
+                                                                                ))}
+                                                                            </select>
+                                                                        ) : (
+                                                                            <div className="session-sub-time">{slots[0].time_range}</div>
+                                                                        )
+                                                                    )}
+                                                                </div>
+                                                        );
+                                                    };
+
                                                     return (
-                                                        <div key={slot.id} className={`mini-slot-item pdc${slot.available_slots === 0 ? ' full' : ''}`}>
-                                                            <div className="mini-slot-info">
-                                                                <span className="mini-slot-label">{sessionLabel}</span>
-                                                                <span className="mini-status">{slot.available_slots === 0 ? 'FULL' : `${slot.available_slots}S`}</span>
-                                                            </div>
-                                                            <div className="mini-slot-time">{slot.time_range || slot.time || ''}</div>
-                                                        </div>
+                                                        <>
+                                                            {renderSubBox('Morning', morningSlots, 'morning')}
+                                                            {renderSubBox('Afternoon', afternoonSlots, 'afternoon')}
+                                                            {renderSubBox('Whole Day', wholeDaySlots, 'whole')}
+                                                        </>
                                                     );
-                                                })}
+                                                })()}
                                             </div>
                                         )}
                                     </div>
@@ -1715,7 +2034,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                                     setSelectedScheduleDate('');
                                                 }}
                                             >
-                                                {opt.label}{opt.price ? ` — ₱${opt.price.toLocaleString()}` : ''}
+                                                <span className="type-btn__label">{opt.label}</span>
                                                 {typeDisabled && <span className="type-btn__no-slots">No Slots</span>}
                                             </button>
                                         );
@@ -1842,6 +2161,21 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                     {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
                                         <div key={day} className="cal-day-header">{day}</div>
                                     ))}
+                                    {/* Legend integration */}
+                                    <div className="cal-legend-minimal" style={{ gridColumn: 'span 7', display: 'flex', gap: '15px', justifyContent: 'center', padding: '10px 0', borderBottom: '1px solid var(--border-color)', marginBottom: '5px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.7rem', fontWeight: '800', color: '#9a3412' }}>
+                                            <div style={{ width: '8px', height: '8px', background: 'rgba(249, 115, 22, 0.1)', border: '1px solid #fed7aa', borderRadius: '2px' }}></div>
+                                            Morning
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.7rem', fontWeight: '800', color: '#713f12' }}>
+                                            <div style={{ width: '8px', height: '8px', background: 'rgba(254, 252, 232, 1)', border: '1px solid #fde68a', borderRadius: '2px' }}></div>
+                                            Afternoon
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.7rem', fontWeight: '800', color: '#1e3a5f' }}>
+                                            <div style={{ width: '8px', height: '8px', background: 'rgba(239, 246, 255, 1)', border: '1px solid #bfdbfe', borderRadius: '2px' }}></div>
+                                            Whole Day
+                                        </div>
+                                    </div>
                                     {(() => {
                                         const year = viewDate.getFullYear();
                                         const month = viewDate.getMonth();
@@ -1866,25 +2200,81 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                             if (isToday) cls += ' cal-day--today';
                                             days.push(
                                                 <div key={d} className={cls} onClick={() => !isDisabled && setSelectedScheduleDate(dateStr)}>
-                                                    <span className="cal-day-num">{d}</span>
-                                                    {isToday && <span className="cal-day--today-dot" />}
-                                                    {!isDisabled && daySlots.length > 0 && (
-                                                        <div className="day-slots-container">
-                                                            {daySlots.map(slot => {
-                                                                const sn = (slot.session || '').toLowerCase();
-                                                                const sessionLabel = sn.includes('morning') ? 'Morning Class' : sn.includes('afternoon') ? 'Afternoon Class' : sn.includes('whole') ? 'Whole Day' : 'PDC';
+                                                    <div className="cal-day-header-mini">
+                                                        <span className="cal-day-num">{d}</span>
+                                                        {isToday && <span className="cal-day--today-dot" />}
+                                                    </div>
+                                                    <div className="day-slots-container">
+                                                        {(() => {
+                                                            const morningSlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('morning'));
+                                                            const afternoonSlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('afternoon'));
+                                                            const wholeDaySlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('whole'));
+
+                                                            const renderSubBox = (label, slots, type) => {
+                                                                // Always show the box, but handle empty slots as "No Slots"
+                                                                const hasSlots = slots.length > 0;
+                                                                const anySelected = hasSlots && slots.some(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id);
+                                                                const selectedSlotId = hasSlots ? slots.find(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id)?.id || "" : "";
+                                                                const allFull = hasSlots && slots.every(s => s.available_slots === 0);
+                                                                const hasMultiple = slots.length > 1;
+
+                                                                const statusClass = !hasSlots ? ' empty' : allFull ? ' full' : '';
+                                                                
                                                                 return (
-                                                                    <div key={slot.id} className={`mini-slot-item pdc${slot.available_slots === 0 ? ' full' : ''}`}>
-                                                                        <div className="mini-slot-info">
-                                                                            <span className="mini-slot-label">{sessionLabel}</span>
-                                                                            <span className="mini-status">{slot.available_slots === 0 ? 'FULL' : `${slot.available_slots}S`}</span>
+                                                                    <div 
+                                                                        key={type} 
+                                                                        className={`session-sub-box ${type}${anySelected ? ' selected' : ''}${statusClass}`}
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            setSelectedScheduleDate(dateStr);
+                                                                            if (!hasSlots || allFull) return;
+                                                                            if (!hasMultiple) handleScheduleSelect(slots[0]);
+                                                                        }}
+                                                                    >
+                                                                        <div className="session-sub-label">
+                                                                            <span>{label}</span>
                                                                         </div>
-                                                                        <div className="mini-slot-time">{slot.time_range || slot.time || ''}</div>
+                                                                        {!hasSlots && <span className="no-slot-tag">NO SLOT</span>}
+                                                                        {hasSlots && allFull && <span className="full-tag">FULL</span>}
+                                                                        {hasSlots && (
+                                                                             hasMultiple ? (
+                                                                                 <select 
+                                                                                     className="session-mini-select"
+                                                                                     value={selectedSlotId}
+                                                                                     onClick={(e) => e.stopPropagation()}
+                                                                                     onChange={(e) => {
+                                                                                         const id = parseInt(e.target.value);
+                                                                                         const s = slots.find(x => x.id === id);
+                                                                                         if (s) {
+                                                                                             setSelectedScheduleDate(dateStr);
+                                                                                             handleScheduleSelect(s);
+                                                                                         }
+                                                                                     }}
+                                                                                 >
+                                                                                     <option value="" disabled>Pick Time</option>
+                                                                                     {slots.map(s => (
+                                                                                         <option key={s.id} value={s.id} disabled={s.available_slots === 0}>
+                                                                                             {s.time_range} ({s.available_slots === 0 ? 'FULL' : `${s.available_slots}S`})
+                                                                                         </option>
+                                                                                     ))}
+                                                                                 </select>
+                                                                             ) : (
+                                                                                 <div className="session-sub-time">{slots[0].time_range}</div>
+                                                                             )
+                                                                        )}
                                                                     </div>
                                                                 );
-                                                            })}
-                                                        </div>
-                                                    )}
+                                                            };
+
+                                                            return (
+                                                                <>
+                                                                    {renderSubBox('Morning', morningSlots, 'morning')}
+                                                                    {renderSubBox('Afternoon', afternoonSlots, 'afternoon')}
+                                                                    {renderSubBox('Whole Day', wholeDaySlots, 'whole')}
+                                                                </>
+                                                            );
+                                                        })()}
+                                                    </div>
                                                 </div>
                                             );
                                         }
@@ -1928,12 +2318,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                     </div>
                                 )}
 
-                                <h4 className="slots-header">
-                                    {isTDC
-                                        ? `Available TDC Schedules — ${viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`
-                                        : `Available Slots — ${new Date(selectedScheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
-                                    }
-                                </h4>
+                                {isTDC && (
+                                    <h4 className="slots-header">
+                                        Available TDC Schedules — {viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                                    </h4>
+                                )}
 
                                 {!isTDC && (
                                     isSelectingDay2 ? (
@@ -1941,19 +2330,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
                                             Showing {formData.scheduleSession} slots only — select Day 2
                                         </div>
-                                    ) : (
-                                        <div className="session-filter-bar">
-                                            {['All', 'Whole Day', 'Morning Class', 'Afternoon Class'].map(filter => (
-                                                <button
-                                                    key={filter}
-                                                    className={`session-filter-btn${pdcSessionFilter === filter ? ' active' : ''}`}
-                                                    onClick={() => setPdcSessionFilter(filter)}
-                                                >
-                                                    {filter}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )
+                                    ) : null
                                 )}
 
                                 {(() => {
@@ -1964,125 +2341,22 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                             const selectedType = formData.courseType.toLowerCase().trim();
                                             return slotType === selectedType || slotType.includes(selectedType) || selectedType.includes(slotType);
                                         })
-                                        : tdcSlotsForMonth.filter(slot => {
-                                            const sn = slot.session.toLowerCase();
-
-                                            // Day 2 selection mode: only show same session type AND same course as Day 1, never Whole Day
-                                            if (isSelectingDay2) {
-                                                if (sn.includes('whole')) return false;
-                                                const day1 = formData.scheduleSession.toLowerCase();
-                                                const sessionOk = day1.includes('morning') ? sn.includes('morning')
-                                                    : day1.includes('afternoon') ? sn.includes('afternoon')
-                                                        : false;
-                                                if (!sessionOk) return false;
-                                                // Must also match the selected course
-                                                if (formData.course?.name) {
-                                                    const slotCT = (slot.course_type || '').toLowerCase().trim();
-                                                    const selectedName = (formData.course.name || '').toLowerCase().trim();
-                                                    if (slotCT && selectedName && !(slotCT === selectedName || slotCT.includes(selectedName) || selectedName.includes(slotCT))) {
-                                                        return false;
-                                                    }
-                                                }
-                                                // Must also match transmission type (Manual/Automatic)
-                                                if (formData.courseType) {
-                                                    const slotTx = (slot.transmission || '').toLowerCase().trim();
-                                                    const selectedTx = formData.courseType.toLowerCase().trim();
-                                                    if (slotTx && selectedTx && !(slotTx === selectedTx || slotTx.includes(selectedTx) || selectedTx.includes(slotTx))) {
-                                                        return false;
-                                                    }
-                                                    return true;
-                                                }
-                                            }
-
-                                            // Normal session filter
-                                            let sessionMatch = true;
-                                            if (pdcSessionFilter === 'Whole Day') sessionMatch = sn.includes('whole');
-                                            else if (pdcSessionFilter === 'Morning Class') sessionMatch = sn.includes('morning');
-                                            else if (pdcSessionFilter === 'Afternoon Class') sessionMatch = sn.includes('afternoon');
-
-                                            // Course match — only show slots for the selected course
-                                            let courseMatch = true;
-                                            if (formData.course?.name) {
-                                                const slotCT = (slot.course_type || '').toLowerCase().trim();
-                                                const selectedName = (formData.course.name || '').toLowerCase().trim();
-                                                if (slotCT && selectedName) {
-                                                    courseMatch = slotCT === selectedName ||
-                                                        slotCT.includes(selectedName) ||
-                                                        selectedName.includes(slotCT);
-                                                }
-                                            }
-
-                                            // Transmission match — filter by selected type (Manual/Automatic)
-                                            let transmissionMatch = true;
-                                            if (formData.courseType) {
-                                                const slotTx = (slot.transmission || '').toLowerCase().trim();
-                                                const selectedTx = formData.courseType.toLowerCase().trim();
-                                                if (slotTx && selectedTx) {
-                                                    transmissionMatch = slotTx === selectedTx || slotTx.includes(selectedTx) || selectedTx.includes(slotTx);
-                                                }
-                                            }
-
-                                            return sessionMatch && courseMatch && transmissionMatch;
-                                        });
+                                        : []; // Empty array for PDC as slots are now handled in calendar
 
                                     return loadingSchedule ? (
                                         <div className="slots-loading">Loading available slots...</div>
-                                    ) : filteredPdcSlots.length === 0 ? (
+                                    ) : (isTDC && filteredPdcSlots.length === 0) ? (
                                         <div className="slots-empty">
-                                            <p className="slots-empty__title">No available slots {isTDC ? `in ${viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}` : `for ${pdcSessionFilter !== 'All' ? pdcSessionFilter.toLowerCase() : 'this date'}`}</p>
-                                            <p className="slots-empty__sub">{isTDC ? (hasPrevSlotMonth || hasNextSlotMonth ? 'Try navigating to another month using the arrows above' : 'Please check back later') : 'Please try selecting another date or filter'}</p>
+                                            <p className="slots-empty__title">No available slots in {viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+                                            <p className="slots-empty__sub">Try navigating to another month using the arrows above or check back later.</p>
                                         </div>
-                                    ) : (
+                                    ) : isTDC ? (
                                         <div className="slots-grid">
-                                            {filteredPdcSlots.map(slot => {
-                                                const isSelected1 = formData.scheduleSlotId === slot.id;
-                                                const isSelected2 = formData.scheduleSlotId2 === slot.id;
-                                                const isSelected = isSelected1 || isSelected2;
-                                                // For PDC show only the transmission (Automatic/Manual); for TDC show the modality (F2F/Online)
-                                                const slotChip = (() => {
-                                                    const isTdcSlot = slot.type?.toLowerCase() === 'tdc';
-                                                    if (isTdcSlot) return slot.course_type || '';
-                                                    return slot.transmission || '';
-                                                })();
-                                                const slotDateLabel = slot.end_date && slot.date !== slot.end_date
-                                                    ? `${new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(slot.end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                                                    : new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-                                                const availFull = slot.available_slots >= slot.total_capacity * 0.8;
-                                                const availLow = slot.available_slots < 5;
-                                                return (
-                                                    <div key={slot.id} className={`slot-card${isSelected ? ' slot-card--selected' : ''}`} onClick={() => handleScheduleSelect(slot)}>
-                                                        {isSelected && <div className="slot-card__accent" />}
-                                                        <div className="slot-card__body">
-                                                            <div className="slot-card__date-row">
-                                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                                                                {slotDateLabel}
-                                                            </div>
-                                                            <div className="slot-card__top">
-                                                                <div className="slot-card__icon">
-                                                                    {slot.session?.toLowerCase().includes('whole')
-                                                                        ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                                                                        : slot.session?.toLowerCase().includes('morning')
-                                                                            ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" /></svg>
-                                                                            : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 18a5 5 0 0 0-10 0" /><line x1="12" y1="2" x2="12" y2="9" /><path d="M4.22 10.22l1.42 1.42" /><path d="M18.36 11.64l1.42-1.42" /><line x1="2" y1="18" x2="22" y2="18" /></svg>
-                                                                    }
-                                                                </div>
-                                                                <div>
-                                                                    <p className="slot-card__session">{slot.session}</p>
-                                                                    <p className="slot-card__time">{slot.time_range}</p>
-                                                                </div>
-                                                            </div>
-                                                            {slotChip && <span className="slot-card__chip">{slotChip}</span>}
-                                                            <div className="slot-card__footer">
-                                                                <div className={`slot-card__avail-badge${availLow ? ' slot-card__avail-badge--low' : ''}`}>
-                                                                    {slot.available_slots}<span>/{slot.total_capacity}</span>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
+                                            {filteredPdcSlots.map(slot => 
+                                                renderPromoSlotCard(slot, formData.scheduleSlotId === slot.id, () => handleScheduleSelect(slot), slot.course_type || 'F2F')
+                                            )}
                                         </div>
-                                    );
+                                    ) : null;
                                 })()}
                                 <div className="step-actions">
                                     <button type="button" className="back-btn" onClick={prevStep}>
@@ -2109,7 +2383,17 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
             const selectedTypeOpt = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType);
             const selectedPrice = selectedTypeOpt?.price || dynamicCourse?.price || 0;
-            const requiredAmount = formData.paymentStatus === 'Downpayment' ? selectedPrice * 0.5 : selectedPrice;
+            const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
+            
+            // Subtotal includes course + addons
+            const subtotal = selectedPrice + addonsTotal;
+            // Standard 3% discount on subtotal for all walk-ins as requested
+            const discount = subtotal * 0.03;
+            // Total amount includes convenience fee (not discounted)
+            const totalAmount = subtotal - discount + CONVENIENCE_FEE;
+            
+            const requiredAmount = formData.paymentStatus === 'Downpayment' ? totalAmount * 0.5 : totalAmount;
+            const balanceDue = totalAmount - (Number(formData.amountPaid) || 0);
             const change = formData.amountPaid ? Math.max(0, Number(formData.amountPaid) - requiredAmount) : 0;
 
             return (
@@ -2138,13 +2422,91 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 </div>
                                 {(selectedTypeOpt || isPromo) && (
                                     <div className="payment-summary-card__right">
-                                        {selectedTypeOpt && <span className="payment-summary-card__type-label">TYPE</span>}
-                                        {selectedTypeOpt && <span className="payment-summary-card__type-value">{selectedTypeOpt.label}</span>}
-                                        <span className="payment-summary-card__price">₱{selectedPrice.toLocaleString()}</span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                            {selectedTypeOpt && <span className="payment-summary-card__type-label" style={{ margin: 0 }}>TYPE</span>}
+                                            {selectedTypeOpt && <span className="payment-summary-card__type-value">{selectedTypeOpt.label}</span>}
+                                        </div>
+                                        <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                            <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>₱{selectedPrice.toLocaleString()}</span>
+                                            <span className="payment-summary-card__fee-info" style={{ color: 'var(--primary-color)', opacity: 1, fontWeight: '800', fontSize: '0.75rem' }}>+ ₱{CONVENIENCE_FEE} Convenience Fee</span>
+                                        </div>
                                     </div>
                                 )}
                             </div>
                         )}
+
+                        {/* ── Add-ons Selection (Standardized placement) ── */}
+                        <div className="payment-form-section" style={{ borderTop: '1px solid #e2e8f0', paddingTop: '15px' }}>
+                            <p className="payment-form-section__title">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                                Optional Add-ons
+                            </p>
+                            <div className="addon-selection-grid">
+                                {DEFAULT_ADDONS.map(addon => {
+                                    const isSelected = formData.addons.some(a => a.id === addon.id);
+                                    return (
+                                        <div 
+                                            key={addon.id} 
+                                            className={`addon-card${isSelected ? ' selected' : ''}`}
+                                            onClick={() => toggleAddon(addon)}
+                                        >
+                                            <div className="addon-icon">{addon.icon}</div>
+                                            <div className="addon-info">
+                                                <div className="addon-name">{addon.name}</div>
+                                                <div className="addon-price">₱{addon.price.toLocaleString()}</div>
+                                            </div>
+                                            <div className="addon-check">
+                                                {isSelected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* ── Payment Breakdown ── */}
+                        <div className="payment-breakdown">
+                            <span className="breakdown-title">Final Billing Breakdown</span>
+                            <div className="breakdown-row">
+                                <span>Course Fee ({formData.courseType || 'Standard'})</span>
+                                <span>₱{selectedPrice.toLocaleString()}</span>
+                            </div>
+                            {formData.addons.map(a => (
+                                <div key={a.id} className="breakdown-row">
+                                    <span>{a.name}</span>
+                                    <span>₱{a.price.toLocaleString()}</span>
+                                </div>
+                            ))}
+                            <div className="breakdown-row" style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px dashed #e2e8f0' }}>
+                                <span style={{ color: '#64748b' }}>Subtotal</span>
+                                <span style={{ color: '#64748b' }}>₱{subtotal.toLocaleString()}</span>
+                            </div>
+                            <div className="breakdown-row" style={{ color: '#059669', fontWeight: '600' }}>
+                                <span>3% Discount (Walk-In Promo)</span>
+                                <span>- ₱{discount.toLocaleString()}</span>
+                            </div>
+                            <div className="breakdown-row">
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                    Convenience Fee
+                                    <span style={{ fontSize: '0.65rem', padding: '1px 5px', color: '#1a4fba', border: '1px solid #1a4fba', borderRadius: '4px' }}>SEPARATE</span>
+                                </span>
+                                <span>₱{CONVENIENCE_FEE.toLocaleString()}</span>
+                            </div>
+                            <div className="breakdown-row total">
+                                <span>Total Amount Due</span>
+                                <span>₱{totalAmount.toLocaleString()}</span>
+                            </div>
+
+                            {formData.paymentStatus === 'Downpayment' && (
+                                <div className="breakdown-row dpt-badge" style={{ marginTop: '10px', background: '#fffbeb', padding: '10px', borderRadius: '8px', border: '1px solid #fde68a' }}>
+                                    <div>
+                                        <div style={{ fontWeight: '700', color: '#92400e', fontSize: '0.85rem' }}>DOWNPAYMENT (DPT) MODE</div>
+                                        <div style={{ fontSize: '0.75rem', color: '#b45309' }}>50% of total amount required today</div>
+                                    </div>
+                                    <div style={{ fontWeight: '800', color: '#92400e', fontSize: '1.1rem' }}>₱{requiredAmount.toLocaleString()}</div>
+                                </div>
+                            )}
+                        </div>
 
                         {/* ── Payment Form ── */}
                         <div className="payment-form-section">
@@ -2160,7 +2522,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                         value={formData.branchId}
                                         onChange={(e) => {
                                             const branch = branches.find(b => b.id === parseInt(e.target.value));
-                                            setFormData(prev => ({ ...prev, branchId: e.target.value, branchName: branch ? branch.name : '' }));
+                                            setFormData(prev => ({ 
+                                                ...prev, 
+                                                branchId: e.target.value, 
+                                                branchName: branch ? branch.name : '',
+                                                zipCode: (branch && !prev.zipCode) ? getZipForBranch(branch.name) : prev.zipCode
+                                            }));
                                         }}
                                         disabled={adminProfile?.rawRole === 'staff'}
                                     >
@@ -2171,12 +2538,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                     <label>Payment Method</label>
                                     <select name="paymentMethod" value={formData.paymentMethod} onChange={handleChange}>
                                         <option value="Cash">Cash</option>
-                                        <option value="GCash">GCash</option>
                                         <option value="Starpay">Starpay</option>
                                         <option value="MetroBank">MetroBank</option>
                                     </select>
                                 </div>
-                                {['GCash', 'Starpay', 'MetroBank'].includes(formData.paymentMethod) && (
+                                {['Starpay', 'MetroBank'].includes(formData.paymentMethod) && (
                                     <div className="form-group">
                                         <label>
                                             Transaction No.
@@ -2234,7 +2600,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         const paid = Number(formData.amountPaid);
                         const hasAmount = formData.amountPaid !== '' && !isNaN(paid) && paid > 0;
                         const isEnough = hasAmount && paid >= requiredAmount;
-                        const needsTxn = ['GCash', 'Starpay'].includes(formData.paymentMethod);
+                        const needsTxn = ['Starpay', 'MetroBank'].includes(formData.paymentMethod);
                         const hasTxn = !!(formData.transactionNo && formData.transactionNo.trim());
                         const canProceed = isEnough && (!needsTxn || hasTxn);
 
@@ -2291,6 +2657,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         <h4>Course & Branch</h4>
                         <p><strong>Course:</strong> {formData.course?.name}</p>
                         <p><strong>Type:</strong> {formData.courseType}</p>
+                        {formData.addons.length > 0 && <p><strong>Add-ons:</strong> {formData.addons.map(a => a.name).join(', ')}</p>}
                         <p><strong>Branch:</strong> {formatBranchName(formData.branchName)}</p>
                     </div>
                     <div className="review-section">
@@ -2336,13 +2703,20 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         )}
                     </div>
                     <div className="review-section">
-                        <h4>Payment</h4>
-                        <p><strong>Method:</strong> {formData.paymentMethod}</p>
-                        {['GCash', 'Starpay'].includes(formData.paymentMethod) && (
-                            <p><strong>Transaction No:</strong> {formData.transactionNo}</p>
-                        )}
-                        <p><strong>Amount:</strong> ₱{Number(formData.amountPaid).toLocaleString()}</p>
-                        <p><strong>Status:</strong> {formData.paymentStatus}</p>
+                        <h4>Payment Summary</h4>
+                        <div className="review-payment-grid">
+                            <p><strong>Method:</strong> {formData.paymentMethod}</p>
+                            {['GCash', 'Starpay'].includes(formData.paymentMethod) && (
+                                <p><strong>Transaction No:</strong> {formData.transactionNo}</p>
+                            )}
+                            <p><strong>Payment Status:</strong> {formData.paymentStatus}</p>
+                            <p><strong>Amount Paid Today:</strong> ₱{Number(formData.amountPaid).toLocaleString()}</p>
+                            {formData.paymentStatus === 'Downpayment' && (
+                                <p style={{ color: '#b45309', fontWeight: '700' }}>
+                                    <strong>Remaining Balance:</strong> ₱{balanceDue.toLocaleString()}
+                                </p>
+                            )}
+                        </div>
                     </div>
                 </div>
 

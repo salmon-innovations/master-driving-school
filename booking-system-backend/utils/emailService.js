@@ -470,7 +470,7 @@ const sendPasswordEmail = async (email, password, firstName, role) => {
               <p>${EMAIL_CONTENT.newAccount.loginPrompt}</p>
               
               <p style="text-align: center;">
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/signin" class="btn" style="display: inline-block; padding: 12px 24px; background-color: #2157da; color: #ffffff !important; text-decoration: none; border-radius: 5px; margin-top: 15px; font-weight: bold;">${EMAIL_CONTENT.newAccount.loginButtonText}</a>
+                <a href="${EMAIL_CONTENT.newAccount.buttonUrl || process.env.FRONTEND_URL + '/signin' || 'http://localhost:5173/signin'}" class="btn" style="display: inline-block; padding: 12px 24px; background-color: #2157da; color: #ffffff !important; text-decoration: none; border-radius: 5px; margin-top: 15px; font-weight: bold;">${EMAIL_CONTENT.newAccount.loginButtonText}</a>
               </p>
             </div>
             <div class="footer">
@@ -570,10 +570,10 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
             .content { padding: 30px; background-color: #f9f9f9; }
             .section { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; border: 1px solid #e5e7eb; }
             .section h3 { color: #1a4fba; margin-top: 0; font-size: 16px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; }
-            .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; }
+            .detail-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f3f4f6; clear: both; overflow: hidden; }
             .detail-row:last-child { border-bottom: none; }
-            .detail-label { font-weight: 600; color: #6b7280; font-size: 14px; }
-            .detail-value { font-weight: 600; color: #1f2937; font-size: 14px; }
+            .detail-label { font-weight: 600; color: #6b7280; font-size: 14px; float: left; width: 40%; }
+            .detail-value { font-weight: 600; color: #1f2937; font-size: 14px; float: right; text-align: right; width: 55%; word-wrap: break-word; }
             .schedule-highlight { background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%); border: 2px solid #3b82f6; border-radius: 12px; padding: 20px; margin: 20px 0; text-align: center; }
             .schedule-highlight h3 { color: #1a4fba; margin: 0 0 15px 0; font-size: 18px; }
             .schedule-date { font-size: 22px; font-weight: 800; color: #1e40af; margin: 5px 0; }
@@ -607,7 +607,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
               
               <div class="schedule-highlight">
                 <h3>${EMAIL_CONTENT.walkIn.scheduleHeading}</h3>
-                ${isTDC && effectiveDate2 ? `
+                ${effectiveDate2 ? `
                 <div style="margin-bottom: 15px;">
                   <div style="font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 1</div>
                   <div class="schedule-date">${formattedDate}</div>
@@ -631,28 +631,28 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
               <div class="section">
                 <h3>${EMAIL_CONTENT.walkIn.detailsHeading}</h3>
                 <div class="detail-row">
-                  <span class="detail-label">Course:</span>
+                  <span class="detail-label">Course:&nbsp;&nbsp;</span>
                   <span class="detail-value">${courseName}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Type:</span>
-                  <span class="detail-value">${courseType.toUpperCase()}</span>
+                  <span class="detail-label">Type:&nbsp;&nbsp;</span>
+                  <span class="detail-value">${(courseType || 'N/A').toUpperCase()}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Branch:</span>
+                  <span class="detail-label">Branch:&nbsp;&nbsp;</span>
                   <span class="detail-value">${branchName}</span>
                 </div>
-                ${branchAddress ? `<div class="detail-row"><span class="detail-label">Branch Address:</span><span class="detail-value">${branchAddress}</span></div>` : ''}
+                ${branchAddress ? `<div class="detail-row"><span class="detail-label">Branch Address:&nbsp;&nbsp;</span><span class="detail-value">${branchAddress}</span></div>` : ''}
                 <div class="detail-row">
-                  <span class="detail-label">Payment Method:</span>
+                  <span class="detail-label">Payment Method:&nbsp;&nbsp;</span>
                   <span class="detail-value">${paymentMethod}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Amount Paid:</span>
+                  <span class="detail-label">Amount Paid:&nbsp;&nbsp;</span>
                   <span class="detail-value">₱${Number(amountPaid).toLocaleString()}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Payment Status:</span>
+                  <span class="detail-label">Payment Status:&nbsp;&nbsp;</span>
                   <span class="detail-value">${paymentStatus}</span>
                 </div>
               </div>
@@ -711,7 +711,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
               </div>
 
               <p style="text-align: center; margin-top: 25px;">
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify-email?email=${encodeURIComponent(email)}" class="btn">${EMAIL_CONTENT.walkIn.verifyButtonText}</a>
+                <a href="${EMAIL_CONTENT.walkIn.buttonUrl || process.env.FRONTEND_URL + '/verify-email?email=' + encodeURIComponent(email) || 'http://localhost:5173/verify-email?email=' + encodeURIComponent(email)}" class="btn">${EMAIL_CONTENT.walkIn.verifyButtonText}</a>
               </p>
             </div>
             <div class="footer">
@@ -736,7 +736,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
 };
 
 // Send guest enrollment confirmation without login credentials
-const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails) => {
+const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails, hasReviewer = false, hasVehicleTips = false) => {
   try {
     const transporter = createTransporter();
     const { courseName, courseCategory, courseType, branchName, branchAddress, scheduleDate, scheduleSession, scheduleTime, scheduleDate2, scheduleSession2, scheduleTime2, paymentMethod, amountPaid, paymentStatus } = enrollmentDetails;
@@ -753,10 +753,23 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
     const isB1B2 = courseNameLower.includes('b1') || courseNameLower.includes('b2') || courseNameLower.includes('van') || courseNameLower.includes('l300');
     const isTricycle = courseNameLower.includes('a1') || courseNameLower.includes('tricycle');
 
+    const path = require('path');
+    const attachments = [];
+    let items = [];
+    if (hasReviewer) {
+        items.push('Driving School Reviewer');
+        attachments.push({ filename: 'MASTER-TDC-PDC-REVIEWER-AND-GUIDE.pdf', path: path.join(__dirname, 'AddOns', 'MASTER-TDC-PDC-REVIEWER-AND-GUIDE.pdf') });
+    }
+    if (hasVehicleTips) {
+        items.push('Vehicle Maintenance Guide');
+        attachments.push({ filename: 'Vehicle-Maintenance-Guide.pdf', path: path.join(__dirname, 'AddOns', 'Vehicle-Maintenance-Guide.pdf') });
+    }
+
     const mailOptions = {
       from: process.env.EMAIL_FROM,
       to: email,
       subject: EMAIL_CONTENT.guest.subject,
+      attachments,
       html: `
         <!DOCTYPE html>
         <html>
@@ -770,10 +783,10 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
             .content { padding: 30px; background-color: #f9f9f9; }
             .section { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; border: 1px solid #e5e7eb; }
             .section h3 { color: #1a4fba; margin-top: 0; font-size: 16px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; }
-            .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; }
+            .detail-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f3f4f6; clear: both; overflow: hidden; }
             .detail-row:last-child { border-bottom: none; }
-            .detail-label { font-weight: 600; color: #6b7280; font-size: 14px; }
-            .detail-value { font-weight: 600; color: #1f2937; font-size: 14px; }
+            .detail-label { font-weight: 600; color: #6b7280; font-size: 14px; float: left; width: 40%; }
+            .detail-value { font-weight: 600; color: #1f2937; font-size: 14px; float: right; text-align: right; width: 55%; word-wrap: break-word; }
             .schedule-highlight { background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%); border: 2px solid #3b82f6; border-radius: 12px; padding: 20px; margin: 20px 0; text-align: center; }
             .schedule-highlight h3 { color: #1a4fba; margin: 0 0 15px 0; font-size: 18px; }
             .schedule-date { font-size: 22px; font-weight: 800; color: #1e40af; margin: 5px 0; }
@@ -801,7 +814,7 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
               
               <div class="schedule-highlight">
                 <h3>${EMAIL_CONTENT.guest.scheduleHeading}</h3>
-                ${isTDC && effectiveDate2 ? `
+                ${effectiveDate2 ? `
                 <div style="margin-bottom: 15px;">
                   <div style="font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 1</div>
                   <div class="schedule-date">${formattedDate}</div>
@@ -822,31 +835,42 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
                 `}
               </div>
 
+              
+              ${items.length > 0 ? `
+              <div class="section" style="background: #e0f2fe; border-left: 4px solid #3b82f6;">
+                <h3 style="color: #1e40af; margin-top: 0;">🎁 Your Requested Add-ons</h3>
+                <p style="margin: 0 0 10px 0; font-size: 14px;">Thank you for availing our additional review materials! We have attached them directly to this email.</p>
+                <ul style="margin: 0; padding-left: 20px; font-weight: bold; color: #1e3a8a;">
+                  ${items.map(i => `<li>${i}</li>`).join('')}
+                </ul>
+              </div>
+              ` : ''}
+
               <div class="section">
                 <h3>${EMAIL_CONTENT.guest.detailsHeading}</h3>
                 <div class="detail-row">
-                  <span class="detail-label">Course:</span>
+                  <span class="detail-label">Course:&nbsp;&nbsp;</span>
                   <span class="detail-value">${courseName}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Type:</span>
-                  <span class="detail-value">${courseType.toUpperCase()}</span>
+                  <span class="detail-label">Type:&nbsp;&nbsp;</span>
+                  <span class="detail-value">${(courseType || 'N/A').toUpperCase()}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Branch:</span>
+                  <span class="detail-label">Branch:&nbsp;&nbsp;</span>
                   <span class="detail-value">${branchName}</span>
                 </div>
-                ${branchAddress ? `<div class="detail-row"><span class="detail-label">Branch Address:</span><span class="detail-value">${branchAddress}</span></div>` : ''}
+                ${branchAddress ? `<div class="detail-row"><span class="detail-label">Branch Address:&nbsp;&nbsp;</span><span class="detail-value">${branchAddress}</span></div>` : ''}
                 <div class="detail-row">
-                  <span class="detail-label">Payment Method:</span>
+                  <span class="detail-label">Payment Method:&nbsp;&nbsp;</span>
                   <span class="detail-value">${paymentMethod}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Amount Paid:</span>
+                  <span class="detail-label">Amount Paid:&nbsp;&nbsp;</span>
                   <span class="detail-value">₱${Number(amountPaid).toLocaleString()}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Payment Status:</span>
+                  <span class="detail-label">Payment Status:&nbsp;&nbsp;</span>
                   <span class="detail-value">${paymentStatus}</span>
                 </div>
               </div>
@@ -956,7 +980,7 @@ const sendNoShowEmail = async (email, firstName, lastName, enrollmentDetails) =>
               </div>
               
               <div style="text-align: center; margin-top: 30px;">
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/login" class="btn">${EMAIL_CONTENT.noShow.loginButtonText}</a>
+                <a href="" class="btn"></a>
               </div>
             </div>
           </div>
@@ -1018,7 +1042,7 @@ const sendNewsPromoEmail = async (email, firstName, newsTitle, newsDescription, 
               </div>
 
               <div style="text-align: center; margin-top: 25px;">
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}" style="display: inline-block; padding: 12px 24px; background-color: #1a4fba; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">${EMAIL_CONTENT.news.visitButton}</a>
+                <a href="" style="display: inline-block; padding: 12px 24px; background-color: #1a4fba; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;"></a>
               </div>
             </div>
             <div class="footer">
@@ -1176,7 +1200,7 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
               ` : ''}
 
               <p style="text-align:center;margin-top:20px;">
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/profile"
+                <a href=""
                    style="display:inline-block;padding:12px 28px;background:linear-gradient(135deg,#1a4fba,#3b82f6);color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">
                   ${EMAIL_CONTENT.receipt.viewAccountButton}
                 </a>
@@ -1201,7 +1225,53 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
   }
 };
 
+const sendAddonsEmail = async (email, firstName, lastName, hasReviewer, hasVehicleTips) => {
+  try {
+    const transporter = createTransporter();
+    const attachments = [];
+    let items = [];
+    if (hasReviewer) {
+      items.push('Driving School Reviewer');
+      attachments.push({ filename: 'MASTER-TDC-PDC-REVIEWER-AND-GUIDE.pdf', path: path.join(__dirname, 'AddOns', 'MASTER-TDC-PDC-REVIEWER-AND-GUIDE.pdf') });
+    }
+    if (hasVehicleTips) {
+      items.push('Vehicle Maintenance Guide');
+      attachments.push({ filename: 'Vehicle-Maintenance-Guide.pdf', path: path.join(__dirname, 'AddOns', 'Vehicle-Maintenance-Guide.pdf') });
+    }
+    if (attachments.length === 0) return;
+    const mailOptions = { 
+      from: process.env.EMAIL_FROM, 
+      to: email, 
+      subject: 'Your Driving School Add-ons', 
+      attachments, 
+      html: `<!DOCTYPE html><html><body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px;"><div style="max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;"><div style="background: linear-gradient(135deg, #1a4fba 0%, #3b82f6 100%); color: white; padding: 30px 20px; text-align: center;"><h1 style="margin:0;font-size:24px;">Your Add-ons Are Here!</h1></div><div style="padding: 30px; background: #fff;"><p>Hi ${firstName},</p><p>Thank you for availing our additional review materials! We have attached the following requested add-ons to this email:</p><ul>${items.map(i=>'<li><strong>'+i+'</strong></li>').join('')}</ul><p>These guides will greatly help with your driving preparation. If you have any questions, feel free to reach out to us.</p><br><p>Best regards,<br>The MDS Team</p></div></div></body></html>`
+    };
+    await transporter.sendMail(mailOptions);
+    console.log('[EmailService] Add-ons sent to:', email);
+  } catch (err) { console.error('Addons email error:', err); }
+};
+
+const sendTestEmail = async (email, html, subject) => {
+  try {
+    const transporter = createTransporter();
+    const mailOptions = {
+      from: process.env.EMAIL_FROM || 'admin@school.com',
+      to: email,
+      subject: subject || 'Test Email Preview',
+      html: html
+    };
+    await transporter.sendMail(mailOptions);
+    console.log('[EmailService] Test email sent to:', email);
+    return true;
+  } catch (err) {
+    console.error('Test email error:', err);
+    throw err;
+  }
+};
+
 module.exports = {
+  sendTestEmail,
+  sendAddonsEmail,
   reloadEmailContent,
   generateVerificationCode,
   sendVerificationEmail,

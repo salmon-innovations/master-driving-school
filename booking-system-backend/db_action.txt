@@ -1,0 +1,8 @@
+Found 8 bookings.
+Deleted 0 from transactions.
+Payments error: relation "payments" does not exist
+Deleted 0 from schedule_enrollments.
+Deleted 8 from bookings.
+Reset bookings_id_seq
+Reset transactions_id_seq
+Reset schedule_enrollments_id_seq

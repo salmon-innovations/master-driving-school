@@ -14,10 +14,14 @@ const apiRequest = async (endpoint, options = {}) => {
   const config = {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
       ...options.headers,
     },
   };
+
+  // Only set application/json if we are not sending FormData
+  if (!(options.body instanceof FormData)) {
+    config.headers['Content-Type'] = 'application/json';
+  }
 
   // Add authorization header if token exists
   if (token) {
@@ -133,6 +137,22 @@ export const authAPI = {
       localStorage.removeItem('userToken');
       localStorage.removeItem('user');
     }
+  },
+
+  // Update profile
+  updateProfile: async (data) => {
+    return await apiRequest('/auth/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Change password
+  changePassword: async (data) => {
+    return await apiRequest('/auth/change-password', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
   },
 };
 
@@ -651,6 +671,10 @@ export const emailContentAPI = {
     method: 'PUT',
     body: JSON.stringify({ content }),
   }),
+  testEmail: async (data) => await apiRequest('/admin/email-content/test', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
 };
 
 // News & Announcements API
@@ -676,7 +700,15 @@ export const newsAPI = {
   })
 };
 
-// Notifications API
+// Testimonials API
+export const testimonialsAPI = {
+  getAll: async () => await apiRequest('/testimonials'),
+  create: async (data) => await apiRequest('/testimonials', {
+    method: 'POST',
+    body: data instanceof FormData ? data : JSON.stringify(data)
+  })
+};
+
 export const notificationsAPI = {
   getAll: async () => await apiRequest('/admin/notifications'),
 };

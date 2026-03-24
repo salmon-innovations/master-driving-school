@@ -9,7 +9,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   const [selectedCourse, setSelectedCourse] = useState(null)
   const [courseType, setCourseType] = useState('online')
   const [quantity, setQuantity] = useState(1)
-  const [addonsConfig, setAddonsConfig] = useState({ reviewer: 30, vehicleTips: 20, convenienceFee: 25 })
+  const [addonsConfig, setAddonsConfig] = useState({ reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 3, customAddons: [] })
   const [selectedAddons, setSelectedAddons] = useState({ reviewer: true, vehicleTips: true, convenienceFee: true })
   const [courses, setCourses] = useState([])
   const [branchContacts, setBranchContacts] = useState([])
@@ -52,7 +52,16 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
         ]);
 
         if (addonsRes?.success && addonsRes.config) {
-          setAddonsConfig(addonsRes.config);
+          const config = { reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 3, ...addonsRes.config, customAddons: addonsRes.config.customAddons || [] };
+          setAddonsConfig(config);
+          
+          const newSelected = { reviewer: true, vehicleTips: true, convenienceFee: true };
+          if (config.customAddons) {
+              config.customAddons.forEach(addon => {
+                  newSelected[addon.id] = true;
+              });
+          }
+          setSelectedAddons(newSelected);
         }
 
         if (coursesRes.success) {
@@ -227,11 +236,6 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   }
 
   const handleAddToCartFromDetail = () => {
-    if (!isLoggedIn) {
-      showNotification("Please sign in to add courses to your cart. Guest enrollment provides direct checkout.", "error")
-      return
-    }
-
     if (selectedCourse) {
       addToCart(selectedCourse, quantity, courseType)
       showNotification(`${selectedCourse.shortName} added to cart!`, "success")
@@ -543,10 +547,10 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                   </span>
                 </div>
 
-                {((selectedAddons.reviewer ? parseFloat(addonsConfig.reviewer || 30) : 0) + (selectedAddons.vehicleTips ? parseFloat(addonsConfig.vehicleTips || 20) : 0)) > 0 && (
+                {((selectedAddons.reviewer ? parseFloat(addonsConfig.reviewer || 30) : 0) + (selectedAddons.vehicleTips ? parseFloat(addonsConfig.vehicleTips || 20) : 0) + (addonsConfig.customAddons || []).reduce((sum, addon) => sum + (selectedAddons[addon.id] ? parseFloat(addon.price || 0) : 0), 0)) > 0 && (
                   <div className="flex justify-between items-center py-0.5">
                     <span>Add-ons</span>
-                    <span className="font-bold text-gray-900">₱{(((selectedAddons.reviewer ? parseFloat(addonsConfig.reviewer || 30) : 0) + (selectedAddons.vehicleTips ? parseFloat(addonsConfig.vehicleTips || 20) : 0)) * quantity).toLocaleString()}</span>
+                    <span className="font-bold text-gray-900">₱{(((selectedAddons.reviewer ? parseFloat(addonsConfig.reviewer || 30) : 0) + (selectedAddons.vehicleTips ? parseFloat(addonsConfig.vehicleTips || 20) : 0) + (addonsConfig.customAddons || []).reduce((sum, addon) => sum + (selectedAddons[addon.id] ? parseFloat(addon.price || 0) : 0), 0)) * quantity).toLocaleString()}</span>
                   </div>
                 )}
 
@@ -569,6 +573,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                       calcBasePrice - (hasDiscount ? calcDiscountValue : 0) +
                       (selectedAddons.reviewer ? parseFloat(addonsConfig.reviewer || 30) : 0) +
                       (selectedAddons.vehicleTips ? parseFloat(addonsConfig.vehicleTips || 20) : 0) +
+                      (addonsConfig.customAddons || []).reduce((sum, addon) => sum + (selectedAddons[addon.id] ? parseFloat(addon.price || 0) : 0), 0) +
                       parseFloat(addonsConfig.convenienceFee || 25)
                     ) * quantity).toLocaleString()}
                   </span>
@@ -670,6 +675,28 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                     </div>
                     <span className="font-bold text-[#2157da]">₱{(parseFloat(addonsConfig.vehicleTips || 20) * quantity).toLocaleString()}</span>
                   </label>
+
+                  {/* Custom Add-ons */}
+                  {(addonsConfig.customAddons || []).map(addon => (
+                  <label key={addon.id} className={`flex items-center justify-between p-4 border rounded-xl cursor-pointer transition-colors ${selectedAddons[addon.id] ? 'border-[#2157da] bg-blue-50/10' : 'border-gray-200 hover:border-blue-300'}`}>
+                    <div className="flex items-center gap-4">
+                      <input 
+                        type="checkbox" 
+                        checked={!!selectedAddons[addon.id]} 
+                        onChange={(e) => setSelectedAddons({...selectedAddons, [addon.id]: e.target.checked})} 
+                        className="w-5 h-5 text-[#2157da] rounded border-gray-300 focus:ring-[#2157da]" 
+                      />
+                      <div className="flex items-center gap-2">
+                        <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        <div>
+                          <p className="font-bold text-[#1a2332]">{addon.name || 'Additional Add-on'}</p>
+                          {addon.fileName && <p className="text-[11px] text-[#2157da] flex items-center gap-1"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg> Includes document</p>}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="font-bold text-[#2157da]">₱{(parseFloat(addon.price || 0) * quantity).toLocaleString()}</span>
+                  </label>
+                  ))}
                 </div>
               </div>
 
@@ -874,95 +901,82 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
             <p className="text-gray-500 mt-2">Please check back later.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-            {filteredPackages.map((pkg, index) => (
-              <div
-                key={pkg.id}
-                className={`bg-white rounded-lg shadow-md hover:shadow-xl transition-all overflow-hidden flex flex-col h-full ${pkg.popular ? 'ring-2 ring-[#F3B74C]' : ''
-                  }`}
-                data-aos="zoom-in"
-                data-aos-delay={index * 100}
-              >
-                {/* Course Image */}
-                <div
-                  className="w-full aspect-square bg-gray-200 relative cursor-pointer group overflow-hidden"
-                  onClick={() => handleViewCourse(pkg)}
-                >
-                  {pkg.image ? (
-                    <img
-                      src={pkg.image}
-                      alt={pkg.name}
-                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                      onError={(e) => {
-                        e.target.style.display = 'none'
-                        e.target.nextSibling.style.display = 'flex'
-                      }}
-                    />
-                  ) : null}
-                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#2157da] to-[#1a3a8a] text-white" style={{ display: pkg.image ? 'none' : 'flex' }}>
-                    <svg className="w-16 h-16 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                    </svg>
-                  </div>
-                  {pkg.popular && (
-                    <div className="absolute top-2 left-2 bg-[#F3B74C] text-[#2157da] px-3 py-1 rounded-full text-xs font-bold">
-                      BEST SELLER
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-5 flex flex-col flex-grow">
-                  <h3
-                    className="text-lg font-bold text-[#2157da] mb-2 line-clamp-2 min-h-[56px] flex items-center justify-center text-center cursor-pointer hover:underline"
-                    onClick={() => handleViewCourse(pkg)}
-                  >
-                    {pkg.name}
-                  </h3>
-
-                  <div className="text-gray-600 mb-3 text-sm text-center">
-                    <span className="font-medium">{pkg.duration}</span>
-                  </div>
-
-                  <div className="mb-4 text-center">
-                    {pkg.priceNote ? (
-                      <div className="text-xl font-bold text-gray-800">{pkg.priceNote}</div>
-                    ) : (
-                      <div className="text-2xl font-bold text-gray-800">
-                        {pkg.typeOptions && pkg.typeOptions.length > 0
-                          ? pkg.typeOptions.length === 1
-                            ? `₱${pkg.typeOptions[0].price.toLocaleString()}`
-                            : `₱${Math.min(...pkg.typeOptions.map(o => o.price)).toLocaleString()} - ₱${Math.max(...pkg.typeOptions.map(o => o.price)).toLocaleString()}`
-                          : `₱${pkg.price.toLocaleString()}`
-                        }
-                      </div>
-                    )}
-                  </div>
-
-                  <ul className="space-y-1.5 mb-6 text-sm flex-grow">
-                    {pkg.features.slice(0, 3).map((feature, idx) => (
-                      <li key={idx} className="flex items-start text-gray-600">
-                        <span className="text-[#2157da] mr-2 mt-0.5 flex-shrink-0">✓</span>
-                        <span className="text-xs">{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
-
-                  <button
-                    onClick={() => handleViewCourse(pkg)}
-                    className={`w-full py-2.5 mt-auto rounded-lg font-semibold transition-all text-sm ${pkg.popular
-                      ? 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b]'
-                      : 'bg-[#2157da] text-white hover:bg-[#1a3a8a]'
-                      } flex items-center justify-center gap-2`}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                    View Details
-                  </button>
-                </div>
-              </div>
-            ))}
+          <div className="bg-white rounded-lg shadow-md overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead>
+                  <tr className="bg-[#2157da] text-white">
+                    <th className="py-4 px-6 font-semibold text-sm">Course Details</th>
+                    <th className="py-4 px-6 font-semibold text-sm text-center whitespace-nowrap">Duration</th>
+                    <th className="py-4 px-6 font-semibold text-sm text-right whitespace-nowrap">Price</th>
+                    <th className="py-4 px-6 font-semibold text-sm text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filteredPackages.map((pkg, index) => (
+                    <tr 
+                      key={pkg.id} 
+                      className={`hover:bg-blue-50 transition-colors ${pkg.popular ? 'bg-orange-50/30' : ''}`}
+                    >
+                      <td className="py-4 px-4 sm:px-6 align-middle">
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <h3 
+                              className="text-sm sm:text-base font-bold text-[#2157da] cursor-pointer hover:underline min-h-0"
+                              onClick={() => handleViewCourse(pkg)}
+                            >
+                              {pkg.name}
+                            </h3>
+                            {pkg.popular && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3B74C] text-[#2157da] shadow-sm whitespace-nowrap">
+                                BEST SELLER
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-600 hidden sm:block">
+                            <ul className="flex gap-4 list-disc list-inside">
+                              {pkg.features.slice(0, 2).map((feature, idx) => (
+                                <li key={idx} className="truncate max-w-[200px] lg:max-w-xs" title={feature}>{feature}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-4 px-4 sm:px-6 text-center text-sm font-medium text-gray-700 align-middle whitespace-nowrap">
+                        {pkg.duration}
+                      </td>
+                      <td className="py-4 px-4 sm:px-6 text-right font-black text-gray-800 text-base sm:text-lg align-middle whitespace-nowrap">
+                        {pkg.priceNote ? (
+                          <div className="text-[15px]">{pkg.priceNote}</div>
+                        ) : (
+                          <div>
+                            {(() => {
+                              if (pkg.typeOptions && pkg.typeOptions.length > 0) {
+                                if (pkg.typeOptions.length === 1) return `₱${Number(pkg.typeOptions[0].price || 0).toLocaleString()}`;
+                                const minPrice = Math.min(...pkg.typeOptions.map(o => Number(o.price || 0)));
+                                const maxPrice = Math.max(...pkg.typeOptions.map(o => Number(o.price || 0)));
+                                return minPrice === maxPrice 
+                                  ? `₱${minPrice.toLocaleString()}` 
+                                  : `₱${minPrice.toLocaleString()} - ₱${maxPrice.toLocaleString()}`;
+                              }
+                              return `₱${Number(pkg.price || 0).toLocaleString()}`;
+                            })()}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-4 px-4 sm:px-6 text-center align-middle">
+                        <button
+                          onClick={() => handleViewCourse(pkg)}
+                          className={`inline-flex items-center justify-center px-4 sm:px-6 py-2 border border-transparent text-sm font-bold rounded-md shadow-sm transition-all active:scale-95 whitespace-nowrap ${pkg.popular ? 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b]' : 'bg-[#2157da] text-white hover:bg-[#1a3a8a]'}`}
+                        >
+                          Select
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

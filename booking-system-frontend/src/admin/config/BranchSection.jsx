@@ -23,12 +23,12 @@ const BranchSection = ({ branches, loading, searchTerm, setSearchTerm, onAdd, on
             </button>
         </div>
 
-        <div className="cfg-grid">
+        <div className="cfg-grid branch-grid">
             {loading ? (
                 <LoadingPlaceholder count={3} />
             ) : branches.length > 0 ? (
                 branches.map(branch => (
-                    <div key={branch.id} className="cfg-card">
+                    <div key={branch.id} className="cfg-card branch-card">
                         <div className="cfg-card-header">
                             <div className="cfg-card-avatar">
                                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
@@ -37,7 +37,7 @@ const BranchSection = ({ branches, loading, searchTerm, setSearchTerm, onAdd, on
                                 </svg>
                             </div>
                             <div className="cfg-card-title-group">
-                                <h3>{branch.name}</h3>
+                                <h3 className="branch-card-title">{branch.name}</h3>
                                 <span className="cfg-badge">Active</span>
                             </div>
                             <div className="cfg-card-actions">

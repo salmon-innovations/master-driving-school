@@ -1,0 +1,6 @@
+User ID: 2
+Bookings count: 8
+Schedule enrollments count: 0
+bookings_id_seq current value: 9
+payments_id_seq error: relation "payments_id_seq" does not exist
+schedule_enrollments_id_seq current value: 11

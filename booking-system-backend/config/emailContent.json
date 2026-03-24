@@ -58,6 +58,21 @@
     "footerTagline": "If you have any questions, please contact our support team."
   },
 
+  "online": {
+    "subject": "Online Enrollment Confirmation - Master Driving School",
+    "headerSubtitle": "Online Enrollment Confirmation",
+    "greeting": "Hello {first} {last}!",
+    "intro": "Your online enrollment has been successfully processed. Below are your enrollment details and schedule information.",
+    "scheduleHeading": "📅 Your Training Schedule",
+    "detailsHeading": "📋 Enrollment Details",
+    "credentialsHeading": "🔐 Your Login Credentials",
+    "credentialsIntro": "An account has been created for you. Use the credentials below to log in and manage your enrollment.",
+    "passwordWarning": "⚠️ Important: Please change your password after your first login for security reasons.",
+    "verifyButtonText": "Log In to Account",
+    "thankYou": "Thank you for choosing Master Driving School!",
+    "footerTagline": "If you have any questions, please contact our support team."
+  },
+
   "noShow": {
     "subject": "Action Required: Missed Training Session - Master Driving School",
     "headerSubtitle": "Missed Session Notice",

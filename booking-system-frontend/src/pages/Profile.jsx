@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { authAPI, schedulesAPI, starpayAPI } from '../services/api'
+import { authAPI, schedulesAPI, starpayAPI, testimonialsAPI } from '../services/api'
 import { useNotification } from '../context/NotificationContext'
 
 // Helper component for detail items
@@ -60,6 +60,19 @@ function Profile({ onNavigate, setIsLoggedIn }) {
   const [rescheduleFeeModal, setRescheduleFeeModal] = useState(null) // { enrollmentId, loading, codeUrl, msgId, qrStatus }
   const reschedulePollRef = useRef(null)
   const [waitTimers, setWaitTimers] = useState({}) // { [enrollmentId]: secondsLeft }
+
+  // Feedback modal state
+  const [feedbackModal, setFeedbackModal] = useState(null) // enrollment object
+  const [feedbackForm, setFeedbackForm] = useState({ rating: 5, comment: '', videoFile: null, imageFile: null, error: '' });
+  const [submitFeedbackLoading, setSubmitFeedbackLoading] = useState(false)
+
+  // Edit Profile / Password Modals
+  const [editProfileModal, setEditProfileModal] = useState(false);
+  const [changePasswordModal, setChangePasswordModal] = useState(false);
+  const [profileForm, setProfileForm] = useState({});
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
   useEffect(() => {
     fetchUserData()
@@ -135,6 +148,52 @@ function Profile({ onNavigate, setIsLoggedIn }) {
     }
   }
 
+  const handleSubmitFeedback = async (e) => {
+    e.preventDefault()
+    if (!feedbackForm.comment.trim()) {
+      setFeedbackForm(prev => ({ ...prev, error: 'Please provide a review comment.' }));
+      return
+    }
+    
+    setFeedbackForm(prev => ({ ...prev, error: '' }));
+    setSubmitFeedbackLoading(true)
+    
+    try {
+      let submitData;
+      if (feedbackForm.videoFile || feedbackForm.imageFile) {
+        submitData = new FormData();
+        submitData.append('rating', feedbackForm.rating);
+        submitData.append('comment', feedbackForm.comment);
+        if (feedbackForm.videoFile) submitData.append('videoFile', feedbackForm.videoFile);
+        if (feedbackForm.imageFile) submitData.append('imageFile', feedbackForm.imageFile);
+        submitData.append('booking_id', feedbackModal.booking_id);
+        if (feedbackModal.course_id) submitData.append('course_id', feedbackModal.course_id);
+      } else {
+        submitData = {
+          rating: feedbackForm.rating,
+          comment: feedbackForm.comment,
+          booking_id: feedbackModal.booking_id,
+          course_id: feedbackModal.course_id
+        };
+      }
+      
+      const response = await testimonialsAPI.create(submitData)
+
+      if (response.success) {
+        setPayToast({ msg: 'Thank you! Your feedback has been submitted successfully.', type: 'success' })
+        setFeedbackModal(null)
+        setFeedbackForm({ rating: 5, comment: '', videoFile: null, imageFile: null, error: '' })
+      } else {
+        throw new Error(response.message || 'Failed to submit feedback.')
+      }
+    } catch (err) {
+      console.error('Feedback error:', err);
+      setFeedbackForm(prev => ({ ...prev, error: 'Failed to submit feedback. Please try again.' }));
+    } finally {
+      setSubmitFeedbackLoading(false)
+    }
+  }
+
   const handlePayRescheduleFee = async (enrollmentId) => {
     setRescheduleFeeModal({ enrollmentId, loading: true, codeUrl: null, msgId: null, qrStatus: 'pending' })
 
@@ -177,6 +236,42 @@ function Profile({ onNavigate, setIsLoggedIn }) {
       setTimeout(() => setPayToast(null), 8000)
     }
   }
+
+  const handleUpdateProfile = async (e) => {
+    e.preventDefault();
+    setIsUpdatingProfile(true);
+    try {
+      const response = await authAPI.updateProfile(profileForm);
+      setUser(response.user);
+      setEditProfileModal(false);
+      showNotification('Profile updated successfully!', 'success');
+    } catch (err) {
+      showNotification(err.message || 'Failed to update profile', 'error');
+    } finally {
+      setIsUpdatingProfile(false);
+    }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      return showNotification('New passwords do not match', 'error');
+    }
+    setIsUpdatingPassword(true);
+    try {
+      await authAPI.changePassword({
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword
+      });
+      setChangePasswordModal(false);
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      showNotification('Password changed successfully!', 'success');
+    } catch (err) {
+      showNotification(err.message || 'Failed to change password', 'error');
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -394,7 +489,25 @@ function Profile({ onNavigate, setIsLoggedIn }) {
 
                 <div className="pt-8 border-t flex flex-wrap gap-4">
                   <button
-                    onClick={() => showNotification('Edit profile feature coming soon!', 'info')}
+                    onClick={() => {
+                      setProfileForm({
+                        firstName: user?.firstName || '',
+                        middleName: user?.middleName || '',
+                        lastName: user?.lastName || '',
+                        address: user?.address || '',
+                        age: user?.age || '',
+                        gender: user?.gender || '',
+                        birthday: user?.birthday ? new Date(user.birthday).toISOString().split('T')[0] : '',
+                        birthPlace: user?.birthPlace || '',
+                        nationality: user?.nationality || '',
+                        maritalStatus: user?.maritalStatus || '',
+                        contactNumbers: user?.contactNumbers || '',
+                        zipCode: user?.zipCode || '',
+                        emergencyContactPerson: user?.emergencyContactPerson || '',
+                        emergencyContactNumber: user?.emergencyContactNumber || ''
+                      });
+                      setEditProfileModal(true);
+                    }}
                     className="flex items-center gap-2 px-6 py-2.5 bg-[#2157da] text-white rounded-lg hover:bg-[#1a3a8a] transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -403,7 +516,10 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                     Edit Profile
                   </button>
                   <button
-                    onClick={() => showNotification('Password change coming soon!', 'info')}
+                    onClick={() => {
+                      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+                      setChangePasswordModal(true);
+                    }}
                     className="flex items-center gap-2 px-6 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -529,10 +645,21 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                           </div>
 
                           {/* Card footer row */}
-                          <div className="px-5 py-2.5 bg-gray-50 border-t border-gray-100">
+                          <div className="px-5 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
                             <p className="text-[11px] text-gray-400">
                               Booked {new Date(enrollment.enrolled_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
                             </p>
+                            {rawStatus === 'completed' && (
+                              <button
+                                onClick={() => setFeedbackModal(enrollment)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#2157da] text-white rounded-full text-[11px] font-bold hover:bg-[#1a3a8a] transition-colors shadow-sm"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                                </svg>
+                                Share Feedback
+                              </button>
+                            )}
                           </div>
 
                           {/* Pay Balance */}
@@ -742,6 +869,313 @@ function Profile({ onNavigate, setIsLoggedIn }) {
               </button>
             </div>
           )}
+        </div>
+      </div>
+    )}
+
+    {/* Feedback Modal */}
+    {feedbackModal && (
+      <div 
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 transition-opacity"
+        onClick={(e) => {
+          if (e.target === e.currentTarget && !submitFeedbackLoading) {
+            setFeedbackModal(null)
+          }
+        }}
+      >
+        <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh]">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-[#2157da] to-[#3b82f6] p-6 text-white shrink-0">
+            <h2 className="text-xl font-bold">Share Your Feedback</h2>
+            <p className="text-blue-100 text-sm mt-1">
+              For {feedbackModal.course_full_name || (feedbackModal.slot_type ? feedbackModal.slot_type.toUpperCase() + ' Course' : 'Course')}
+            </p>
+          </div>
+          
+          {/* Body */}
+          <div className="p-6 overflow-y-auto">
+            <form id="feedback-form" onSubmit={handleSubmitFeedback}>
+              {/* Rating */}
+              <div className="mb-6">
+                <label className="block text-sm font-bold text-gray-700 mb-2">How would you rate your experience?</label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setFeedbackForm(prev => ({ ...prev, rating: star }))}
+                      className={`text-3xl transition-transform hover:scale-110 focus:outline-none ${
+                        star <= feedbackForm.rating ? 'text-[#F3B74C]' : 'text-gray-300'
+                      }`}
+                    >
+                      ★
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Comment */}
+              <div className="mb-6">
+                <label className="block text-sm font-bold text-gray-700 mb-2">Your Review *</label>
+                <textarea
+                  required
+                  value={feedbackForm.comment}
+                  onChange={(e) => setFeedbackForm(prev => ({ ...prev, comment: e.target.value }))}
+                  placeholder="Tell us about your learning experience..."
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-[#2157da] focus:ring-2 focus:ring-[#2157da]/20 outline-none resize-none transition-all placeholder:text-gray-400"
+                  rows={4}
+                ></textarea>
+              </div>
+
+              {/* Media Upload (Picture / Video) */}
+              <div className="mb-4">
+                <label className="block text-sm font-bold text-gray-700 mb-2">Add Picture or Video <span className="text-xs font-normal text-gray-500">(Optional)</span></label>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Picture Upload Box */}
+                  <div className="relative border-2 border-dashed border-gray-300 rounded-xl hover:border-[#2157da] hover:bg-blue-50/50 transition-all flex flex-col items-center justify-center p-4 text-center cursor-pointer group">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      onChange={(e) => {
+                        const file = e.target.files[0];
+                        if (file && file.size > 5 * 1024 * 1024) {
+                          setFeedbackForm(prev => ({ ...prev, error: 'Image size must be less than 5MB' }));
+                          return;
+                        }
+                        setFeedbackForm(prev => ({ ...prev, imageFile: file, error: '' }));
+                      }}
+                    />
+                    <div className="w-10 h-10 mb-2 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                    </div>
+                    <span className="text-sm font-semibold text-gray-700 overflow-hidden text-ellipsis w-full whitespace-nowrap px-2">
+                      {feedbackForm.imageFile ? feedbackForm.imageFile.name : 'Upload Picture'}
+                    </span>
+                    <span className="text-xs text-gray-500 mt-1">Max 5MB</span>
+                  </div>
+
+                  {/* Video Upload Box */}
+                  <div className="relative border-2 border-dashed border-gray-300 rounded-xl hover:border-[#2157da] hover:bg-blue-50/50 transition-all flex flex-col items-center justify-center p-4 text-center cursor-pointer group">
+                    <input
+                      type="file"
+                      accept="video/*"
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      onChange={(e) => {
+                        const file = e.target.files[0];
+                        if (file && file.size > 50 * 1024 * 1024) {
+                          setFeedbackForm(prev => ({ ...prev, error: 'Video size must be less than 50MB' }));
+                          return;
+                        }
+                        setFeedbackForm(prev => ({ ...prev, videoFile: file, error: '' }));
+                      }}
+                    />
+                    <div className="w-10 h-10 mb-2 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                    </div>
+                    <span className="text-sm font-semibold text-gray-700 overflow-hidden text-ellipsis w-full whitespace-nowrap px-2">
+                      {feedbackForm.videoFile ? feedbackForm.videoFile.name : 'Upload Video'}
+                    </span>
+                    <span className="text-xs text-gray-500 mt-1">Max 50MB</span>
+                  </div>
+                </div>
+                
+                {feedbackForm.error && (
+                  <div className="mt-3 p-3 bg-red-50 border border-red-200 text-red-600 text-sm font-medium rounded-lg flex items-center gap-2">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                    {feedbackForm.error}
+                  </div>
+                )}
+
+                <p className="text-xs text-gray-500 mt-3">
+                  Share a picture or video of your experience.
+                </p>
+              </div>
+            </form>
+          </div>
+
+          {/* Footer */}
+          <div className="p-6 border-t border-gray-100 bg-gray-50 flex gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={() => setFeedbackModal(null)}
+              disabled={submitFeedbackLoading}
+              className="flex-1 py-3 rounded-xl border-2 border-gray-300 text-gray-700 font-bold hover:bg-gray-100 transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="feedback-form"
+              disabled={submitFeedbackLoading || !feedbackForm.comment.trim()}
+              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-[#2157da] to-[#3b82f6] text-white font-bold hover:shadow-lg transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+            >
+              {submitFeedbackLoading ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  Submitting...
+                </>
+              ) : (
+                'Submit Review'
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    
+    {/* Edit Profile Modal */}
+    {editProfileModal && (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-sm shadow-xl transition-all overflow-y-auto">
+        <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl relative my-auto">
+          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white sticky top-0 z-10 shrink-0">
+            <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+              <svg className="w-5 h-5 text-[#2157da]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+              Edit Profile
+            </h3>
+            <button onClick={() => setEditProfileModal(false)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
+            <form id="edit-profile-form" onSubmit={handleUpdateProfile} className="space-y-8">
+              
+              {/* Personal Information */}
+              <section>
+                <div className="flex items-center gap-3 mb-4 pb-2 border-b">
+                  <div className="p-2 bg-blue-50 rounded-lg text-[#2157da]">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                  </div>
+                  <h4 className="text-lg font-bold text-gray-800">Personal Information</h4>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">First Name</label><input type="text" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.firstName} onChange={e => setProfileForm({...profileForm, firstName: e.target.value})} required/></div>
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Middle Name</label><input type="text" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.middleName} onChange={e => setProfileForm({...profileForm, middleName: e.target.value})} /></div>
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Last Name</label><input type="text" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.lastName} onChange={e => setProfileForm({...profileForm, lastName: e.target.value})} required/></div>
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Age</label><input type="number" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.age} onChange={e => setProfileForm({...profileForm, age: e.target.value})} /></div>
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Gender</label><select className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.gender} onChange={e => setProfileForm({...profileForm, gender: e.target.value})}><option value="">Select Gender</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></div>
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Birthday</label><input type="date" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.birthday} onChange={e => setProfileForm({...profileForm, birthday: e.target.value})} /></div>
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Birth Place</label><input type="text" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.birthPlace} onChange={e => setProfileForm({...profileForm, birthPlace: e.target.value})} /></div>
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Nationality</label><input type="text" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.nationality} onChange={e => setProfileForm({...profileForm, nationality: e.target.value})} /></div>
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Marital Status</label><select className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.maritalStatus} onChange={e => setProfileForm({...profileForm, maritalStatus: e.target.value})}><option value="">Select</option><option value="single">Single</option><option value="married">Married</option><option value="widowed">Widowed</option></select></div>
+                </div>
+              </section>
+
+              {/* Address & Contact */}
+              <section>
+                <div className="flex items-center gap-3 mb-4 pb-2 border-b">
+                  <div className="p-2 bg-blue-50 rounded-lg text-[#2157da]">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                  </div>
+                  <h4 className="text-lg font-bold text-gray-800">Address & Contact</h4>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div className="sm:col-span-2"><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Full Address</label><input type="text" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.address} onChange={e => setProfileForm({...profileForm, address: e.target.value})} /></div>
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Contact Numbers</label><input type="text" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.contactNumbers} onChange={e => setProfileForm({...profileForm, contactNumbers: e.target.value})} /></div>
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Zip Code</label><input type="text" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.zipCode} onChange={e => setProfileForm({...profileForm, zipCode: e.target.value})} /></div>
+                </div>
+              </section>
+
+              {/* Emergency Contact */}
+              <section>
+                <div className="flex items-center gap-3 mb-4 pb-2 border-b">
+                  <div className="p-2 bg-red-50 rounded-lg text-red-500">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                  </div>
+                  <h4 className="text-lg font-bold text-gray-800">Emergency Contact</h4>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Contact Person</label><input type="text" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.emergencyContactPerson} onChange={e => setProfileForm({...profileForm, emergencyContactPerson: e.target.value})} /></div>
+                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Emergency Number</label><input type="text" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.emergencyContactNumber} onChange={e => setProfileForm({...profileForm, emergencyContactNumber: e.target.value})} /></div>
+                </div>
+              </section>
+
+            </form>
+          </div>
+          <div className="p-4 sm:p-6 border-t border-gray-100 bg-gray-50 flex gap-3 shrink-0 rounded-b-2xl justify-end">
+            <button type="button" onClick={() => setEditProfileModal(false)} className="px-6 py-2.5 rounded-xl border-2 border-gray-300 text-gray-700 font-bold hover:bg-gray-100 transition-colors">Cancel</button>
+            <button type="submit" form="edit-profile-form" disabled={isUpdatingProfile} className="px-8 py-2.5 rounded-xl bg-gradient-to-r from-[#2157da] to-[#3b82f6] text-white font-bold hover:shadow-lg transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+              {isUpdatingProfile ? (
+                 <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  Saving...
+                 </>
+              ) : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Change Password Modal */}
+    {changePasswordModal && (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-sm shadow-xl transition-all">
+        <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden shadow-2xl relative">
+          <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-white relative z-10 shrink-0">
+            <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+              <svg className="w-5 h-5 text-[#2157da]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17.086V19a1 1 0 01-1 1h-2a1 1 0 01-1-1v-2a1 1 0 01.293-.707L10.243 13.5A6 6 0 1121 9z" /></svg>
+              Change Password
+            </h3>
+            <button onClick={() => setChangePasswordModal(false)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div className="p-6">
+            <form id="change-password-form" onSubmit={handleChangePassword} className="space-y-5">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Current Password</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <input type="password" required className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={passwordForm.currentPassword} onChange={e => setPasswordForm({...passwordForm, currentPassword: e.target.value})} placeholder="••••••••" />
+                </div>
+              </div>
+              <div className="pt-2">
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">New Password</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <input type="password" required minLength="6" className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={passwordForm.newPassword} onChange={e => setPasswordForm({...passwordForm, newPassword: e.target.value})} placeholder="••••••••" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Confirm New Password</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 2a5 5 0 00-5 5v2a2 2 0 00-2 2v5a2 2 0 002 2h10a2 2 0 002-2v-5a2 2 0 00-2-2H5V7a3 3 0 015.905-.75 1 1 0 001.937-.5A5.002 5.002 0 0010 2z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <input type="password" required className={`w-full pl-10 pr-4 py-2.5 rounded-lg border focus:ring-2 focus:border-transparent outline-none transition-all text-gray-800 focus:bg-white ${passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword ? 'border-red-300 focus:ring-red-400 bg-red-50/30' : 'border-gray-300 focus:ring-[#2157da] bg-gray-50/50'}`} value={passwordForm.confirmPassword} onChange={e => setPasswordForm({...passwordForm, confirmPassword: e.target.value})} placeholder="••••••••" />
+                </div>
+                {passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword && (
+                  <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                    Passwords do not match
+                  </p>
+                )}
+              </div>
+            </form>
+          </div>
+          <div className="p-4 sm:p-6 border-t border-gray-100 bg-gray-50 flex gap-3 shrink-0 rounded-b-2xl">
+            <button type="button" onClick={() => setChangePasswordModal(false)} className="flex-1 py-3 rounded-xl border-2 border-gray-300 text-gray-700 font-bold hover:bg-gray-100 transition-colors">Cancel</button>
+            <button type="submit" form="change-password-form" disabled={isUpdatingPassword || (passwordForm.newPassword !== passwordForm.confirmPassword)} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-[#2157da] to-[#3b82f6] text-white font-bold hover:shadow-lg transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+              {isUpdatingPassword ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  Updating...
+                </>
+              ) : 'Update Password'}
+            </button>
+          </div>
         </div>
       </div>
     )}

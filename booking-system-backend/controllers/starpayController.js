@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
 const { createRepayment, queryRepayment, verifySignature } = require('../utils/starpayService');
-const { sendGuestEnrollmentEmail } = require('../utils/emailService');
+const { sendGuestEnrollmentEmail, sendAddonsEmail } = require('../utils/emailService');
 
 /* ─────────────────────────────────────────────────────────────────────
    POST /api/starpay/create-payment
@@ -41,6 +41,8 @@ const initiatePayment = async (req, res) => {
             source: 'starpay',
             scheduleSlotId: scheduleSlotId || null,
             scheduleSlotId2: scheduleSlotId2 || null,
+            hasReviewer: req.body.hasReviewer || false,
+            hasVehicleTips: req.body.hasVehicleTips || false,
         });
 
         // Insert pending booking
@@ -66,6 +68,7 @@ const initiatePayment = async (req, res) => {
             notifyUrl,
             amountPhp: parseFloat(amount),
             attach: attach || `MDS Course: ${courseCategory || ''} ${courseType || ''}`.trim().slice(0, 92),
+            branchId: branchId || null,
         });
 
         const spResponse = spResult?.response || spResult;
@@ -225,7 +228,7 @@ const handleWebhook = async (req, res) => {
                                 paymentMethod: 'StarPay',
                                 amountPaid: amountPhp,
                                 paymentStatus: pType || 'Full Payment',
-                            });
+                            }, meta.hasReviewer, meta.hasVehicleTips);
                             console.log(`[StarPay] Enrollment email sent to ${gEmail}`);
                         } catch (emailErr) {
                             console.error('[StarPay] Guest email failed (non-fatal):', emailErr.message);
@@ -235,6 +238,8 @@ const handleWebhook = async (req, res) => {
                     console.error('[StarPay] Enrollment error (non-fatal):', enrollErr.message);
                 }
 
+                
+                
                 console.log(`[StarPay] Booking ${bookingId} marked paid (₱${amountPhp})`);
             }
         } else {
@@ -272,7 +277,7 @@ const checkStatus = async (req, res) => {
 
     // Check bookings table first (regular payments)
     const { rows } = await pool.query(
-        `SELECT id, status, total_amount FROM bookings WHERE transaction_id = $1`,
+        `SELECT id, status, total_amount, branch_id FROM bookings WHERE transaction_id = $1`,
         [msgId]
     );
 
@@ -290,7 +295,7 @@ const checkStatus = async (req, res) => {
         // booking exists and is still pending — query StarPay
         try {
             const queryMsgId = `QRY${Date.now()}`;
-            const spResult = await queryRepayment(queryMsgId, msgId);
+            const spResult = await queryRepayment(queryMsgId, msgId, { branchId: booking.branch_id || null });
             const spResponse = spResult?.response || spResult;
             return res.json({
                 success: true,
@@ -306,7 +311,10 @@ const checkStatus = async (req, res) => {
 
     // Reschedule fee payments: no booking row — check schedule_enrollments
     const { rows: enrollRows } = await pool.query(
-        `SELECT id, reschedule_fee_paid FROM schedule_enrollments WHERE starpay_msgid = $1`,
+        `SELECT se.id, se.reschedule_fee_paid, ss.branch_id
+           FROM schedule_enrollments se
+           LEFT JOIN schedule_slots ss ON ss.id = se.slot_id
+          WHERE se.starpay_msgid = $1`,
         [msgId]
     );
 
@@ -318,7 +326,7 @@ const checkStatus = async (req, res) => {
         // Still unpaid — query StarPay live
         try {
             const queryMsgId = `QRY${Date.now()}`;
-            const spResult = await queryRepayment(queryMsgId, msgId);
+            const spResult = await queryRepayment(queryMsgId, msgId, { branchId: enroll.branch_id || null });
             const spResponse = spResult?.response || spResult;
             return res.json({ success: true, localStatus: 'pending', starpayState: spResponse?.trxState || 'UNKNOWN' });
         } catch {
@@ -348,7 +356,7 @@ const initiateGuestPayment = async (req, res) => {
         emergencyContactPerson, emergencyContactNumber,
         // Course / schedule
         courseId, branchId, courseCategory, courseType,
-        scheduleSlotId, scheduleSlotId2, scheduleDate,
+        scheduleSlotId, scheduleSlotId2, scheduleDate, scheduleDate2,
         // Payment
         amount, paymentType = 'Full Payment', attach,
     } = req.body;
@@ -402,6 +410,9 @@ const initiateGuestPayment = async (req, res) => {
             scheduleSlotId: scheduleSlotId || null,
             scheduleSlotId2: scheduleSlotId2 || null,
             scheduleDate: scheduleDate || null,
+            scheduleDate2: scheduleDate2 || null,
+            hasReviewer: req.body.hasReviewer || false,
+            hasVehicleTips: req.body.hasVehicleTips || false,
             guestData: { firstName, lastName, email, courseCategory, courseType, paymentType },
         });
 
@@ -427,6 +438,7 @@ const initiateGuestPayment = async (req, res) => {
             notifyUrl,
             amountPhp: parseFloat(amount),
             attach: attach || `MDS ${courseCategory || ''} ${courseType || ''}`.trim().slice(0, 92),
+            branchId: parsedBranchId || null,
         });
 
         const spResponse = spResult?.response || spResult;
@@ -508,6 +520,7 @@ const initiateRescheduleFeePayment = async (req, res) => {
             notifyUrl,
             amountPhp: 1000,
             attach: 'MDS Reschedule Fee',
+            branchId: enroll.branch_id || null,
         });
 
         const spResponse = spResult?.response || spResult;

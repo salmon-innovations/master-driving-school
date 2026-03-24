@@ -1,0 +1,1 @@
+const pool = require('./config/db'); async function check() { try { const slots = await pool.query('SELECT * FROM schedule_slots WHERE date >= CURRENT_DATE LIMIT 5'); console.log(slots.rows); } catch(e) { console.error(e); } finally { process.exit(); } }; check();

@@ -48,6 +48,9 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // Routes
 app.use('/api/news', require('./routes/news'));
 app.use('/api/auth', require('./routes/auth'));
@@ -58,6 +61,7 @@ app.use('/api/schedules', require('./routes/schedules'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/crm', require('./routes/crm'));
 app.use('/api/roles', require('./routes/roles'));
+app.use('/api/testimonials', require('./routes/testimonials'));
 app.use('/api/starpay', require('./routes/starpay')); // StarPay payment gateway
 
 // TEST ROUTE - ABSOLUTE PRIORITY

@@ -1,5 +1,13 @@
 {
   "dependencies": {
     "recharts": "^3.7.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-react": "^7.28.5",
+    "@babel/register": "^7.28.6",
+    "jsdom": "^29.0.0",
+    "jsdom-global": "^3.0.2",
+    "react-dom": "^19.2.4"
   }
 }

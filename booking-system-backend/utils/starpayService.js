@@ -18,7 +18,8 @@ const path = require('path');
 const axios = require('axios');
 
 /* ── env ──────────────────────────────────────────────────────────── */
-const IS_PROD = process.env.NODE_ENV === 'production';
+const rawMode = (process.env.STARPAY_MODE || (process.env.NODE_ENV === 'production' ? 'prod' : 'uat')).toLowerCase();
+const IS_PROD = ['prod', 'production', 'live'].includes(rawMode);
 const BASE_URL = IS_PROD
     ? (process.env.STARPAY_PROD_BASE_URL || 'https://financeapi.wallytglobal.com/finance-payment-service')
     : (process.env.STARPAY_UAT_BASE_URL || 'https://financeapi-uat.wallyt.net/finance-payment-service');
@@ -31,7 +32,68 @@ const BEARER = IS_PROD
     ? (process.env.STARPAY_PROD_BEARER || '')
     : (process.env.STARPAY_UAT_BEARER || '');
 
+const SECRET_KEY = IS_PROD
+    ? (process.env.STARPAY_PROD_SECRET_KEY || '')
+    : (process.env.STARPAY_UAT_SECRET_KEY || '');
+
+const PIN = IS_PROD
+    ? (process.env.STARPAY_PROD_PIN || '')
+    : (process.env.STARPAY_UAT_PIN || '');
+
+const USE_SECRET_SIGNING = String(process.env.STARPAY_USE_SECRET_SIGNING || 'false').toLowerCase() === 'true';
+
 const keyEnv = IS_PROD ? 'prod' : 'uat';
+
+const normalizeBranchKey = (value) => String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+const loadBranchConfigFromFile = () => {
+    const cfgPath = path.join(__dirname, '..', 'config', 'starpayBranchConfig.json');
+    if (!fs.existsSync(cfgPath)) return {};
+    try {
+        return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    } catch (e) {
+        console.warn('[StarPay] Invalid config/starpayBranchConfig.json:', e.message);
+        return {};
+    }
+};
+
+const loadBranchConfigFromEnv = () => {
+    const envKey = IS_PROD ? 'STARPAY_PROD_BRANCH_CONFIG_JSON' : 'STARPAY_UAT_BRANCH_CONFIG_JSON';
+    const raw = process.env[envKey];
+    if (!raw) return {};
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        console.warn(`[StarPay] Invalid ${envKey}:`, e.message);
+        return {};
+    }
+};
+
+const BRANCH_CONFIG = {
+    ...loadBranchConfigFromFile(),
+    ...loadBranchConfigFromEnv(),
+};
+
+const getDefaultConfig = () => ({
+    mchId: MCH_ID,
+    bearer: BEARER,
+    secretKey: SECRET_KEY,
+    pin: PIN,
+});
+
+const resolveStarpayConfig = ({ branchId, branchName } = {}) => {
+    const byId = branchId != null ? BRANCH_CONFIG[String(branchId)] : null;
+    const byName = branchName ? BRANCH_CONFIG[normalizeBranchKey(branchName)] : null;
+    const cfg = byId || byName || {};
+    return {
+        ...getDefaultConfig(),
+        ...cfg,
+    };
+};
 
 /* ── RSA keys ──────────────────────────────────────────────────────── */
 const loadKey = (filename) => {
@@ -51,11 +113,19 @@ const stripPem = (pem) => pem
  * using the merchant private key.
  * Per docs: the to-be-signed string is the raw JSON string of the "request" field.
  */
-const signRequest = (requestObj) => {
+const signRequest = (requestObj, starpayConfig = getDefaultConfig()) => {
+    const dataStr = JSON.stringify(requestObj);
+
+    // Optional HMAC mode for merchants that provide secretKey+pin instead of RSA private key flow.
+    if (USE_SECRET_SIGNING && starpayConfig.secretKey && starpayConfig.pin) {
+        const hmac = crypto.createHmac('sha256', starpayConfig.secretKey);
+        hmac.update(`${dataStr}|${starpayConfig.pin}`, 'utf8');
+        return hmac.digest('base64');
+    }
+
     const privPem = loadKey(`starpay_${keyEnv}_private.pem`);
     if (!privPem) throw new Error(`StarPay private key not found (keys/starpay_${keyEnv}_private.pem)`);
 
-    const dataStr = JSON.stringify(requestObj);
     const sign = crypto.createSign('SHA256');
     sign.update(dataStr, 'utf8');
     return sign.sign(privPem, 'base64');
@@ -87,7 +157,7 @@ const verifySignature = (rawRequestStr, signature) => {
 };
 
 /* ── HTTP helper ───────────────────────────────────────────────────── */
-const apiPost = async (endpoint, requestObj) => {
+const apiPost = async (endpoint, requestObj, starpayConfig = getDefaultConfig()) => {
     // Docs require fields sorted alphabetically (mirrors Java TreeMap behaviour)
     const sorted = Object.keys(requestObj).sort().reduce((acc, k) => {
         acc[k] = requestObj[k];
@@ -96,14 +166,14 @@ const apiPost = async (endpoint, requestObj) => {
 
     // Sign the sorted JSON string with merchant private key
     const requestStr = JSON.stringify(sorted);
-    const signature = signRequest(sorted);
+    const signature = signRequest(sorted, starpayConfig);
 
     const body = { request: sorted, signature };
 
     // Build headers — always include Content-Type
     // Include Authorization bearer if configured in .env
     const headers = { 'Content-Type': 'application/json' };
-    if (BEARER) headers['Authorization'] = `Bearer ${BEARER}`;
+    if (starpayConfig.bearer) headers['Authorization'] = `Bearer ${starpayConfig.bearer}`;
 
     const response = await axios.post(`${BASE_URL}${endpoint}`, body, {
         headers,
@@ -126,11 +196,16 @@ const apiPost = async (endpoint, requestObj) => {
  *
  * @returns {object} Full StarPay response — response.codeUrl is the QRPh string
  */
-const createRepayment = async ({ msgId, notifyUrl, amountPhp, attach = 'Course Fee', timeExpire }) => {
+const createRepayment = async ({ msgId, notifyUrl, amountPhp, attach = 'Course Fee', timeExpire, branchId, branchName }) => {
+    const starpayConfig = resolveStarpayConfig({ branchId, branchName });
+    if (!starpayConfig.mchId) {
+        throw new Error(`StarPay merchant not configured for branch ${branchId || branchName || 'default'}`);
+    }
+
     const trxAmount = Math.round(parseFloat(amountPhp) * 100); // centavos
     const requestObj = {
         msgId,
-        mchId: MCH_ID,
+        mchId: starpayConfig.mchId,
         notifyUrl,
         deviceInfo: 'web',
         trxAmount,
@@ -140,7 +215,7 @@ const createRepayment = async ({ msgId, notifyUrl, amountPhp, attach = 'Course F
     };
     if (timeExpire) requestObj.timeExpire = timeExpire;
 
-    return await apiPost('/v1/repayment', requestObj);
+    return await apiPost('/v1/repayment', requestObj, starpayConfig);
 };
 
 /**
@@ -149,14 +224,19 @@ const createRepayment = async ({ msgId, notifyUrl, amountPhp, attach = 'Course F
  * @param {string} queryMsgId    A new unique msgId for this query request
  * @param {string} originalMsgId The msgId used when the order was created
  */
-const queryRepayment = async (queryMsgId, originalMsgId) => {
+const queryRepayment = async (queryMsgId, originalMsgId, { branchId, branchName } = {}) => {
+    const starpayConfig = resolveStarpayConfig({ branchId, branchName });
+    if (!starpayConfig.mchId) {
+        throw new Error(`StarPay merchant not configured for branch ${branchId || branchName || 'default'}`);
+    }
+
     const requestObj = {
         msgId: queryMsgId,
-        mchId: MCH_ID,
+        mchId: starpayConfig.mchId,
         originalMsgId,
         service: 'unified.repayment.query',
     };
-    return await apiPost('/v1/repayment/query', requestObj);
+    return await apiPost('/v1/repayment/query', requestObj, starpayConfig);
 };
 
 module.exports = {
@@ -164,6 +244,7 @@ module.exports = {
     queryRepayment,
     verifySignature,
     signRequest,
+    resolveStarpayConfig,
     BASE_URL,
     MCH_ID,
 };

@@ -1803,11 +1803,11 @@
     display: flex;
     align-items: flex-end;
     gap: 25px;
-    margin-top: -60px;
-    /* Adjusted to fit larger banner */
+    margin-top: 0;
 }
 
 .profile-avatar-large {
+    margin-top: -60px;
     width: 120px;
     height: 120px;
     border-radius: 50%;

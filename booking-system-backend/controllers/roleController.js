@@ -45,7 +45,7 @@ const createRole = async (req, res) => {
 const updateRole = async (req, res) => {
     try {
         const { id } = req.params;
-        const { display_name, description, permissions } = req.body;
+        const { name, display_name, description, permissions } = req.body;
 
         // Check if role exists and if it's a system role
         const currentRole = await pool.query('SELECT * FROM roles WHERE id = $1', [id]);
@@ -53,11 +53,19 @@ const updateRole = async (req, res) => {
             return res.status(404).json({ error: 'Role not found' });
         }
 
-        // System roles can only have certain fields updated (or not at all, but let's allow display_name/desc)
-        const result = await pool.query(
-            'UPDATE roles SET display_name = $1, description = $2, permissions = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4 RETURNING *',
-            [display_name, description, JSON.stringify(permissions || []), id]
-        );
+        const normalizedName = typeof name === 'string' && name.trim().length > 0
+            ? name.toLowerCase().replace(/\s+/g, '_')
+            : currentRole.rows[0].name;
+
+        const result = currentRole.rows[0].is_system
+            ? await pool.query(
+                'UPDATE roles SET display_name = $1, description = $2, permissions = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4 RETURNING *',
+                [display_name, description, JSON.stringify(permissions || []), id]
+            )
+            : await pool.query(
+                'UPDATE roles SET name = $1, display_name = $2, description = $3, permissions = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5 RETURNING *',
+                [normalizedName, display_name, description, JSON.stringify(permissions || []), id]
+            );
 
         res.json({
             success: true,

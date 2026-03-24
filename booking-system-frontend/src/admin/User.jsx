@@ -6,7 +6,105 @@ import Pagination from './components/Pagination';
 
 const USER_PAGE_SIZE = 10;
 
-const UserManagement = () => {
+const PERMISSION_GROUPS = [
+    {
+        id: 'main_menu',
+        label: 'Main Menu Access',
+        permissions: [
+            { key: 'operations.schedules.manage', label: 'Schedules' },
+            { key: 'operations.bookings.manage', label: 'Bookings' },
+            { key: 'operations.walk_in.manage', label: 'Walk-in Enrollment' },
+            { key: 'operations.sales.manage', label: 'Sales & Payments' },
+            { key: 'operations.crm.manage', label: 'CRM' },
+            { key: 'operations.analytics.view', label: 'Analytics' },
+            { key: 'operations.news.manage', label: 'News & Events' },
+        ],
+    },
+    {
+        id: 'management_menu',
+        label: 'Management Menu Access',
+        permissions: [
+            { key: 'accounts.courses.view', label: 'Course Management' },
+            { key: 'accounts.config.view', label: 'Config Management' },
+        ],
+    },
+    {
+        id: 'account_actions',
+        label: 'Account Management Actions',
+        permissions: [
+            { key: 'accounts.users.create', label: 'Add Staff/Admin' },
+            { key: 'accounts.users.edit', label: 'Edit Staff/Admin' },
+            { key: 'accounts.users.status', label: 'Activate/Deactivate Staff/Admin' },
+            { key: 'accounts.users.reset_password', label: 'Reset User Password' },
+        ],
+    },
+];
+
+const PERMISSION_GROUP_HINTS = {
+    main_menu: 'Overview is always available and does not need a permission.',
+    management_menu: 'Choose which admin management pages this account can open.',
+    account_actions: 'Account Management access is action-based: choose allowed actions here.',
+};
+
+const ALL_PERMISSION_KEYS = PERMISSION_GROUPS.flatMap(group => group.permissions.map(permission => permission.key));
+
+const PERMISSION_LABEL_MAP = PERMISSION_GROUPS.reduce((acc, group) => {
+    group.permissions.forEach((permission) => {
+        acc[permission.key] = permission.label;
+    });
+    return acc;
+}, {});
+
+const ROLE_PERMISSION_PRESETS = {
+    admin: ALL_PERMISSION_KEYS,
+    staff: [
+        'operations.schedules.manage',
+        'operations.bookings.manage',
+        'operations.walk_in.manage',
+        'operations.sales.manage',
+        'operations.crm.manage',
+        'operations.news.manage',
+    ],
+};
+
+const normalizeRoleValue = (role) => String(role || '').toLowerCase();
+
+const isStaffOrAdminRole = (role) => {
+    const normalizedRole = normalizeRoleValue(role);
+    return normalizedRole === 'admin' || normalizedRole === 'staff';
+};
+
+const normalizePermissionList = (permissions) => {
+    if (!Array.isArray(permissions)) return [];
+    const validPermissionSet = new Set(ALL_PERMISSION_KEYS);
+    return [...new Set(permissions.filter(permission => typeof permission === 'string' && validPermissionSet.has(permission)))];
+};
+
+const getDefaultPermissionsForRole = (role) => {
+    const normalizedRole = normalizeRoleValue(role);
+    return [...(ROLE_PERMISSION_PRESETS[normalizedRole] || [])];
+};
+
+const getPermissionGroupsForDisplay = (permissions) => {
+    const normalized = normalizePermissionList(permissions);
+    if (normalized.length === 0) return [];
+
+    return PERMISSION_GROUPS.map((group) => {
+        const items = group.permissions
+            .filter((permission) => normalized.includes(permission.key))
+            .map((permission) => ({
+                key: permission.key,
+                label: permission.label,
+            }));
+        return {
+            id: group.id,
+            label: group.label,
+            items,
+        };
+    }).filter((group) => group.items.length > 0);
+};
+
+const UserManagement = ({ currentUserPermissions = [] }) => {
     const { showNotification } = useNotification();
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState('All');
@@ -24,6 +122,13 @@ const UserManagement = () => {
     const [editingUser, setEditingUser] = useState(null);
     const [errors, setErrors] = useState({});
     const [submitError, setSubmitError] = useState('');
+    const [openPermissionGroups, setOpenPermissionGroups] = useState(() => {
+        const initialState = {};
+        PERMISSION_GROUPS.forEach((group, index) => {
+            initialState[group.id] = index === 0;
+        });
+        return initialState;
+    });
     const [userData, setUserData] = useState({
         firstName: '',
         middleInitial: '',
@@ -34,12 +139,19 @@ const UserManagement = () => {
         address: '',
         contactNumber: '',
         email: '',
-        role: 'staff',
+        role: 'Staff',
         branch: '',
         status: 'active',
-        avatar: ''
+        avatar: '',
+        permissions: getDefaultPermissionsForRole('staff')
     });
     const [originalEmail, setOriginalEmail] = useState('');
+
+    const currentPermissionSet = new Set(normalizePermissionList(currentUserPermissions));
+    const canCreateUsers = currentPermissionSet.has('accounts.users.create');
+    const canEditUsers = currentPermissionSet.has('accounts.users.edit');
+    const canToggleUserStatus = currentPermissionSet.has('accounts.users.status');
+    const canResetPasswords = currentPermissionSet.has('accounts.users.reset_password');
 
     // Fetch users and branches from database
     useEffect(() => {
@@ -96,7 +208,8 @@ const UserManagement = () => {
                     maritalStatus: user.marital_status || '',
                     zipCode: user.zip_code || '',
                     emergencyContactPerson: user.emergency_contact_person || '',
-                    emergencyContactNumber: user.emergency_contact_number || ''
+                    emergencyContactNumber: user.emergency_contact_number || '',
+                    permissions: normalizePermissionList(user.permissions)
                 };
             });
 
@@ -191,6 +304,15 @@ const UserManagement = () => {
             formattedValue = formatPhoneNumber(value);
         }
 
+        if (name === 'role') {
+            const permissions = getDefaultPermissionsForRole(value);
+            setUserData({ ...userData, [name]: formattedValue, permissions });
+            if (errors.permissions) {
+                setErrors({ ...errors, permissions: '' });
+            }
+            return;
+        }
+
         setUserData({ ...userData, [name]: formattedValue });
 
         // Clear error for this field when user starts typing
@@ -248,6 +370,10 @@ const UserManagement = () => {
             newErrors.branch = 'Branch selection is required';
         }
 
+        if (isStaffOrAdminRole(userData.role) && normalizePermissionList(userData.permissions).length === 0) {
+            newErrors.permissions = 'Select at least one permission for this account';
+        }
+
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
@@ -255,6 +381,16 @@ const UserManagement = () => {
     const handleAddUser = async (e) => {
         e.preventDefault();
         setSubmitError('');
+
+        if (!editingUser && !canCreateUsers) {
+            setSubmitError('You do not have permission to add users.');
+            return;
+        }
+
+        if (editingUser && !canEditUsers) {
+            setSubmitError('You do not have permission to edit users.');
+            return;
+        }
 
         // Validate form
         if (!validateForm()) {
@@ -289,6 +425,7 @@ const UserManagement = () => {
                     status: userData.status.toLowerCase(),
                     emailChanged: emailChanged,
                     avatar: userData.avatar,
+                    permissions: normalizePermissionList(userData.permissions),
                 });
 
                 if (emailChanged && response.passwordSent) {
@@ -310,6 +447,7 @@ const UserManagement = () => {
                     email: userData.email,
                     role: userData.role.toLowerCase(),
                     branch: userData.branch,
+                    permissions: normalizePermissionList(userData.permissions),
                 });
                 showNotification('User created successfully! Login credentials have been sent to their email.', 'success');
             }
@@ -330,10 +468,11 @@ const UserManagement = () => {
                 address: '',
                 contactNumber: '',
                 email: '',
-                role: 'staff',
+                role: 'Staff',
                 branch: '',
                 status: 'active',
-                avatar: ''
+                avatar: '',
+                permissions: getDefaultPermissionsForRole('staff')
             });
             setOriginalEmail('');
         } catch (error) {
@@ -371,6 +510,11 @@ const UserManagement = () => {
     };
 
     const handleEditClick = (user) => {
+        if (!canEditUsers) {
+            showNotification('You do not have permission to edit users.', 'warning');
+            return;
+        }
+
         setEditingUser(user);
         setOriginalEmail(user.email);
         setUserData({
@@ -386,7 +530,10 @@ const UserManagement = () => {
             role: user.role,
             branch: user.branchId || '',
             status: user.status,
-            avatar: user.avatar && !user.avatar.includes('pravatar.cc') ? user.avatar : ''
+            avatar: user.avatar && !user.avatar.includes('pravatar.cc') ? user.avatar : '',
+            permissions: normalizePermissionList(user.permissions).length > 0
+                ? normalizePermissionList(user.permissions)
+                : getDefaultPermissionsForRole(user.role)
         });
         setShowModal(true);
     };
@@ -407,11 +554,65 @@ const UserManagement = () => {
             address: '',
             contactNumber: '',
             email: '',
-            role: 'staff',
+            role: 'Staff',
             branch: '',
             status: 'active',
-            avatar: ''
+            avatar: '',
+            permissions: getDefaultPermissionsForRole('staff')
         });
+    };
+
+    const isPermissionEnabled = (permissionKey) => userData.permissions.includes(permissionKey);
+
+    const togglePermission = (permissionKey) => {
+        const hasPermission = userData.permissions.includes(permissionKey);
+        const updatedPermissions = hasPermission
+            ? userData.permissions.filter(permission => permission !== permissionKey)
+            : [...userData.permissions, permissionKey];
+
+        setUserData({ ...userData, permissions: normalizePermissionList(updatedPermissions) });
+        if (errors.permissions) {
+            setErrors({ ...errors, permissions: '' });
+        }
+    };
+
+    const togglePermissionGroup = (group) => {
+        const groupKeys = group.permissions.map(permission => permission.key);
+        const allEnabled = groupKeys.every(permissionKey => userData.permissions.includes(permissionKey));
+
+        const updatedPermissions = allEnabled
+            ? userData.permissions.filter(permission => !groupKeys.includes(permission))
+            : [...new Set([...userData.permissions, ...groupKeys])];
+
+        setUserData({ ...userData, permissions: normalizePermissionList(updatedPermissions) });
+        if (errors.permissions) {
+            setErrors({ ...errors, permissions: '' });
+        }
+    };
+
+    const togglePermissionGroupDropdown = (groupId) => {
+        setOpenPermissionGroups((prev) => ({
+            ...prev,
+            [groupId]: !prev[groupId],
+        }));
+    };
+
+    const selectAllPermissions = () => {
+        setUserData({ ...userData, permissions: [...ALL_PERMISSION_KEYS] });
+        if (errors.permissions) {
+            setErrors({ ...errors, permissions: '' });
+        }
+    };
+
+    const clearAllPermissions = () => {
+        setUserData({ ...userData, permissions: [] });
+    };
+
+    const applyRolePermissionPreset = () => {
+        setUserData({ ...userData, permissions: getDefaultPermissionsForRole(userData.role) });
+        if (errors.permissions) {
+            setErrors({ ...errors, permissions: '' });
+        }
     };
 
     const filteredUsers = users.filter(user => {
@@ -428,6 +629,11 @@ const UserManagement = () => {
     const pagedUsers = filteredUsers.slice((userPage - 1) * USER_PAGE_SIZE, userPage * USER_PAGE_SIZE);
 
     const toggleStatus = async (id) => {
+        if (!canToggleUserStatus) {
+            showNotification('You do not have permission to change user status.', 'warning');
+            return;
+        }
+
         try {
             await adminAPI.toggleUserStatus(id);
             // Refresh users list
@@ -444,6 +650,11 @@ const UserManagement = () => {
     };
 
     const handlePasswordReset = (user) => {
+        if (!canResetPasswords) {
+            showNotification('You do not have permission to reset passwords.', 'warning');
+            return;
+        }
+
         setPasswordResetUser(user);
         setNewPassword('');
         setPasswordError('');
@@ -487,10 +698,12 @@ const UserManagement = () => {
                     <p>Manage system access for admins, staff members, and students</p>
                 </div>
                 <div className="header-actions">
-                    <button className="add-user-btn" onClick={() => setShowModal(true)}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
-                        Add New User
-                    </button>
+                    {canCreateUsers && (
+                        <button className="add-user-btn" onClick={() => setShowModal(true)}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
+                            Add New User
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -582,10 +795,12 @@ const UserManagement = () => {
                                                 <button className="action-btn view" title="View Details" onClick={() => handleViewUser(user)}>
                                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                                                 </button>
-                                                <button className="action-btn password" title="Reset Password" onClick={() => handlePasswordReset(user)}>
-                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
-                                                </button>
-                                                {user.role !== 'Admin' && (
+                                                {canResetPasswords && (
+                                                    <button className="action-btn password" title="Reset Password" onClick={() => handlePasswordReset(user)}>
+                                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
+                                                    </button>
+                                                )}
+                                                {canToggleUserStatus && user.role !== 'Admin' && (
                                                     <button
                                                         className={`action-btn toggle ${user.status === 'Active' ? 'deactivate' : 'activate'}`}
                                                         title={user.status === 'Active' ? 'Deactivate' : 'Activate'}
@@ -1238,6 +1453,215 @@ const UserManagement = () => {
                                                 )}
                                             </div>
                                         </div>
+
+                                        {isStaffOrAdminRole(userData.role) && (
+                                            <div style={{ marginTop: '18px' }}>
+                                                <div style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center',
+                                                    gap: '12px',
+                                                    flexWrap: 'wrap',
+                                                    marginBottom: '12px'
+                                                }}>
+                                                    <div>
+                                                        <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-color)' }}>Permission Access</h4>
+                                                        <p style={{ margin: '2px 0 0 0', fontSize: '0.75rem', color: 'var(--secondary-text)' }}>
+                                                            {userData.permissions.length} selected out of {ALL_PERMISSION_KEYS.length}
+                                                        </p>
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={applyRolePermissionPreset}
+                                                            style={{
+                                                                padding: '7px 12px',
+                                                                borderRadius: '8px',
+                                                                border: '1px solid var(--border-color)',
+                                                                background: 'var(--card-bg)',
+                                                                color: 'var(--text-color)',
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 600,
+                                                                cursor: 'pointer'
+                                                            }}
+                                                        >
+                                                            Apply Role Preset
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={selectAllPermissions}
+                                                            style={{
+                                                                padding: '7px 12px',
+                                                                borderRadius: '8px',
+                                                                border: '1px solid var(--border-color)',
+                                                                background: 'var(--card-bg)',
+                                                                color: 'var(--text-color)',
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 600,
+                                                                cursor: 'pointer'
+                                                            }}
+                                                        >
+                                                            Select All
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={clearAllPermissions}
+                                                            style={{
+                                                                padding: '7px 12px',
+                                                                borderRadius: '8px',
+                                                                border: '1px solid #fecaca',
+                                                                background: '#fff1f2',
+                                                                color: '#b91c1c',
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 600,
+                                                                cursor: 'pointer'
+                                                            }}
+                                                        >
+                                                            Clear
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                {errors.permissions && (
+                                                    <div style={{
+                                                        marginBottom: '10px',
+                                                        padding: '8px 10px',
+                                                        borderRadius: '8px',
+                                                        border: '1px solid #fecaca',
+                                                        background: '#fef2f2',
+                                                        color: '#991b1b',
+                                                        fontSize: '0.75rem',
+                                                        fontWeight: 600
+                                                    }}>
+                                                        {errors.permissions}
+                                                    </div>
+                                                )}
+
+                                                <div style={{ display: 'grid', gap: '10px' }}>
+                                                    {PERMISSION_GROUPS.map(group => {
+                                                        const groupKeys = group.permissions.map(permission => permission.key);
+                                                        const selectedCount = groupKeys.filter(permissionKey => userData.permissions.includes(permissionKey)).length;
+                                                        const allSelected = selectedCount === groupKeys.length;
+                                                        const isOpen = !!openPermissionGroups[group.id];
+
+                                                        return (
+                                                            <div
+                                                                key={group.id}
+                                                                style={{
+                                                                    border: '1px solid var(--border-color)',
+                                                                    borderRadius: '10px',
+                                                                    background: 'var(--card-bg)',
+                                                                    overflow: 'hidden'
+                                                                }}
+                                                            >
+                                                                <div style={{
+                                                                    display: 'flex',
+                                                                    justifyContent: 'space-between',
+                                                                    alignItems: 'center',
+                                                                    padding: '10px 12px',
+                                                                    borderBottom: isOpen ? '1px solid var(--border-color)' : 'none',
+                                                                    background: 'rgba(59,130,246,0.06)'
+                                                                }}>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => togglePermissionGroupDropdown(group.id)}
+                                                                        style={{
+                                                                            display: 'flex',
+                                                                            alignItems: 'center',
+                                                                            justifyContent: 'space-between',
+                                                                            gap: '10px',
+                                                                            flex: 1,
+                                                                            background: 'transparent',
+                                                                            border: 'none',
+                                                                            color: 'inherit',
+                                                                            textAlign: 'left',
+                                                                            padding: 0,
+                                                                            cursor: 'pointer'
+                                                                        }}
+                                                                    >
+                                                                        <div>
+                                                                            <strong style={{ fontSize: '0.82rem', color: 'var(--text-color)' }}>{group.label}</strong>
+                                                                            <p style={{ margin: '2px 0 0 0', fontSize: '0.72rem', color: 'var(--secondary-text)' }}>
+                                                                                {selectedCount}/{groupKeys.length} selected
+                                                                            </p>
+                                                                                            {PERMISSION_GROUP_HINTS[group.id] && (
+                                                                                                <p style={{ margin: '2px 0 0 0', fontSize: '0.7rem', color: 'var(--secondary-text)' }}>
+                                                                                                    {PERMISSION_GROUP_HINTS[group.id]}
+                                                                                                </p>
+                                                                                            )}
+                                                                        </div>
+                                                                        <span style={{
+                                                                            display: 'inline-flex',
+                                                                            width: '20px',
+                                                                            height: '20px',
+                                                                            alignItems: 'center',
+                                                                            justifyContent: 'center',
+                                                                            fontSize: '0.9rem',
+                                                                            color: 'var(--secondary-text)',
+                                                                            transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                                                                            transition: 'transform 0.2s ease'
+                                                                        }}>
+                                                                            ▾
+                                                                        </span>
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => togglePermissionGroup(group)}
+                                                                        style={{
+                                                                            padding: '6px 10px',
+                                                                            borderRadius: '8px',
+                                                                            border: '1px solid var(--border-color)',
+                                                                            background: allSelected ? 'rgba(16,185,129,0.12)' : 'var(--card-bg)',
+                                                                            color: allSelected ? '#047857' : 'var(--text-color)',
+                                                                            fontSize: '0.73rem',
+                                                                            fontWeight: 600,
+                                                                            cursor: 'pointer',
+                                                                            marginLeft: '10px'
+                                                                        }}
+                                                                    >
+                                                                        {allSelected ? 'Clear Group' : 'Select Group'}
+                                                                    </button>
+                                                                </div>
+
+                                                                {isOpen && (
+                                                                    <div style={{
+                                                                        display: 'grid',
+                                                                        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                                                                        gap: '8px',
+                                                                        padding: '10px 12px'
+                                                                    }}>
+                                                                        {group.permissions.map(permission => (
+                                                                            <label
+                                                                                key={permission.key}
+                                                                                style={{
+                                                                                    display: 'flex',
+                                                                                    alignItems: 'center',
+                                                                                    gap: '8px',
+                                                                                    padding: '6px 8px',
+                                                                                    borderRadius: '8px',
+                                                                                    border: '1px solid rgba(148,163,184,0.25)',
+                                                                                    background: isPermissionEnabled(permission.key) ? 'rgba(59,130,246,0.08)' : 'transparent',
+                                                                                    cursor: 'pointer',
+                                                                                    fontSize: '0.78rem',
+                                                                                    color: 'var(--text-color)'
+                                                                                }}
+                                                                            >
+                                                                                <input
+                                                                                    type="checkbox"
+                                                                                    checked={isPermissionEnabled(permission.key)}
+                                                                                    onChange={() => togglePermission(permission.key)}
+                                                                                />
+                                                                                <span>{permission.label}</span>
+                                                                            </label>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="modal-footer" style={{
@@ -1691,6 +2115,91 @@ const UserManagement = () => {
                                         </div>
                                     </div>
 
+                                    {(['Admin', 'Staff'].includes(selectedUser.role)) && (
+                                        <div style={{ marginBottom: '25px' }}>
+                                            <h3 style={{
+                                                fontSize: '0.85rem',
+                                                fontWeight: '700',
+                                                color: 'var(--text-color)',
+                                                textTransform: 'uppercase',
+                                                letterSpacing: '0.05em',
+                                                marginBottom: '15px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '8px'
+                                            }}>
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                    <path d="M9 12l2 2 4-4"></path>
+                                                    <path d="M21 12c.552 0 1 .449 1 1v6c0 1.105-.895 2-2 2H4c-1.105 0-2-.895-2-2v-6c0-.551.448-1 1-1"></path>
+                                                    <path d="M7 12V7a5 5 0 0 1 10 0v5"></path>
+                                                </svg>
+                                                Access Permissions
+                                            </h3>
+                                            <div className="profile-data-card">
+                                                {selectedUser.permissions && selectedUser.permissions.length > 0 ? (
+                                                    <div style={{ display: 'grid', gap: '10px' }}>
+                                                        {getPermissionGroupsForDisplay(selectedUser.permissions).map((group) => (
+                                                            <div
+                                                                key={group.id}
+                                                                style={{
+                                                                    border: '1px solid rgba(148,163,184,0.35)',
+                                                                    borderRadius: '10px',
+                                                                    overflow: 'hidden',
+                                                                    background: 'var(--card-bg)'
+                                                                }}
+                                                            >
+                                                                <div style={{
+                                                                    padding: '8px 10px',
+                                                                    borderBottom: '1px solid rgba(148,163,184,0.25)',
+                                                                    background: 'rgba(59,130,246,0.08)',
+                                                                    fontSize: '0.78rem',
+                                                                    fontWeight: 700,
+                                                                    color: '#1d4ed8',
+                                                                    display: 'flex',
+                                                                    justifyContent: 'space-between',
+                                                                    alignItems: 'center'
+                                                                }}>
+                                                                    <span>{group.label}</span>
+                                                                    <span style={{ color: 'var(--secondary-text)', fontWeight: 600 }}>{group.items.length}</span>
+                                                                </div>
+                                                                <div style={{ padding: '8px 10px', display: 'grid', gap: '6px' }}>
+                                                                    {group.items.map((permission) => (
+                                                                        <div
+                                                                            key={permission.key}
+                                                                            style={{
+                                                                                display: 'flex',
+                                                                                alignItems: 'center',
+                                                                                gap: '8px',
+                                                                                fontSize: '0.78rem',
+                                                                                color: 'var(--text-color)'
+                                                                            }}
+                                                                        >
+                                                                            <span style={{
+                                                                                width: '16px',
+                                                                                height: '16px',
+                                                                                borderRadius: '50%',
+                                                                                background: 'rgba(16,185,129,0.18)',
+                                                                                color: '#047857',
+                                                                                display: 'inline-flex',
+                                                                                alignItems: 'center',
+                                                                                justifyContent: 'center',
+                                                                                fontSize: '0.68rem',
+                                                                                fontWeight: 700
+                                                                            }}>✓</span>
+                                                                            <span>{permission.label || PERMISSION_LABEL_MAP[permission.key] || permission.key}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ fontSize: '0.85rem', color: 'var(--secondary-text)' }}>No custom permissions assigned.</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {(!['Admin', 'Staff'].includes(selectedUser.role)) && (
                                         <div style={{ marginBottom: '25px' }}>
                                             <h3 style={{
@@ -1829,24 +2338,26 @@ const UserManagement = () => {
                                     }}
                                     onClick={() => setShowViewModal(false)}
                                 >Close View</button>
-                                <button
-                                    className="confirm-btn"
-                                    style={{
-                                        flex: '1 1 150px',
-                                        padding: '12px 24px',
-                                        borderRadius: '10px',
-                                        border: 'none',
-                                        background: 'var(--primary-color)',
-                                        color: 'white',
-                                        fontSize: '0.9rem',
-                                        fontWeight: '600',
-                                        cursor: 'pointer'
-                                    }}
-                                    onClick={() => {
-                                        setShowViewModal(false);
-                                        handleEditClick(selectedUser);
-                                    }}
-                                >Edit Profile</button>
+                                {canEditUsers && (
+                                    <button
+                                        className="confirm-btn"
+                                        style={{
+                                            flex: '1 1 150px',
+                                            padding: '12px 24px',
+                                            borderRadius: '10px',
+                                            border: 'none',
+                                            background: 'var(--primary-color)',
+                                            color: 'white',
+                                            fontSize: '0.9rem',
+                                            fontWeight: '600',
+                                            cursor: 'pointer'
+                                        }}
+                                        onClick={() => {
+                                            setShowViewModal(false);
+                                            handleEditClick(selectedUser);
+                                        }}
+                                    >Edit Profile</button>
+                                )}
                             </div>
                         </div>
                     </div>

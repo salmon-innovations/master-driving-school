@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 
 const logo = '/images/logo.png';
 
-const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onNavigate, handleLogout }) => {
+const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onNavigate, handleLogout, allowedTabs }) => {
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 1024);
     const [openDropdowns, setOpenDropdowns] = useState({});
 
@@ -167,6 +167,28 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onN
         }
     ];
 
+    const visibleMenuItems = useMemo(() => {
+        const canShowTab = (tabId) => !allowedTabs || allowedTabs.has(tabId);
+
+        return menuItems
+            .map((item) => {
+                if (!item.isDropdown) {
+                    return canShowTab(item.id) ? item : null;
+                }
+
+                const visibleChildren = (item.children || []).filter((child) => canShowTab(child.id));
+                if (visibleChildren.length === 0) {
+                    return null;
+                }
+
+                return {
+                    ...item,
+                    children: visibleChildren,
+                };
+            })
+            .filter(Boolean);
+    }, [allowedTabs]);
+
     return (
         <>
             {/* Mobile Overlay */}
@@ -199,7 +221,7 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onN
 
                 <nav className="sidebar-menu">
                     <div className="menu-group">
-                        {menuItems.map((item) => (
+                        {visibleMenuItems.map((item) => (
                             <div key={item.id}>
                                 {item.isDropdown ? (
                                     <>

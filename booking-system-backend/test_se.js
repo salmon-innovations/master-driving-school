@@ -1,0 +1,1 @@
+const pool = require('./config/db'); async function test() { const c = await pool.query('SELECT column_name FROM information_schema.columns WHERE table_name = ''schedule_enrollments'''); console.log(c.rows); process.exit(); } test();

@@ -84,7 +84,7 @@ function Header({ currentPage, onNavigate, cartItemCount = 0, onCartClick, isLog
             ))}
 
             {/* Shopping Cart Icon */}
-            {cartItemCount > 0 && isLoggedIn && (
+            {cartItemCount > 0 && (
               <button
                 onClick={onCartClick}
                 className="relative p-2 text-gray-700 hover:text-[#2157da] transition-colors"
@@ -157,7 +157,7 @@ function Header({ currentPage, onNavigate, cartItemCount = 0, onCartClick, isLog
           {/* Mobile Controls */}
           <div className="mobile-menu-toggle flex items-center gap-3">
             {/* Mobile Cart Icon */}
-            {cartItemCount > 0 && isLoggedIn && (
+            {cartItemCount > 0 && (
               <button
                 onClick={onCartClick}
                 className="relative p-2 text-gray-700 hover:text-[#2157da] transition-colors"

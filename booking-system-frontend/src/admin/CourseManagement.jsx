@@ -36,7 +36,7 @@ const CourseManagement = () => {
     const [editingBranchId, setEditingBranchId] = useState('');
     const [activeTab, setActiveTab] = useState('courses');
     const [discountForm, setDiscountForm] = useState({});
-    const [addonsConfig, setAddonsConfig] = useState({ reviewer: 30, vehicleTips: 20, convenienceFee: 25 });
+    const [addonsConfig, setAddonsConfig] = useState({ reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 3, customAddons: [] });
     const [addonsLoading, setAddonsLoading] = useState(false);
 
     // Fetch courses from database
@@ -44,7 +44,11 @@ const CourseManagement = () => {
         fetchCourses();
         coursesAPI.getConfig().then(r => { if (r.success) setCourseConfig(r.config); }).catch(() => {});
         branchesAPI.getAll().then(r => { if (r.success) setBranches(r.branches || []); }).catch(() => {});
-        adminAPI.getAddonsConfig().then(r => { if (r.success) setAddonsConfig(r.config); }).catch(() => {});
+        adminAPI.getAddonsConfig().then(r => { 
+            if (r.success) {
+                setAddonsConfig({ reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 3, ...r.config, customAddons: r.config.customAddons || [] });
+            }
+        }).catch(() => {});
     }, []);
 
     const fetchCourses = async () => {
@@ -396,6 +400,50 @@ const CourseManagement = () => {
     const courseTotalPages = Math.ceil(filteredCourses.length / COURSE_PAGE_SIZE);
     const pagedCourses = filteredCourses.slice((coursePage - 1) * COURSE_PAGE_SIZE, coursePage * COURSE_PAGE_SIZE);
     const viewingBranch = branches.find(b => String(b.id) === String(viewingBranchId)) || null;
+
+    const handleAddCustomAddon = () => {
+        setAddonsConfig({
+            ...addonsConfig,
+            customAddons: [...(addonsConfig.customAddons || []), { id: Date.now().toString(), name: '', price: '', file: null, fileName: '' }]
+        });
+    };
+
+    const handleRemoveCustomAddon = (index) => {
+        const newAddons = [...(addonsConfig.customAddons || [])];
+        newAddons.splice(index, 1);
+        setAddonsConfig({ ...addonsConfig, customAddons: newAddons });
+    };
+
+    const handleCustomAddonChange = (index, field, value) => {
+        const newAddons = [...(addonsConfig.customAddons || [])];
+        newAddons[index][field] = value;
+        setAddonsConfig({ ...addonsConfig, customAddons: newAddons });
+    };
+
+    const handleCustomAddonFileUpload = (index, e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        if (file.size > 5 * 1024 * 1024) {
+            showNotification('File must be less than 5MB', 'error');
+            return;
+        }
+
+        const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+        if (!validTypes.includes(file.type)) {
+            showNotification('Only PDF and Word documents are allowed', 'error');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const newAddons = [...(addonsConfig.customAddons || [])];
+            newAddons[index].file = reader.result;
+            newAddons[index].fileName = file.name;
+            setAddonsConfig({ ...addonsConfig, customAddons: newAddons });
+        };
+        reader.readAsDataURL(file);
+    };
 
     const handleSaveAddonsConfig = async () => {
         setAddonsLoading(true);
@@ -1053,6 +1101,97 @@ const CourseManagement = () => {
                                     onChange={(e) => setAddonsConfig({...addonsConfig, convenienceFee: e.target.value})}
                                     className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:border-[#2157da] focus:ring-2 focus:ring-blue-100 outline-none transition-all text-gray-800 font-semibold"
                                 />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">
+                                    TDC + PDC Promo Discount (%)
+                                </label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    step="0.1"
+                                    value={addonsConfig.promoBundleDiscountPercent ?? 3}
+                                    onChange={(e) => setAddonsConfig({ ...addonsConfig, promoBundleDiscountPercent: e.target.value })}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:border-[#2157da] focus:ring-2 focus:ring-blue-100 outline-none transition-all text-gray-800 font-semibold"
+                                />
+                            </div>
+
+                            {/* Custom Add-ons Section */}
+                            <div className="mt-8 pt-8 border-t border-gray-200">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-lg font-bold text-[#1a2332]">Custom Add-ons</h3>
+                                    <button
+                                        onClick={handleAddCustomAddon}
+                                        className="text-sm font-bold text-[#2157da] bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition-colors border border-blue-200"
+                                    >
+                                        + Add New Add-on
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4">
+                                    {(addonsConfig.customAddons || []).map((addon, index) => (
+                                        <div key={addon.id} className="p-4 bg-gray-50 border border-gray-200 rounded-xl relative">
+                                            <button
+                                                onClick={() => handleRemoveCustomAddon(index)}
+                                                className="absolute top-3 right-3 text-red-400 hover:text-red-600 font-blacktext-lg w-8 h-8 flex items-center justify-center hover:bg-red-50 rounded-full transition-colors"
+                                            >
+                                                &times;
+                                            </button>
+                                            
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                                                <div>
+                                                    <label className="block text-xs font-bold text-gray-700 mb-2">Add-on Name</label>
+                                                    <input
+                                                        type="text"
+                                                        value={addon.name}
+                                                        onChange={(e) => handleCustomAddonChange(index, 'name', e.target.value)}
+                                                        placeholder="e.g. Student Manual"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[#2157da] focus:ring-1 focus:ring-[#2157da] outline-none text-sm font-semibold"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-bold text-gray-700 mb-2">Price (₱)</label>
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        value={addon.price}
+                                                        onChange={(e) => handleCustomAddonChange(index, 'price', e.target.value)}
+                                                        placeholder="0"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[#2157da] focus:ring-1 focus:ring-[#2157da] outline-none text-sm font-semibold"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-700 mb-2">Upload File (PDF/Word)</label>
+                                                <div className="flex flex-col sm:flex-row items-center gap-3">
+                                                    <label className="cursor-pointer bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2">
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+                                                        Choose File
+                                                        <input 
+                                                            type="file" 
+                                                            accept=".pdf,.doc,.docx" 
+                                                            className="hidden" 
+                                                            onChange={(e) => handleCustomAddonFileUpload(index, e)}
+                                                        />
+                                                    </label>
+                                                    {addon.fileName && (
+                                                        <span className="text-xs text-[#2157da] font-medium bg-blue-50 px-2.5 py-1 rounded-md border border-blue-100 flex items-center gap-1.5 truncate max-w-full">
+                                                            <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                                            <span className="truncate">{addon.fileName}</span>
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {(addonsConfig.customAddons || []).length === 0 && (
+                                        <div className="text-center py-6 text-sm text-gray-400 font-medium italic border-2 border-dashed border-gray-200 rounded-xl">
+                                            No custom add-ons configured yet.
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             
                             <button

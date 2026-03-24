@@ -93,7 +93,6 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
     try {
       setLoadingSlots2(true)
       setDbSlots2([])
-      setSelectedSlot2(null)
 
       if (!date) return
       const branchId = preSelectedBranch?.id || null
@@ -423,7 +422,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
         } : null,
       }
       setScheduleSelection(scheduleData)
-      if (selectedCourse) {
+      if (selectedCourse && !selectedCourse.fromCartBundle) {
         const existingItem = cart.find(item => item.id === selectedCourse.id)
         if (existingItem) {
           setCart(cart.map(item => item.id === selectedCourse.id ? { ...item, quantity: 1 } : item))
@@ -437,6 +436,8 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
             category: selectedCourse.category,
             typeOptions: selectedCourse.typeOptions,
             hasTypeOption: selectedCourse.hasTypeOption,
+            addonsConfig: selectedCourse.addonsConfig,
+            selectedAddons: selectedCourse.selectedAddons,
             quantity: 1,
             type: courseType,
           }])
@@ -522,6 +523,8 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
           category: selectedCourse.category,
           typeOptions: selectedCourse.typeOptions,
           hasTypeOption: selectedCourse.hasTypeOption,
+            addonsConfig: selectedCourse.addonsConfig,
+            selectedAddons: selectedCourse.selectedAddons,
           quantity: 1,
           type: courseType,
         }])
@@ -734,13 +737,11 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
   const promoPdcMinDate = (() => {
     const today = new Date(); today.setHours(0, 0, 0, 0)
     const base = new Date(today)
-    base.setDate(today.getDate() + 2)
     if (!promoTdcSlot) return base
     const tdcEnd = promoTdcSlot.end_date || promoTdcSlot.date
     if (!tdcEnd) return base
     const tdcEndDate = new Date(tdcEnd + 'T00:00:00')
     const afterTdc = new Date(tdcEndDate)
-    afterTdc.setDate(tdcEndDate.getDate() + 2)
     return afterTdc > base ? afterTdc : base
   })()
 
@@ -976,9 +977,8 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                 return (
                   <div
                     key={day}
-                    onClick={() => isAvailable && !isDay1Marker && handleDateClick(day)}
                     className={`min-h-[140px] rounded-xl border flex flex-col overflow-hidden transition-all relative
-                      ${!isAvailable || isDay1Marker ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'}
+                      ${!isAvailable || isDay1Marker ? 'cursor-not-allowed opacity-45' : 'cursor-default'}
                       ${slotCellBorder}`}
                   >
                     {/* Day number */}
@@ -1004,12 +1004,12 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                           if (sn.includes('whole')) return 'Whole Day';
                           return slot.session || (isTdc ? 'TDC' : 'PDC');
                         })();
-                        const countLabel = isFullyBooked ? 'FULL' : `${slot.available_slots}S`;
+                        const countLabel = isFullyBooked ? 'FULL' : `${slot.available_slots} Slots`;
 
                         return (
                           <div
                             key={slot.id}
-                            className={`w-full text-left rounded-[7px] border px-1.5 py-1 flex flex-col gap-[2px] pointer-events-none ${
+                            onClick={(e) => { e.stopPropagation(); handleCalendarSlotClick(slot, day); }} className={`w-full text-left rounded-[7px] border px-1.5 py-1 flex flex-col gap-[2px] ${!isFullyBooked ? 'cursor-pointer hover:shadow-md transition-all' : 'cursor-not-allowed'} ${
                               isSlotSelected
                                 ? 'border-[#2563eb] bg-[#2563eb] text-white shadow-sm'
                                 : isFullyBooked
@@ -1554,9 +1554,8 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                                     : 'border-gray-200/80 bg-white hover:border-gray-300'
                           return (
                             <div key={day}
-                              onClick={() => { if (!avail) return; const d = new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth(), day); setPromoPdcDate(d); setPromoPdcSlot(null) }}
                               className={`min-h-[100px] rounded-xl border flex flex-col overflow-hidden transition-all relative ${
-                                !avail ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'
+                                !avail ? 'cursor-not-allowed opacity-45' : 'cursor-default'
                               } ${slotCellBorder}`}
                             >
                               <div className="flex items-center justify-between px-2.5 pt-2.5 pb-1 flex-shrink-0">
@@ -1576,10 +1575,10 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                                     if (sn.includes('whole')) return 'Whole Day'
                                     return slot.session || 'PDC'
                                   })()
-                                  const countLabel = isFullyBooked ? 'FULL' : `${slot.available_slots}S`
+                                  const countLabel = isFullyBooked ? 'FULL' : `${slot.available_slots} Slots`
                                   const timeStr = (slot.time_range || '').toLowerCase().replace(/ - /g, ' / ').replace(/ am/g, 'am').replace(/ pm/g, 'pm')
                                   return (
-                                    <div key={slot.id} className={`w-full text-left rounded-[7px] border px-1.5 py-1 flex flex-col gap-[2px] pointer-events-none ${
+                                    <div key={slot.id} onClick={(e) => { e.stopPropagation(); if (isFullyBooked) return; setPromoPdcDate(new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth(), day)); handleSlotClick(slot); }} className={`w-full text-left rounded-[7px] border px-1.5 py-1 flex flex-col gap-[2px] ${!isFullyBooked ? 'cursor-pointer hover:shadow-md transition-all' : 'cursor-not-allowed'} ${
                                       isSlotSel ? 'border-[#2563eb] bg-[#2563eb] text-white shadow-sm'
                                         : isFullyBooked ? 'border-red-200 bg-red-50 text-red-500 opacity-70'
                                           : 'border-orange-200 bg-orange-50 text-orange-700'
@@ -1605,7 +1604,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                   )}
 
                   {/* PDC Day 1 Slots */}
-                  {(promoPdcType !== 'Motorcycle' || promoPdcMotorType) && promoPdcDate && (
+                  {false && (promoPdcType !== 'Motorcycle' || promoPdcMotorType) && promoPdcDate && (
                     <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
                       <div className="flex items-center justify-between mb-5">
                         <div>
@@ -1747,10 +1746,9 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                                       : 'border-gray-200/80 bg-white hover:border-gray-300'
                           return (
                             <div key={day}
-                              onClick={() => { if (!avail || isDay1) return; const d = new Date(promoPdcDay2CalMonth.getFullYear(), promoPdcDay2CalMonth.getMonth(), day); setPromoPdcDate2(d); setPromoPdcSlot2(null) }}
                               title={isDay1 ? 'Already used for Day 1' : undefined}
                               className={`min-h-[100px] rounded-xl border flex flex-col overflow-hidden transition-all relative ${
-                                !avail || isDay1 ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'
+                                !avail || isDay1 ? 'cursor-not-allowed opacity-45' : 'cursor-default'
                               } ${cellBorder2}`}
                             >
                               <div className="flex items-center justify-between px-2.5 pt-2.5 pb-1 flex-shrink-0">
@@ -1771,10 +1769,10 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                                     if (sn.includes('whole')) return 'Whole Day'
                                     return slot.session || 'PDC'
                                   })()
-                                  const countLabel = isFullyBooked ? 'FULL' : `${slot.available_slots}S`
+                                  const countLabel = isFullyBooked ? 'FULL' : `${slot.available_slots} Slots`
                                   const timeStr = (slot.time_range || '').toLowerCase().replace(/ - /g, ' / ').replace(/ am/g, 'am').replace(/ pm/g, 'pm')
                                   return (
-                                    <div key={slot.id} className={`w-full text-left rounded-[7px] border px-1.5 py-1 flex flex-col gap-[2px] pointer-events-none ${
+                                    <div key={slot.id} onClick={(e) => { e.stopPropagation(); if (isFullyBooked) return; setPromoPdcDate2(new Date(promoPdcDay2CalMonth.getFullYear(), promoPdcDay2CalMonth.getMonth(), day)); handleSlotClick(slot); }} className={`w-full text-left rounded-[7px] border px-1.5 py-1 flex flex-col gap-[2px] ${!isFullyBooked ? 'cursor-pointer hover:shadow-md transition-all' : 'cursor-not-allowed'} ${
                                       isSlotSel2 ? 'border-green-500 bg-green-500 text-white shadow-sm'
                                         : isFullyBooked ? 'border-red-200 bg-red-50 text-red-500 opacity-70'
                                           : 'border-orange-200 bg-orange-50 text-orange-700'
@@ -1800,7 +1798,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                   )}
 
                   {/* PDC Day 2 Slots */}
-                  {promoPdcSelectingDay2 && !promoPdcSlot2 && promoPdcDate2 && (
+                  {false && promoPdcSelectingDay2 && !promoPdcSlot2 && promoPdcDate2 && (
                     <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
                       <div className="flex items-center justify-between mb-5">
                         <div>
@@ -1895,7 +1893,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
 
         {/* Day-1 selected banner (half-day PDC) */}
         {/* Day 1 slot panel — appears after a date is clicked in the calendar */}
-        {!isPromoCourse && !isTDCCourse && selectedDate && !selectingDay2 && !selectedSlot && (() => {
+        {false && !isPromoCourse && !isTDCCourse && selectedDate && !selectingDay2 && !selectedSlot && (() => {
           const day1DateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
           const day1Slots = filteredPdcSlots.filter(s => s.date === day1DateStr)
           return (
@@ -2021,7 +2019,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
         )}
 
         {/* Day-2 slot panel — appears below main panel after Day 1 is picked, no second calendar */}
-        {!isPromoCourse && selectingDay2 && !selectedSlot2 && (
+        {false && !isPromoCourse && selectingDay2 && !selectedSlot2 && (
           <div className="bg-white rounded-3xl shadow-lg border-2 border-dashed border-[#2157da] p-5 sm:p-7 mb-6" data-aos="fade-up">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-8 h-8 bg-[#2157da] rounded-xl flex items-center justify-center flex-shrink-0">

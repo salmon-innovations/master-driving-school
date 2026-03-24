@@ -272,6 +272,11 @@
     */
 .cfg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; }
 
+/* Branch cards need extra width for long branch names and addresses */
+.branch-grid {
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+}
+
 /* 
    CARD
     */
@@ -325,6 +330,29 @@
 }
 .cfg-card-title-group { flex: 1; }
 .cfg-card-title-group h3 { font-size: .95rem; font-weight: 700; color: var(--cfg-slate-800); letter-spacing: -.01em; }
+
+/* Branch-specific alignment fixes */
+.branch-card .cfg-card-header {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    column-gap: 12px;
+}
+
+.branch-card .cfg-card-title-group {
+    min-width: 0;
+}
+
+.branch-card-title {
+    margin: 0;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.branch-card .cfg-card-actions {
+    margin-left: 4px;
+}
 
 .cfg-badge { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; padding: 3px 10px; border-radius: 99px; font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; background: rgba(16,185,129,.1); color: #059669; border: 1px solid rgba(16,185,129,.2); }
 .cfg-system-badge { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; padding: 3px 10px; border-radius: 99px; font-size: .68rem; font-weight: 700; background: rgba(99,102,241,.1); color: var(--cfg-indigo-dark); border: 1px solid rgba(99,102,241,.2); }

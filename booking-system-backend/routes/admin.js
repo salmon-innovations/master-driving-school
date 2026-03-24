@@ -24,6 +24,7 @@ const {
   sendReceiptEmail,
   getEmailContent,
   updateEmailContent,
+  sendTestEmailRoute,
   getTodayStudents,
   getStudentDetail,
   getAddonsConfig,
@@ -99,8 +100,7 @@ router.get('/analytics/branch-performance', getBranchPerformance);
 // Email content configuration (admin only)
 router.get('/email-content', getEmailContent);
 router.put('/email-content', updateEmailContent);
-
-// Add-ons configuration (admin only)
+router.post('/email-content/test', sendTestEmailRoute);
 router.get('/addons-config', getAddonsConfig);
 router.put('/addons-config', updateAddonsConfig);
 

@@ -138,6 +138,30 @@ curl -X POST http://localhost:5000/api/auth/login \
 | DB_USER | Database user | postgres |
 | DB_PASSWORD | Database password | - |
 | JWT_SECRET | JWT signing secret | - |
+
+## Deploying to DigitalOcean
+
+This repository is now prepared for DigitalOcean App Platform + Managed PostgreSQL.
+
+- App spec file: `.do/app.yaml`
+- Backend deployment guide: `booking-system-backend/DIGITALOCEAN_DEPLOYMENT.md`
+- Production env template: `booking-system-backend/.env.digitalocean.example`
+
+Quick summary:
+
+1. Create a Managed PostgreSQL cluster in DigitalOcean.
+2. Set backend environment variables (especially `DATABASE_URL`, `FRONTEND_URL`, `JWT_SECRET`).
+3. Deploy backend using `.do/app.yaml` (or App Platform UI with source dir `booking-system-backend`).
+4. Confirm health endpoint: `/api/health`.
+
+### DigitalOcean DB SSL
+
+The backend now supports DB SSL toggles:
+
+- `DB_SSL=true`
+- `DB_SSL_REJECT_UNAUTHORIZED=false`
+
+For DigitalOcean Managed PostgreSQL, use SSL-enabled `DATABASE_URL` (`sslmode=require`) and keep `DB_SSL=true`.
 | JWT_EXPIRE | JWT expiration time | 7d |
 | FRONTEND_URL | Frontend URL for CORS | http://localhost:5174 |
 
