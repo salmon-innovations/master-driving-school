@@ -353,6 +353,42 @@ const createTransporter = () => {
   });
 };
 
+const isResendMode = () => {
+  const rawService = String(process.env.EMAIL_SERVICE || '').toLowerCase().trim();
+  return rawService === 'resend' || !!process.env.RESEND_API_KEY;
+};
+
+const createStrictResendTransporter = () => {
+  return nodemailer.createTransport({
+    host: 'smtp.resend.com',
+    port: 465,
+    secure: true,
+    auth: {
+      user: 'resend',
+      pass: process.env.RESEND_API_KEY,
+    },
+    connectionTimeout: 15000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
+    tls: {
+      rejectUnauthorized: false,
+    },
+  });
+};
+
+const sendMailWithFallback = async (transporter, mailOptions) => {
+  try {
+    return await transporter.sendMail(mailOptions);
+  } catch (error) {
+    if (isResendMode() && process.env.RESEND_API_KEY) {
+      console.warn('[emailService] Primary send failed; retrying with strict Resend SMTP defaults:', error.message);
+      const strictResendTransporter = createStrictResendTransporter();
+      return strictResendTransporter.sendMail(mailOptions);
+    }
+    throw error;
+  }
+};
+
 // Resolve a valid From address. Prevent placeholder values from breaking SMTP/API delivery.
 const getFromAddress = () => {
   const configuredFrom = String(process.env.EMAIL_FROM || '').trim();
@@ -450,7 +486,7 @@ const sendVerificationEmail = async (email, code, firstName, type = 'Email Verif
 
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendMailWithFallback(transporter, mailOptions);
     console.log(`✅ ${type} email sent to:`, email);
     console.log('Message ID:', info.messageId);
     return true;
@@ -530,7 +566,7 @@ const sendPasswordEmail = async (email, password, firstName, role) => {
       text: `Hello ${firstName}!\n\nYour ${role.charAt(0).toUpperCase() + role.slice(1)} account has been successfully created.\n\nYour Login Credentials:\nEmail: ${email}\nPassword: ${password}\n\nIMPORTANT: Please change your password after your first login for security reasons.\n\nMaster Driving School`,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendMailWithFallback(transporter, mailOptions);
     console.log(`✅ Password email sent to:`, email);
     console.log('Message ID:', info.messageId);
     return true;
@@ -771,7 +807,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
       text: `Hello ${firstName} ${lastName}!\n\nYour walk-in enrollment has been successfully processed.\n\nSchedule Day 1: ${formattedDate}\nSession: ${scheduleSession}\nTime: ${scheduleTime}\n${effectiveDate2 ? `\nSchedule Day 2: ${effectiveDate2}\nSession: ${effectiveSession2}\nTime: ${effectiveTime2}\n` : ''}Course: ${courseName} (${courseType})\nBranch: ${branchName}\n\nLogin Credentials:\nEmail: ${email}\nPassword: ${password}\n\nVerification Code: ${verificationCode}\n\nPlease verify your email to activate your account.\n\n${isDownpayment ? `REMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n\n` : ''}${isB1B2 ? `VEHICLE RENTAL NOTE: For PDC - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}${isTricycle ? `VEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}IMPORTANT: Change your password after first login.\n\nMaster Driving School`,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendMailWithFallback(transporter, mailOptions);
     console.log('✅ Walk-in enrollment email sent to:', email);
     console.log('Message ID:', info.messageId);
     return true;
@@ -967,7 +1003,7 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
       text: `Hello ${firstName} ${lastName}!\n\nYour enrollment has been successfully processed.\n\nSchedule Day 1: ${formattedDate}\nSession: ${scheduleSession}\nTime: ${scheduleTime}\n${effectiveDate2 ? `\nSchedule Day 2: ${effectiveDate2}\nSession: ${effectiveSession2}\nTime: ${effectiveTime2}\n` : ''}Course: ${courseName} (${courseType})\nBranch: ${branchName}\n\n${isDownpayment ? `REMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n\n` : ''}${isB1B2 ? `VEHICLE RENTAL NOTE: For PDC - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}${isTricycle ? `VEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}Thank you for choosing Master Driving School!`,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendMailWithFallback(transporter, mailOptions);
     console.log('✅ Guest enrollment email sent to:', email);
     console.log('Message ID:', info.messageId);
     return true;
@@ -1035,7 +1071,7 @@ const sendNoShowEmail = async (email, firstName, lastName, enrollmentDetails) =>
       `,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendMailWithFallback(transporter, mailOptions);
     console.log('✅ No-show email sent to:', email);
     return true;
   } catch (error) {
@@ -1101,7 +1137,7 @@ const sendNewsPromoEmail = async (email, firstName, newsTitle, newsDescription, 
       `,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendMailWithFallback(transporter, mailOptions);
     return true;
   } catch (error) {
     console.error('❌ News promo email sending failed:', error.message);
@@ -1262,7 +1298,7 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
       `,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendMailWithFallback(transporter, mailOptions);
     console.log(`✅ Payment receipt email sent to: ${email}`);
     return true;
   } catch (error) {
@@ -1292,7 +1328,7 @@ const sendAddonsEmail = async (email, firstName, lastName, hasReviewer, hasVehic
       attachments, 
       html: `<!DOCTYPE html><html><body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px;"><div style="max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;"><div style="background: linear-gradient(135deg, #1a4fba 0%, #3b82f6 100%); color: white; padding: 30px 20px; text-align: center;"><h1 style="margin:0;font-size:24px;">Your Add-ons Are Here!</h1></div><div style="padding: 30px; background: #fff;"><p>Hi ${firstName},</p><p>Thank you for availing our additional review materials! We have attached the following requested add-ons to this email:</p><ul>${items.map(i=>'<li><strong>'+i+'</strong></li>').join('')}</ul><p>These guides will greatly help with your driving preparation. If you have any questions, feel free to reach out to us.</p><br><p>Best regards,<br>The MDS Team</p></div></div></body></html>`
     };
-    await transporter.sendMail(mailOptions);
+    await sendMailWithFallback(transporter, mailOptions);
     console.log('[EmailService] Add-ons sent to:', email);
   } catch (err) { console.error('Addons email error:', err); }
 };
@@ -1306,7 +1342,7 @@ const sendTestEmail = async (email, html, subject) => {
       subject: subject || 'Test Email Preview',
       html: html
     };
-    await transporter.sendMail(mailOptions);
+    await sendMailWithFallback(transporter, mailOptions);
     console.log('[EmailService] Test email sent to:', email);
     return true;
   } catch (err) {
