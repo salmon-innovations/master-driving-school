@@ -1995,7 +1995,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     // =====================================================================
 
                     return (
-                    <div className="step-content animate-fadeIn">
+                    <div className="step-content animate-fadeIn walkin-schedule-theme">
                         <div className="section-title">
                             <span className="step-badge">3</span>
                             <h3>Select Schedule</h3>
