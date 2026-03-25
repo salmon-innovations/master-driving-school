@@ -33,6 +33,8 @@ const resolveApiBaseUrl = () => {
 
 const API_BASE_URL = resolveApiBaseUrl();
 export const MEDIA_BASE_URL = API_BASE_URL.replace(/\/api$/, '');
+const GET_CACHE_TTL_MS = 30 * 1000;
+const getRequestCache = new Map();
 
 // Helper function to get auth token
 const getAuthToken = () => {
@@ -43,9 +45,20 @@ const getAuthToken = () => {
 const apiRequest = async (endpoint, options = {}) => {
   const url = `${API_BASE_URL}${endpoint}`;
   const token = getAuthToken();
+  const method = String(options.method || 'GET').toUpperCase();
+  const shouldUseCache = method === 'GET' && !token && options.cache !== false;
+  const cacheKey = `${method}:${url}`;
+
+  if (shouldUseCache) {
+    const cached = getRequestCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
+  }
 
   const config = {
     ...options,
+    method,
     headers: {
       ...options.headers,
     },
@@ -101,6 +114,15 @@ const apiRequest = async (endpoint, options = {}) => {
 
     if (!rawBody && response.status !== 204) {
       return {};
+    }
+
+    if (shouldUseCache) {
+      getRequestCache.set(cacheKey, {
+        data,
+        expiresAt: Date.now() + GET_CACHE_TTL_MS,
+      });
+    } else if (method !== 'GET') {
+      getRequestCache.clear();
     }
 
     return data;
