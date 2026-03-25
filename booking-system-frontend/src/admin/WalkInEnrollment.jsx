@@ -17,6 +17,20 @@ const DEFAULT_ADDONS = [
 // (e.g. 'Manila', 'Antipolo') are included in the comprehensive city map.
 const getZipForBranch = (name) => getZipFromAddress(name);
 
+const formatLocalDate = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+};
+
+const getMinSchedDate = (daysAhead = 2) => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + daysAhead);
+    return formatLocalDate(d);
+};
+
 
 const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const { showNotification } = useNotification();
@@ -51,7 +65,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const [selectedScheduleDate, setSelectedScheduleDate] = useState('');
     const [viewDate, setViewDate] = useState(new Date());
     const [loadingSchedule, setLoadingSchedule] = useState(false);
-    const today = new Date().toISOString().split('T')[0];
+    const today = formatLocalDate(new Date());
     const [formErrors, setFormErrors] = useState({});
     const [pdcSessionFilter, setPdcSessionFilter] = useState('All');
     const [tdcTypeFilter, setTdcTypeFilter] = useState('All');
@@ -460,10 +474,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         const filtered = pdcAllSlots.filter(s => {
             const ct = (s.course_type || '').toLowerCase();
             const tx = (s.transmission || '').toLowerCase();
-            // Course name match — slot course_type must match this course's name
-            if (ct) {
-                if (!ct.includes(courseName) && !courseName.includes(ct)) return false;
-            }
+            // Do not force a strict course-name contains match here.
+            // Many slots store generic values (e.g. "manual"/"automatic") in course_type,
+            // which previously hid valid slots from Step 3 calendar.
             // Vehicle bucket filter — exclude slots for the wrong vehicle type
             if (isMoto && !ct.includes('motorcycle')) return false;
             if (isTricycle && !ct.includes('tricycle')) return false;
@@ -840,6 +853,10 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 // Second click
                 if (slot.id === formData.scheduleSlotId) {
                     showNotification('Please select a different slot for Day 2.', 'warning');
+                    return;
+                }
+                if (slot.date === formData.scheduleDate) {
+                    showNotification('Day 2 must be on a different date from Day 1.', 'warning');
                     return;
                 }
                 if (slot.session !== formData.scheduleSession) {
@@ -1433,6 +1450,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             (formData.scheduleSession.toLowerCase().includes('morning') ||
                 formData.scheduleSession.toLowerCase().includes('afternoon') ||
                 formData.scheduleSession.toLowerCase().includes('4 hours'));
+        const lockedDay1Date = isSelectingDay2 ? formData.scheduleDate : null;
 
         const goToPrevMonth = () => {
             const prev = tdcMonthKeys.filter(k => k < currentMonthKey);
@@ -1512,12 +1530,10 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         const tdcEndDate = tdcSlot.end_date || tdcSlot.date;
                         const d = new Date(tdcEndDate + 'T00:00:00');
                         d.setDate(d.getDate() + 2);
-                        return d.toISOString().split('T')[0];
+                        return formatLocalDate(d);
                     }
                 }
-                const d = new Date(today);
-                d.setDate(d.getDate() + 2);
-                return d.toISOString().split('T')[0];
+                return getMinSchedDate(2);
             })();
             const pdcIsHalfDay = promoPdcDay1Session && (
                 promoPdcDay1Session.toLowerCase().includes('morning') ||
@@ -2185,13 +2201,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                         for (let i = 0; i < firstDay; i++) {
                                             days.push(<div key={`pad-${i}`} className="cal-day cal-day--pad" />);
                                         }
-                                        const minDateStr = (() => { const d = new Date(today); d.setDate(d.getDate() + 2); return d.toISOString().split('T')[0]; })();
+                                        const minDateStr = getMinSchedDate(2);
                                         for (let d = 1; d <= daysInMonth; d++) {
                                             const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
                                             const isSelected = selectedScheduleDate === dateStr;
                                             const isToday = today === dateStr;
                                             const isSunday = new Date(year, month, d).getDay() === 0;
-                                            const isDisabled = dateStr < minDateStr || isSunday;
+                                            const isLockedDay1 = !!lockedDay1Date && lockedDay1Date === dateStr;
+                                            const isDisabled = dateStr < minDateStr || isSunday || isLockedDay1;
                                             const daySlots = isDisabled ? [] : pdcCalendarSlots.filter(s => dateStr >= s.date && dateStr <= (s.end_date || s.date));
                                             const slotStatus = isDisabled ? '' : daySlots.length === 0 ? ' no-slots' : daySlots.every(s => s.available_slots === 0) ? ' full-slots' : ' has-slots';
                                             let cls = 'cal-day' + slotStatus;
@@ -2199,7 +2216,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                             else if (isSelected) cls += ' cal-day--selected';
                                             if (isToday) cls += ' cal-day--today';
                                             days.push(
-                                                <div key={d} className={cls} onClick={() => !isDisabled && setSelectedScheduleDate(dateStr)}>
+                                                <div key={d} className={cls} title={isLockedDay1 ? 'Day 1 date is already selected' : undefined} onClick={() => !isDisabled && setSelectedScheduleDate(dateStr)}>
                                                     <div className="cal-day-header-mini">
                                                         <span className="cal-day-num">{d}</span>
                                                         {isToday && <span className="cal-day--today-dot" />}
