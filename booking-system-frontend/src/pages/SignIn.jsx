@@ -85,7 +85,11 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
         })
 
         // Handle expected unverified state without treating it as a failed login error.
-        if (response?.needsVerification === true) {
+        const shouldGoToVerification =
+          response?.needsVerification === true ||
+          /not verified|verification code|verify/i.test(String(response?.message || ''))
+
+        if (shouldGoToVerification) {
           setPendingVerificationEmail(response.email || formData.email)
           showNotification(
             response.message || 'Email not verified. Please enter the verification code sent to your inbox.',
@@ -93,6 +97,10 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
           )
           onNavigate('verify-email')
           return
+        }
+
+        if (!response?.token || !response?.user) {
+          throw new Error(response?.message || 'Unexpected login response. Please try again.')
         }
 
         // Store auth token and user info
