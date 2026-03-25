@@ -433,6 +433,7 @@ const getFromAddress = () => {
 
   const plainEmailRegex = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
   const namedEmailMatch = configuredFrom.match(/^([^<>]+)<\s*([^<>\s]+@[^<>\s]+\.[^<>\s]+)\s*>$/);
+  const looseNamedEmailMatch = configuredFrom.match(/^(.+?)\s+([^\s@<>]+@[^\s@<>]+\.[^\s@<>]+)$/);
 
   if (plainEmailRegex.test(configuredFrom)) {
     return configuredFrom;
@@ -441,6 +442,15 @@ const getFromAddress = () => {
   if (namedEmailMatch) {
     const displayName = namedEmailMatch[1].trim().replace(/^['"]+|['"]+$/g, '');
     const email = namedEmailMatch[2].trim();
+    if (displayName && plainEmailRegex.test(email)) {
+      return `${displayName} <${email}>`;
+    }
+  }
+
+  // Accept common misformat: "Name email@domain.com" and normalize it.
+  if (looseNamedEmailMatch) {
+    const displayName = looseNamedEmailMatch[1].trim().replace(/^['"]+|['"]+$/g, '');
+    const email = looseNamedEmailMatch[2].trim();
     if (displayName && plainEmailRegex.test(email)) {
       return `${displayName} <${email}>`;
     }
