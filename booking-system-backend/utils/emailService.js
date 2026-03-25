@@ -353,6 +353,18 @@ const createTransporter = () => {
   });
 };
 
+// Resolve a valid From address. Prevent placeholder values from breaking SMTP/API delivery.
+const getFromAddress = () => {
+  const configuredFrom = String(process.env.EMAIL_FROM || '').trim();
+
+  if (configuredFrom && !/your-verified-domain/i.test(configuredFrom)) {
+    return configuredFrom;
+  }
+
+  console.warn('[emailService] EMAIL_FROM is missing or uses placeholder value; falling back to onboarding sender');
+  return 'Master Driving School <onboarding@resend.dev>';
+};
+
 // Generate 6-digit verification code
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -398,7 +410,7 @@ const sendVerificationEmail = async (email, code, firstName, type = 'Email Verif
       : EMAIL_CONTENT.verification.messageVerify;
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM,
+      from: getFromAddress(),
       to: email,
       subject: subject,
       html: `
@@ -455,7 +467,7 @@ const sendPasswordEmail = async (email, password, firstName, role) => {
     const transporter = createTransporter();
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM,
+      from: getFromAddress(),
       to: email,
       subject: EMAIL_CONTENT.newAccount.subject,
       html: `
@@ -588,7 +600,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
     const isTricycle = courseNameLower.includes('a1') || courseNameLower.includes('tricycle');
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM,
+      from: getFromAddress(),
       to: email,
       subject: EMAIL_CONTENT.walkIn.subject,
       html: `
@@ -800,7 +812,7 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
     }
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM,
+      from: getFromAddress(),
       to: email,
       subject: EMAIL_CONTENT.guest.subject,
       attachments,
@@ -973,7 +985,7 @@ const sendNoShowEmail = async (email, firstName, lastName, enrollmentDetails) =>
     const formattedDate = formatDisplayDate(scheduleDate);
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM,
+      from: getFromAddress(),
       to: email,
       subject: EMAIL_CONTENT.noShow.subject,
       html: `
@@ -1038,7 +1050,7 @@ const sendNewsPromoEmail = async (email, firstName, newsTitle, newsDescription, 
     const transporter = createTransporter();
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM,
+      from: getFromAddress(),
       to: email,
       subject: `[${newsType}] ${newsTitle} - ${EMAIL_CONTENT.schoolName}`,
       html: `
@@ -1127,7 +1139,7 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
     const pdfFilename = `Receipt-${safeSurname}.pdf`;
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM,
+      from: getFromAddress(),
       to: email,
       subject,
       attachments: [
@@ -1274,7 +1286,7 @@ const sendAddonsEmail = async (email, firstName, lastName, hasReviewer, hasVehic
     }
     if (attachments.length === 0) return;
     const mailOptions = { 
-      from: process.env.EMAIL_FROM, 
+      from: getFromAddress(), 
       to: email, 
       subject: 'Your Driving School Add-ons', 
       attachments, 
@@ -1289,7 +1301,7 @@ const sendTestEmail = async (email, html, subject) => {
   try {
     const transporter = createTransporter();
     const mailOptions = {
-      from: process.env.EMAIL_FROM || 'admin@school.com',
+      from: getFromAddress(),
       to: email,
       subject: subject || 'Test Email Preview',
       html: html
