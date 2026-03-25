@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
-const { generateVerificationCode, sendVerificationEmail, sendGuestEnrollmentEmail, sendAddonsEmail } = require('../utils/emailService');
+const { generateVerificationCode, sendVerificationEmail, sendGuestEnrollmentEmail } = require('../utils/emailService');
 
 // Generate JWT token
 const generateToken = (userId, role = 'student', branchId = null) => {
@@ -133,18 +133,22 @@ const register = async (req, res) => {
 
     const user = result.rows[0];
 
-    // Send verification email (non-blocking)
+    // Send verification email and report actual delivery status.
+    let verificationEmailSent = true;
     try {
       await sendVerificationEmail(email, verificationCode, firstName);
       console.log('✅ Verification email sent successfully');
     } catch (emailError) {
+      verificationEmailSent = false;
       console.error('⚠️ Failed to send verification email:', emailError.message);
-      // Continue with registration even if email fails
     }
 
     res.status(201).json({
       success: true,
-      message: 'Registration successful. Please check your email for verification code.',
+      message: verificationEmailSent
+        ? 'Registration successful. Please check your email for verification code.'
+        : 'Registration successful, but we could not send the verification code right now. Please use Resend Code in Verify Email.',
+      emailSent: verificationEmailSent,
       user: {
         id: user.id,
         email: user.email,
@@ -366,19 +370,23 @@ const login = async (req, res) => {
         [verificationCode, codeExpires, user.id]
       );
 
-      // Send verification email (non-blocking)
+      let verificationEmailSent = true;
       try {
         await sendVerificationEmail(user.email, verificationCode, user.first_name);
         console.log('✅ Verification email sent successfully');
       } catch (emailError) {
+        verificationEmailSent = false;
         console.error('⚠️ Failed to send verification email:', emailError.message);
       }
 
       return res.status(403).json({
-        error: 'Email not verified. A new verification code has been sent to your email.',
+        error: verificationEmailSent
+          ? 'Email not verified. A new verification code has been sent to your email.'
+          : 'Email not verified. We could not send a verification code right now. Please try Resend Code again shortly.',
         needsVerification: true,
         userId: user.id,
-        email: user.email
+        email: user.email,
+        emailSent: verificationEmailSent,
       });
     }
 
@@ -546,12 +554,16 @@ const resendVerificationCode = async (req, res) => {
       [verificationCode, codeExpires, user.id]
     );
 
-    // Send email (non-blocking)
+    // Send email and return an error if delivery fails.
     try {
       await sendVerificationEmail(user.email, verificationCode, user.first_name);
       console.log('✅ Verification email sent successfully');
     } catch (emailError) {
       console.error('⚠️ Failed to send verification email:', emailError.message);
+      return res.status(500).json({
+        error: 'Failed to send verification code email. Please try again in a moment.',
+        emailSent: false,
+      });
     }
 
     res.json({
@@ -596,12 +608,16 @@ const forgotPassword = async (req, res) => {
       [resetCode, codeExpires, user.id]
     );
 
-    // Send OTP email (non-blocking)
+    // Send OTP email and return an error if delivery fails.
     try {
       await sendVerificationEmail(user.email, resetCode, user.first_name, 'Password Reset');
       console.log('✅ Password reset email sent successfully');
     } catch (emailError) {
       console.error('⚠️ Failed to send password reset email:', emailError.message);
+      return res.status(500).json({
+        error: 'Failed to send OTP email. Please try again in a moment.',
+        emailSent: false,
+      });
     }
 
     res.json({

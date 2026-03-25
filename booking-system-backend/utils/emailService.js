@@ -304,15 +304,22 @@ const generateReceiptPDF = (firstName, lastName, receiptData) => {
 
 // Create email transporter
 const createTransporter = () => {
+  const port = parseInt(process.env.EMAIL_PORT || '587', 10);
+  const secure = process.env.EMAIL_SECURE === 'true' || port === 465;
+
   return nodemailer.createTransport({
-    service: 'gmail',
-    host: process.env.EMAIL_HOST,
-    port: parseInt(process.env.EMAIL_PORT),
-    secure: false, // true for 465, false for other ports
+    // Keep Gmail service for compatibility, but allow host/port override from env.
+    service: process.env.EMAIL_SERVICE || 'gmail',
+    host: process.env.EMAIL_HOST || undefined,
+    port,
+    secure,
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASSWORD,
     },
+    connectionTimeout: 15000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
     tls: {
       rejectUnauthorized: false
     }

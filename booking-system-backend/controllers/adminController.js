@@ -2,7 +2,19 @@ const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
-const { generateRandomPassword, sendPasswordEmail, generateVerificationCode, sendWalkInEnrollmentEmail, sendPaymentReceiptEmail, reloadEmailContent, sendTestEmail } = require('../utils/emailService');
+const {
+  generateRandomPassword,
+  sendPasswordEmail,
+  generateVerificationCode,
+  sendVerificationEmail,
+  sendWalkInEnrollmentEmail,
+  sendGuestEnrollmentEmail,
+  sendNoShowEmail,
+  sendNewsPromoEmail,
+  sendPaymentReceiptEmail,
+  reloadEmailContent,
+  sendTestEmail,
+} = require('../utils/emailService');
 
 const EMAIL_CONTENT_PATH = path.join(__dirname, '../config/emailContent.json');
 const ADDONS_CONFIG_PATH = path.join(__dirname, '../config/addonsConfig.json');
@@ -508,6 +520,7 @@ const createUser = async (req, res) => {
       age,
       birthday,
       address,
+      zipCode,
       contactNumber,
       email,
       role,
@@ -557,8 +570,8 @@ const createUser = async (req, res) => {
       `INSERT INTO users (
         first_name, middle_name, last_name, email, password, 
         gender, age, birthday, address, contact_numbers, 
-        role, branch_id, permissions, status, is_verified
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        zip_code, role, branch_id, permissions, status, is_verified
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING id, first_name, middle_name, last_name, email, role, branch_id, permissions, status, created_at`,
       [
         firstName,
@@ -571,6 +584,7 @@ const createUser = async (req, res) => {
         birthday,
         address,
         contactNumber,
+        zipCode || null,
         role,
         branchId,
         JSON.stringify(normalizedPermissions),
@@ -618,6 +632,7 @@ const updateUser = async (req, res) => {
       age,
       birthday,
       address,
+      zipCode,
       contactNumber,
       email,
       role,
@@ -676,12 +691,13 @@ const updateUser = async (req, res) => {
           birthday = $8,
           address = $9,
           contact_numbers = $10,
-          role = $11,
-          branch_id = $12,
-          permissions = $13,
-          status = $14,
-          avatar = $15
-        WHERE id = $16
+          zip_code = $11,
+          role = $12,
+          branch_id = $13,
+          permissions = $14,
+          status = $15,
+          avatar = $16
+        WHERE id = $17
         RETURNING id, first_name, middle_name, last_name, email, role, branch_id, permissions, status, avatar`
       : `UPDATE users SET
           first_name = $1,
@@ -692,12 +708,13 @@ const updateUser = async (req, res) => {
           birthday = $6,
           address = $7,
           contact_numbers = $8,
-          role = $9,
-          branch_id = $10,
-          permissions = $11,
-          status = $12,
-          avatar = $13
-        WHERE id = $14
+          zip_code = $9,
+          role = $10,
+          branch_id = $11,
+          permissions = $12,
+          status = $13,
+          avatar = $14
+        WHERE id = $15
         RETURNING id, first_name, middle_name, last_name, email, role, branch_id, permissions, status, avatar`;
 
     const updateParams = isEmailChanged
@@ -712,6 +729,7 @@ const updateUser = async (req, res) => {
         birthday,
         address,
         contactNumber,
+        zipCode || null,
         role,
         branch ? parseInt(branch) : null,
         JSON.stringify(normalizedPermissions),
@@ -728,6 +746,7 @@ const updateUser = async (req, res) => {
         birthday,
         address,
         contactNumber,
+        zipCode || null,
         role,
         branch ? parseInt(branch) : null,
         JSON.stringify(normalizedPermissions),
@@ -1581,6 +1600,81 @@ const sendTestEmailRoute = async (req, res) => {
   }
 };
 
+const sendAllEmailDesignsRoute = async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email || !String(email).includes('@')) {
+      return res.status(400).json({ error: 'A valid email is required' });
+    }
+
+    const firstName = 'Jeff';
+    const lastName = 'Gabasa';
+    const sampleDate = new Date().toISOString().split('T')[0];
+
+    const enrollmentDetails = {
+      courseName: 'PDC B1/B2 (Manual)',
+      courseCategory: 'PDC',
+      courseType: 'manual',
+      branchName: 'Main Branch',
+      branchAddress: '123 Master Drive St., City',
+      scheduleDate: sampleDate,
+      scheduleSession: 'Morning Session',
+      scheduleTime: '8:00 AM - 12:00 PM',
+      scheduleDate2: sampleDate,
+      scheduleSession2: 'Afternoon Session',
+      scheduleTime2: '1:00 PM - 5:00 PM',
+      paymentMethod: 'GCash',
+      amountPaid: 1500,
+      paymentStatus: 'Downpayment',
+    };
+
+    await sendVerificationEmail(email, '123456', firstName, 'Email Verification');
+    await sendVerificationEmail(email, '654321', firstName, 'Password Reset');
+    await sendPasswordEmail(email, 'Temp#1234', firstName, 'staff');
+    await sendWalkInEnrollmentEmail(email, firstName, lastName, 'Temp#1234', '112233', enrollmentDetails);
+    await sendGuestEnrollmentEmail(email, firstName, lastName, enrollmentDetails, true, true);
+    await sendNoShowEmail(email, firstName, lastName, {
+      courseName: 'PDC B1/B2 (Manual)',
+      scheduleDate: sampleDate,
+      scheduleSession: 'Morning Session',
+    });
+    await sendNewsPromoEmail(
+      email,
+      firstName,
+      'Summer Enrollment Promo',
+      'Enroll this week and enjoy discounted rates on selected courses. Limited slots only.',
+      'PROMO',
+      'LIMITED OFFER'
+    );
+    await sendPaymentReceiptEmail(email, firstName, lastName, {
+      bookingId: 123,
+      transactionId: 'TXN-TEST-DOWN-001',
+      courseName: 'PDC B1/B2 (Manual)',
+      amountPaid: 1500,
+      coursePrice: 3500,
+      paymentMethod: 'GCash',
+      paymentDate: new Date().toISOString(),
+      isFullPayment: false,
+      balanceDue: 2000,
+    });
+    await sendPaymentReceiptEmail(email, firstName, lastName, {
+      bookingId: 124,
+      transactionId: 'TXN-TEST-FULL-001',
+      courseName: 'TDC',
+      amountPaid: 1000,
+      coursePrice: 1000,
+      paymentMethod: 'Cash',
+      paymentDate: new Date().toISOString(),
+      isFullPayment: true,
+      balanceDue: 0,
+    });
+    return res.json({ success: true, message: 'All template emails sent successfully' });
+  } catch (e) {
+    console.error('sendAllEmailDesignsRoute error:', e);
+    return res.status(500).json({ error: 'Failed to send one or more template emails' });
+  }
+};
+
 const getTodayStudents = async (req, res) => {
   try {
     const dateParam = req.query.date;
@@ -1795,6 +1889,7 @@ module.exports = {
   getEmailContent,
   updateEmailContent,
   sendTestEmailRoute,
+  sendAllEmailDesignsRoute,
   getTodayStudents,
   getStudentDetail,
   getAddonsConfig,

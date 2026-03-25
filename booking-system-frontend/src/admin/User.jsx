@@ -3,6 +3,7 @@ import './css/user.css';
 import { adminAPI, branchesAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import Pagination from './components/Pagination';
+import { getZipFromAddress } from '../utils/philippineZipCodes';
 
 const USER_PAGE_SIZE = 10;
 
@@ -137,6 +138,7 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
         age: '',
         birthday: '',
         address: '',
+        zipCode: '',
         contactNumber: '',
         email: '',
         role: 'Staff',
@@ -295,6 +297,18 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
         return `${limited.slice(0, 4)} ${limited.slice(4, 7)} ${limited.slice(7, 11)}`;
     };
 
+    const calculateAge = (birthday) => {
+        if (!birthday) return '';
+        const birthDate = new Date(birthday);
+        const today = new Date();
+        let computedAge = today.getFullYear() - birthDate.getFullYear();
+        const monthDiff = today.getMonth() - birthDate.getMonth();
+        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+            computedAge -= 1;
+        }
+        return computedAge >= 0 ? String(computedAge) : '';
+    };
+
     const handleInputChange = (e) => {
         const { name, value } = e.target;
 
@@ -302,6 +316,9 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
         let formattedValue = value;
         if (name === 'contactNumber') {
             formattedValue = formatPhoneNumber(value);
+        }
+        if (name === 'zipCode') {
+            formattedValue = value.replace(/\D/g, '').slice(0, 4);
         }
 
         if (name === 'role') {
@@ -313,7 +330,20 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
             return;
         }
 
-        setUserData({ ...userData, [name]: formattedValue });
+        const nextUserData = { ...userData, [name]: formattedValue };
+
+        if (name === 'birthday') {
+            nextUserData.age = calculateAge(formattedValue);
+        }
+
+        if (name === 'address') {
+            const suggestedZip = getZipFromAddress(formattedValue);
+            if (suggestedZip) {
+                nextUserData.zipCode = suggestedZip;
+            }
+        }
+
+        setUserData(nextUserData);
 
         // Clear error for this field when user starts typing
         if (errors[name]) {
@@ -357,6 +387,13 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
             newErrors.age = 'Age is required';
         } else if (userData.age < 18 || userData.age > 100) {
             newErrors.age = 'Age must be between 18 and 100';
+        }
+
+        // Zip code validation
+        if (!userData.zipCode.trim()) {
+            newErrors.zipCode = 'Zip code is required';
+        } else if (!/^\d{4}$/.test(userData.zipCode.trim())) {
+            newErrors.zipCode = 'Zip code must be exactly 4 digits';
         }
 
         // Gender validation
@@ -418,6 +455,7 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                     age: userData.age,
                     birthday: userData.birthday,
                     address: userData.address,
+                    zipCode: userData.zipCode,
                     contactNumber: userData.contactNumber,
                     email: userData.email,
                     role: userData.role.toLowerCase(),
@@ -443,6 +481,7 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                     age: userData.age,
                     birthday: userData.birthday,
                     address: userData.address,
+                    zipCode: userData.zipCode,
                     contactNumber: userData.contactNumber,
                     email: userData.email,
                     role: userData.role.toLowerCase(),
@@ -466,6 +505,7 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                 age: '',
                 birthday: '',
                 address: '',
+                zipCode: '',
                 contactNumber: '',
                 email: '',
                 role: 'Staff',
@@ -525,6 +565,7 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
             age: user.age || '',
             birthday: user.birthday || '',
             address: user.address || '',
+            zipCode: user.zipCode || '',
             contactNumber: user.contactNumber || '',
             email: user.email,
             role: user.role,
@@ -552,6 +593,7 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
             age: '',
             birthday: '',
             address: '',
+            zipCode: '',
             contactNumber: '',
             email: '',
             role: 'Staff',
@@ -1115,12 +1157,39 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                                                     marginBottom: '6px',
                                                     display: 'block'
                                                 }}>
+                                                    Birthday <span style={{ color: '#ef4444' }}>*</span>
+                                                </label>
+                                                <input
+                                                    type="date"
+                                                    name="birthday"
+                                                    value={userData.birthday}
+                                                    onChange={handleInputChange}
+                                                    required
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '11px 14px',
+                                                        borderRadius: '10px',
+                                                        border: '1.5px solid var(--border-color)',
+                                                        background: 'var(--card-bg)',
+                                                        fontSize: '0.9rem',
+                                                        color: 'var(--text-color)'
+                                                    }}
+                                                />
+                                            </div>
+                                            <div className="form-group" style={{ flex: 1 }}>
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
+                                                    color: 'var(--text-color)',
+                                                    marginBottom: '6px',
+                                                    display: 'block'
+                                                }}>
                                                     Age <span style={{ color: '#ef4444' }}>*</span>
                                                 </label>
                                                 <input
                                                     type="number"
                                                     name="age"
-                                                    placeholder="25"
+                                                    placeholder="Auto-calculated"
                                                     min="18"
                                                     max="65"
                                                     value={userData.age}
@@ -1141,33 +1210,6 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                                                         {errors.age}
                                                     </span>
                                                 )}
-                                            </div>
-                                            <div className="form-group" style={{ flex: 1 }}>
-                                                <label style={{
-                                                    fontSize: '0.8rem',
-                                                    fontWeight: '600',
-                                                    color: 'var(--text-color)',
-                                                    marginBottom: '6px',
-                                                    display: 'block'
-                                                }}>
-                                                    Birthday <span style={{ color: '#ef4444' }}>*</span>
-                                                </label>
-                                                <input
-                                                    type="date"
-                                                    name="birthday"
-                                                    value={userData.birthday}
-                                                    onChange={handleInputChange}
-                                                    required
-                                                    style={{
-                                                        width: '100%',
-                                                        padding: '11px 14px',
-                                                        borderRadius: '10px',
-                                                        border: '1.5px solid var(--border-color)',
-                                                        background: 'var(--card-bg)',
-                                                        fontSize: '0.9rem',
-                                                        color: 'var(--text-color)'
-                                                    }}
-                                                />
                                             </div>
                                         </div>
                                     </div>
@@ -1280,6 +1322,44 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                                                 ) : (
                                                     <span style={{ fontSize: '0.7rem', color: 'var(--secondary-text)', marginTop: '4px', display: 'block' }}>
                                                         Must start with 09 (11 digits)
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="form-group" style={{ flex: 1 }}>
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
+                                                    color: 'var(--text-color)',
+                                                    marginBottom: '6px',
+                                                    display: 'block'
+                                                }}>
+                                                    Zip Code <span style={{ color: '#ef4444' }}>*</span>
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    name="zipCode"
+                                                    placeholder="e.g. 1000"
+                                                    value={userData.zipCode}
+                                                    onChange={handleInputChange}
+                                                    maxLength="4"
+                                                    required
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '11px 14px',
+                                                        borderRadius: '10px',
+                                                        border: errors.zipCode ? '1.5px solid #ef4444' : '1.5px solid var(--border-color)',
+                                                        background: 'var(--card-bg)',
+                                                        fontSize: '0.9rem',
+                                                        color: 'var(--text-color)'
+                                                    }}
+                                                />
+                                                {errors.zipCode ? (
+                                                    <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '4px', display: 'block' }}>
+                                                        {errors.zipCode}
+                                                    </span>
+                                                ) : (
+                                                    <span style={{ fontSize: '0.7rem', color: 'var(--secondary-text)', marginTop: '4px', display: 'block' }}>
+                                                        4-digit Philippine zip code
                                                     </span>
                                                 )}
                                             </div>

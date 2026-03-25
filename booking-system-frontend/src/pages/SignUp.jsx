@@ -42,6 +42,18 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
 
+  const calculateAge = (birthday) => {
+    if (!birthday) return ''
+    const birthDate = new Date(birthday)
+    const today = new Date()
+    let computedAge = today.getFullYear() - birthDate.getFullYear()
+    const monthDiff = today.getMonth() - birthDate.getMonth()
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      computedAge--
+    }
+    return computedAge >= 0 ? String(computedAge) : ''
+  }
+
   const formatPhoneNumber = (value) => {
     // Remove all non-numeric characters
     const cleaned = value.replace(/\D/g, '')
@@ -65,18 +77,6 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
       formattedValue = formatPhoneNumber(value)
     }
     
-    const calculateAge = (birthday) => {
-      if (!birthday) return '';
-      const birthDate = new Date(birthday);
-      const today = new Date();
-      let age = today.getFullYear() - birthDate.getFullYear();
-      const m = today.getMonth() - birthDate.getMonth();
-      if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-        age--;
-      }
-      return age >= 0 ? age.toString() : '';
-    };
-
     setFormData(prev => {
       const updated = {
         ...prev,
@@ -84,7 +84,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
       };
 
       // Auto-calculate age based on birthday
-      if (name === 'birthday' && formattedValue) {
+      if (name === 'birthday') {
         updated.age = calculateAge(formattedValue);
         // Clear age error if it was auto-filled
         if (errors.age) {
@@ -339,9 +339,10 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
                       type="number"
                       name="age"
                       value={formData.age}
-                      onChange={handleChange}
+                      readOnly
+                      tabIndex={-1}
                       className={`w-full px-4 py-3 bg-gray-50 border ${errors.age ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:ring-2 focus:ring-[#2157da] outline-none transition-all`}
-                      placeholder="20"
+                      placeholder="Auto-calculated"
                     />
                     {errors.age && <p className="text-xs text-red-500 mt-1">{errors.age}</p>}
                   </div>
