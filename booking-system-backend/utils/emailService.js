@@ -420,14 +420,34 @@ const sendViaResendApi = async ({ from, to, subject, html, text }) => {
 
 // Resolve a valid From address. Prevent placeholder values from breaking SMTP/API delivery.
 const getFromAddress = () => {
-  const configuredFrom = String(process.env.EMAIL_FROM || '').trim();
+  const fallbackFrom = 'Master Driving School <onboarding@resend.dev>';
+  const configuredFrom = String(process.env.EMAIL_FROM || '')
+    .replace(/^['"`]+|['"`]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  if (configuredFrom && !/your-verified-domain/i.test(configuredFrom)) {
+  if (!configuredFrom || /your-verified-domain/i.test(configuredFrom)) {
+    console.warn('[emailService] EMAIL_FROM is missing or uses placeholder value; falling back to onboarding sender');
+    return fallbackFrom;
+  }
+
+  const plainEmailRegex = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+  const namedEmailMatch = configuredFrom.match(/^([^<>]+)<\s*([^<>\s]+@[^<>\s]+\.[^<>\s]+)\s*>$/);
+
+  if (plainEmailRegex.test(configuredFrom)) {
     return configuredFrom;
   }
 
-  console.warn('[emailService] EMAIL_FROM is missing or uses placeholder value; falling back to onboarding sender');
-  return 'Master Driving School <onboarding@resend.dev>';
+  if (namedEmailMatch) {
+    const displayName = namedEmailMatch[1].trim().replace(/^['"]+|['"]+$/g, '');
+    const email = namedEmailMatch[2].trim();
+    if (displayName && plainEmailRegex.test(email)) {
+      return `${displayName} <${email}>`;
+    }
+  }
+
+  console.warn('[emailService] EMAIL_FROM format is invalid; falling back to onboarding sender');
+  return fallbackFrom;
 };
 
 // Generate 6-digit verification code
