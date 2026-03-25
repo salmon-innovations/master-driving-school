@@ -379,8 +379,9 @@ const login = async (req, res) => {
         console.error('⚠️ Failed to send verification email:', emailError.message);
       }
 
-      return res.status(403).json({
-        error: verificationEmailSent
+      return res.status(200).json({
+        success: false,
+        message: verificationEmailSent
           ? 'Email not verified. A new verification code has been sent to your email.'
           : 'Email not verified. We could not send a verification code right now. Please try Resend Code again shortly.',
         needsVerification: true,

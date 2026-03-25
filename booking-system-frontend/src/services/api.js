@@ -105,6 +105,9 @@ const apiRequest = async (endpoint, options = {}) => {
 
     return data;
   } catch (error) {
+    const isExpectedAuthFlow =
+      error?.statusCode === 403 && (error?.needsVerification === true || error?.accountLocked === true);
+
     if (error.isHtmlResponse) {
       console.error('API Error: HTML response received. Check production API routing/proxy for /api endpoints.', {
         url,
@@ -112,8 +115,9 @@ const apiRequest = async (endpoint, options = {}) => {
         statusCode: error.statusCode,
         responseSnippet: error.responseSnippet,
       });
+    } else if (!isExpectedAuthFlow) {
+      console.error('API Error:', error);
     }
-    console.error('API Error:', error);
     throw error;
   }
 };

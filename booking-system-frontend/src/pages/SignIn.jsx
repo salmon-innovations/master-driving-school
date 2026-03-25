@@ -84,6 +84,17 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
           password: formData.password,
         })
 
+        // Handle expected unverified state without treating it as a failed login error.
+        if (response?.needsVerification === true) {
+          setPendingVerificationEmail(response.email || formData.email)
+          showNotification(
+            response.message || 'Email not verified. Please enter the verification code sent to your inbox.',
+            response.emailSent === false ? 'warning' : 'success'
+          )
+          onNavigate('verify-email')
+          return
+        }
+
         // Store auth token and user info
         setAuthToken(response.token)
         localStorage.setItem('user', JSON.stringify(response.user))
@@ -104,13 +115,14 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
           onNavigate('branches')
         }
       } catch (error) {
-        console.log('Login error:', error);
-        console.log('Error properties:', {
-          accountLocked: error.accountLocked,
-          needsVerification: error.needsVerification,
-          statusCode: error.statusCode,
-          message: error.message
-        });
+        if (import.meta.env.DEV) {
+          console.warn('Sign-in request failed:', {
+            accountLocked: error.accountLocked,
+            needsVerification: error.needsVerification,
+            statusCode: error.statusCode,
+            message: error.message,
+          })
+        }
 
         // IMPORTANT: Check account locked FIRST before email verification
         // Both return 403, but accountLocked flag differentiates them
