@@ -1,11 +1,12 @@
 ﻿import { useState, useEffect } from 'react'
-import { branchesAPI } from '../services/api'
+import { branchesAPI, schedulesAPI } from '../services/api'
 
 function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
   const [selectedMapUrl, setSelectedMapUrl] = useState('https://www.google.com/maps?q=Metro+Manila,+Philippines&output=embed')
   const [selectedBranch, setSelectedBranch] = useState(null)
   const [branches, setBranches] = useState([])
   const [loading, setLoading] = useState(true)
+  const [branchesWithSlots, setBranchesWithSlots] = useState(new Set())
 
   // Format branch name - remove company prefixes
   const formatBranchName = (name) => {
@@ -32,10 +33,14 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
   useEffect(() => {
     const fetchBranches = async () => {
       try {
-        const response = await branchesAPI.getAll()
-        if (response.success) {
+        const [branchesResponse, slotsResponse] = await Promise.all([
+          branchesAPI.getAll(),
+          schedulesAPI.getSlotsByDate()
+        ])
+
+        if (branchesResponse.success) {
           // Format branches to match current UI and constraints
-          const formattedBranches = response.branches.map(branch => {
+          const formattedBranches = branchesResponse.branches.map(branch => {
             // Priority: The exact coordinate-based map URL we stored in branch.embed_url.
             // Fallback: A generically generated search string based on Branch Address.
             const addressQuery = encodeURIComponent(branch.address);
@@ -51,6 +56,15 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
           }).sort((a, b) => a.id - b.id);
           setBranches(formattedBranches)
         }
+
+        if (Array.isArray(slotsResponse)) {
+          const availableBranchIds = new Set(
+            slotsResponse
+              .filter(slot => Number(slot.available_slots) > 0 && slot.branch_id !== null && slot.branch_id !== undefined)
+              .map(slot => String(slot.branch_id))
+          )
+          setBranchesWithSlots(availableBranchIds)
+        }
       } catch (error) {
         console.error('Error fetching branches:', error)
       } finally {
@@ -62,6 +76,11 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
   }, [])
 
   const handleEnrollNow = (branch) => {
+    const hasAvailableSlot = branchesWithSlots.has(String(branch.id))
+    if (!hasAvailableSlot) {
+      return
+    }
+
     setPreSelectedBranch(branch)
     setCurrentPage('courses')
   }
@@ -100,7 +119,9 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
               <p className="text-gray-600">Loading branches...</p>
             </div>
           ) : branches.length > 0 ? (
-            branches.map((branch, index) => (
+            branches.map((branch, index) => {
+              const hasAvailableSlot = branchesWithSlots.has(String(branch.id))
+              return (
               <div
                 key={index}
                 className={`bg-white rounded-2xl shadow-lg hover:shadow-xl transition-all p-6 sm:p-8 flex flex-col h-full ${selectedBranch === index ? 'ring-2 sm:ring-4 ring-[#F3B74C]' : ''
@@ -150,13 +171,19 @@ function Branches({ setCurrentPage, isLoggedIn, setPreSelectedBranch }) {
                   </button>
                   <button
                     onClick={() => handleEnrollNow(branch)}
-                    className="flex-1 py-2.5 sm:py-3 bg-[#2157da] text-white rounded-full font-semibold hover:bg-[#1a3a8a] transition-colors text-sm sm:text-base"
+                    disabled={!hasAvailableSlot}
+                    className={`flex-1 py-2.5 sm:py-3 rounded-full font-semibold transition-colors text-sm sm:text-base ${hasAvailableSlot
+                      ? 'bg-[#2157da] text-white hover:bg-[#1a3a8a]'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      }`}
+                    title={hasAvailableSlot ? 'Enroll in this branch' : 'No available slots in this branch'}
                   >
-                    Enroll Now
+                    {hasAvailableSlot ? 'Enroll Now' : 'No Slots Available'}
                   </button>
                 </div>
               </div>
-            ))
+              )
+            })
           ) : (
             <div className="col-span-full text-center py-12">
               <p className="text-gray-600">No branches found.</p>

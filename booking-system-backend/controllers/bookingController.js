@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { sendAddonsEmail, sendGuestEnrollmentEmail } = require('../utils/emailService');
+const { sendGuestEnrollmentEmail } = require('../utils/emailService');
 
 // Create new booking
 const createBooking = async (req, res) => {

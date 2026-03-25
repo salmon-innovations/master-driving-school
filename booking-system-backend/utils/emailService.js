@@ -304,11 +304,38 @@ const generateReceiptPDF = (firstName, lastName, receiptData) => {
 
 // Create email transporter
 const createTransporter = () => {
+  const rawService = String(process.env.EMAIL_SERVICE || '').toLowerCase().trim();
+  const useResend = rawService === 'resend' || !!process.env.RESEND_API_KEY;
+
+  // Resend SMTP defaults: host=smtp.resend.com, user=resend, pass=<RESEND_API_KEY>
+  if (useResend) {
+    const port = parseInt(process.env.EMAIL_PORT || '465', 10);
+    const secure = process.env.EMAIL_SECURE
+      ? process.env.EMAIL_SECURE === 'true'
+      : port === 465;
+
+    return nodemailer.createTransport({
+      host: process.env.EMAIL_HOST || 'smtp.resend.com',
+      port,
+      secure,
+      auth: {
+        user: process.env.EMAIL_USER || 'resend',
+        pass: process.env.RESEND_API_KEY || process.env.EMAIL_PASSWORD,
+      },
+      connectionTimeout: 15000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
+      tls: {
+        rejectUnauthorized: false,
+      },
+    });
+  }
+
   const port = parseInt(process.env.EMAIL_PORT || '587', 10);
   const secure = process.env.EMAIL_SECURE === 'true' || port === 465;
 
   return nodemailer.createTransport({
-    // Keep Gmail service for compatibility, but allow host/port override from env.
+    // Gmail/default SMTP fallback.
     service: process.env.EMAIL_SERVICE || 'gmail',
     host: process.env.EMAIL_HOST || undefined,
     port,

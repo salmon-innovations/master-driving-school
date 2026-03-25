@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { testimonialsAPI } from '../services/api';
+import { testimonialsAPI, MEDIA_BASE_URL } from '../services/api';
 
 function Reviews({ onNavigate }) {
   const [testimonials, setTestimonials] = useState([]);
@@ -25,8 +25,6 @@ function Reviews({ onNavigate }) {
   const getMediaUrl = (url) => {
     if (!url) return '';
     if (url.startsWith('http')) return url;
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-    const MEDIA_BASE_URL = API_URL.replace('/api', '');
     return `${MEDIA_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
   };
 

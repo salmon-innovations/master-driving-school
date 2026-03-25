@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNotification } from '../context/NotificationContext'
-import { newsAPI, testimonialsAPI } from '../services/api'
+import { newsAPI, testimonialsAPI, MEDIA_BASE_URL } from '../services/api'
 
 function Home({ onNavigate, isLoggedIn }) {
   const { showNotification } = useNotification()
@@ -99,8 +99,6 @@ function Home({ onNavigate, isLoggedIn }) {
   const getMediaUrl = (url) => {
     if (!url) return '';
     if (url.startsWith('http')) return url;
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-    const MEDIA_BASE_URL = API_URL.replace('/api', '');
     return `${MEDIA_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
   };
 

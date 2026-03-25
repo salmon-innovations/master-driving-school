@@ -1,5 +1,38 @@
 // API Configuration
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const normalizeApiUrl = (url) => String(url || '').trim().replace(/\/$/, '');
+const isLoopbackApiUrl = (url) => /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(url);
+
+const resolveApiBaseUrl = () => {
+  const envApiUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
+
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    const isLocalHost = host === 'localhost' || host === '127.0.0.1';
+
+    if (envApiUrl) {
+      // Guard against accidental production builds that embed localhost URLs.
+      if (!isLocalHost && isLoopbackApiUrl(envApiUrl)) {
+        return `${window.location.origin}/api`;
+      }
+
+      return envApiUrl;
+    }
+
+    // In production, default to same-origin API route instead of localhost.
+    if (!isLocalHost) {
+      return `${window.location.origin}/api`;
+    }
+
+    return 'http://localhost:5000/api';
+  }
+
+  if (envApiUrl) return envApiUrl;
+
+  return 'http://localhost:5000/api';
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
+export const MEDIA_BASE_URL = API_BASE_URL.replace(/\/api$/, '');
 
 // Helper function to get auth token
 const getAuthToken = () => {
@@ -18,8 +51,8 @@ const apiRequest = async (endpoint, options = {}) => {
     },
   };
 
-  // Only set application/json if we are not sending FormData
-  if (!(options.body instanceof FormData)) {
+  // Only set JSON content type when a body exists and it's not FormData.
+  if (options.body !== undefined && options.body !== null && !(options.body instanceof FormData)) {
     config.headers['Content-Type'] = 'application/json';
   }
 
@@ -30,7 +63,29 @@ const apiRequest = async (endpoint, options = {}) => {
 
   try {
     const response = await fetch(url, config);
-    const data = await response.json();
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    const rawBody = response.status === 204 ? '' : await response.text();
+    const looksLikeJson = /^\s*[\[{]/.test(rawBody);
+
+    let data = {};
+    if (rawBody) {
+      if (contentType.includes('application/json') || looksLikeJson) {
+        try {
+          data = JSON.parse(rawBody);
+        } catch (parseError) {
+          const error = new Error(`Invalid JSON response from ${url}`);
+          error.statusCode = response.status;
+          error.responseSnippet = rawBody.slice(0, 180);
+          throw error;
+        }
+      } else {
+        const error = new Error(`Expected JSON from ${url}, but received ${contentType || 'non-JSON response'}`);
+        error.statusCode = response.status;
+        error.responseSnippet = rawBody.slice(0, 180);
+        error.isHtmlResponse = /^\s*</.test(rawBody);
+        throw error;
+      }
+    }
 
     if (!response.ok) {
       // Create error with additional data from response
@@ -44,8 +99,20 @@ const apiRequest = async (endpoint, options = {}) => {
       throw error;
     }
 
+    if (!rawBody && response.status !== 204) {
+      return {};
+    }
+
     return data;
   } catch (error) {
+    if (error.isHtmlResponse) {
+      console.error('API Error: HTML response received. Check production API routing/proxy for /api endpoints.', {
+        url,
+        apiBaseUrl: API_BASE_URL,
+        statusCode: error.statusCode,
+        responseSnippet: error.responseSnippet,
+      });
+    }
     console.error('API Error:', error);
     throw error;
   }
@@ -674,6 +741,10 @@ export const emailContentAPI = {
   testEmail: async (data) => await apiRequest('/admin/email-content/test', {
     method: 'POST',
     body: JSON.stringify(data),
+  }),
+  testAllTemplates: async (email) => await apiRequest('/admin/email-content/test-all', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
   }),
 };
 

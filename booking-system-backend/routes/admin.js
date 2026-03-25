@@ -25,6 +25,7 @@ const {
   getEmailContent,
   updateEmailContent,
   sendTestEmailRoute,
+  sendAllEmailDesignsRoute,
   getTodayStudents,
   getStudentDetail,
   getAddonsConfig,
@@ -101,6 +102,7 @@ router.get('/analytics/branch-performance', getBranchPerformance);
 router.get('/email-content', getEmailContent);
 router.put('/email-content', updateEmailContent);
 router.post('/email-content/test', sendTestEmailRoute);
+router.post('/email-content/test-all', sendAllEmailDesignsRoute);
 router.get('/addons-config', getAddonsConfig);
 router.put('/addons-config', updateAddonsConfig);
 
