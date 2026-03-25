@@ -389,6 +389,35 @@ const sendMailWithFallback = async (transporter, mailOptions) => {
   }
 };
 
+const sendViaResendApi = async ({ from, to, subject, html, text }) => {
+  const apiKey = String(process.env.RESEND_API_KEY || '').trim();
+  if (!apiKey) {
+    throw new Error('RESEND_API_KEY is missing for Resend API send');
+  }
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from,
+      to: Array.isArray(to) ? to : [to],
+      subject,
+      html,
+      text,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Resend API error (${response.status}): ${body || response.statusText}`);
+  }
+
+  return response.json().catch(() => ({}));
+};
+
 // Resolve a valid From address. Prevent placeholder values from breaking SMTP/API delivery.
 const getFromAddress = () => {
   const configuredFrom = String(process.env.EMAIL_FROM || '').trim();
@@ -433,8 +462,6 @@ const generateRandomPassword = () => {
 // Send verification email
 const sendVerificationEmail = async (email, code, firstName, type = 'Email Verification') => {
   try {
-    const transporter = createTransporter();
-
     const isPasswordReset = type === 'Password Reset';
     const subject = isPasswordReset
       ? EMAIL_CONTENT.verification.subjectReset
@@ -486,6 +513,13 @@ const sendVerificationEmail = async (email, code, firstName, type = 'Email Verif
 
     };
 
+    if (isResendMode() && process.env.RESEND_API_KEY) {
+      await sendViaResendApi(mailOptions);
+      console.log(`✅ ${type} email sent via Resend API to:`, email);
+      return true;
+    }
+
+    const transporter = createTransporter();
     const info = await sendMailWithFallback(transporter, mailOptions);
     console.log(`✅ ${type} email sent to:`, email);
     console.log('Message ID:', info.messageId);
