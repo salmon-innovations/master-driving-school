@@ -1038,9 +1038,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
             const selectedPrice = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType)?.price || dynamicCourse?.price || 0;
             const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
-            
-            const discount = (selectedPrice + addonsTotal) * 0.03; // Standard 3% discount for all walk-ins
-            const subtotal = (selectedPrice + addonsTotal) - discount; // Walk-ins have NO convenience fee
+            const subtotal = selectedPrice + addonsTotal;
             
             const requiredAmount = formData.paymentStatus === 'Downpayment' ? subtotal * 0.5 : subtotal;
             const changeAmount = formData.amountPaid ? Math.max(0, Number(formData.amountPaid) - requiredAmount) : 0;
@@ -2749,10 +2747,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             
             // Subtotal includes course + addons
             const subtotal = selectedPrice + addonsTotal;
-            // Standard 3% discount on subtotal for all walk-ins as requested
-            const discount = subtotal * 0.03;
-            // Total amount excludes convenience fee for walk-ins
-            const totalAmount = subtotal - discount;
+            // Total amount excluding convenience fee and without discount
+            const totalAmount = subtotal;
             
             const requiredAmount = formData.paymentStatus === 'Downpayment' ? totalAmount * 0.5 : totalAmount;
             const balanceDue = totalAmount - (Number(formData.amountPaid) || 0);
@@ -2924,10 +2920,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 <span style={{ color: '#64748b' }}>Subtotal</span>
                                 <span style={{ color: '#64748b' }}>₱{subtotal.toLocaleString()}</span>
                             </div>
-                            <div className="breakdown-row" style={{ color: '#059669', fontWeight: '600' }}>
-                                <span>3% Discount (Walk-In Promo)</span>
-                                <span>- ₱{discount.toLocaleString()}</span>
-                            </div>
+                            
                             <div className="breakdown-row total">
                                 <span>Total Amount Due</span>
                                 <span>₱{totalAmount.toLocaleString()}</span>
@@ -3086,8 +3079,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
             const selectedPrice = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType)?.price || dynamicCourse?.price || 0;
             const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
-            const discount = (selectedPrice + addonsTotal) * 0.03;
-            const totalAmount = (selectedPrice + addonsTotal) - discount;
+            const totalAmount = (selectedPrice + addonsTotal);
             const balanceDue = Math.max(0, totalAmount - (Number(formData.amountPaid) || 0));
 
             return (
