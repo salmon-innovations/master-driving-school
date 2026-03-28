@@ -1038,9 +1038,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
             const selectedPrice = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType)?.price || dynamicCourse?.price || 0;
             const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
-            const isBundle = formData.course?.category === 'Promo';
-            const bundleDiscount = isBundle ? (selectedPrice + addonsTotal) * 0.03 : 0;
-            const subtotal = (selectedPrice + addonsTotal - bundleDiscount) + CONVENIENCE_FEE;
+            
+            const discount = (selectedPrice + addonsTotal) * 0.03; // Standard 3% discount for all walk-ins
+            const subtotal = (selectedPrice + addonsTotal) - discount; // Walk-ins have NO convenience fee
             
             const requiredAmount = formData.paymentStatus === 'Downpayment' ? subtotal * 0.5 : subtotal;
             const changeAmount = formData.amountPaid ? Math.max(0, Number(formData.amountPaid) - requiredAmount) : 0;
@@ -1094,7 +1094,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 paymentStatus: formData.paymentStatus,
                 transactionNo: formData.transactionNo,
                 addons: formData.addons || [],
-                convenienceFee: CONVENIENCE_FEE,
+                convenienceFee: 0,
 
                 // Metadata
                 enrollmentType: 'walk-in',
@@ -2751,8 +2751,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             const subtotal = selectedPrice + addonsTotal;
             // Standard 3% discount on subtotal for all walk-ins as requested
             const discount = subtotal * 0.03;
-            // Total amount includes convenience fee (not discounted)
-            const totalAmount = subtotal - discount + CONVENIENCE_FEE;
+            // Total amount excludes convenience fee for walk-ins
+            const totalAmount = subtotal - discount;
             
             const requiredAmount = formData.paymentStatus === 'Downpayment' ? totalAmount * 0.5 : totalAmount;
             const balanceDue = totalAmount - (Number(formData.amountPaid) || 0);
@@ -2928,13 +2928,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 <span>3% Discount (Walk-In Promo)</span>
                                 <span>- ₱{discount.toLocaleString()}</span>
                             </div>
-                            <div className="breakdown-row">
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                    Convenience Fee
-                                    <span style={{ fontSize: '0.65rem', padding: '1px 5px', color: '#1a4fba', border: '1px solid #1a4fba', borderRadius: '4px' }}>SEPARATE</span>
-                                </span>
-                                <span>₱{CONVENIENCE_FEE.toLocaleString()}</span>
-                            </div>
                             <div className="breakdown-row total">
                                 <span>Total Amount Due</span>
                                 <span>₱{totalAmount.toLocaleString()}</span>
@@ -3088,6 +3081,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             // Determine schedule label prefixes
             const isTdcCourse = formData.course?.category === 'TDC';
             const sessionPrefix = isTdcCourse ? 'TDC' : (formData.course?.category === 'PDC' ? 'PDC' : '');
+
+            // Recalculate balance for downpayment
+            const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
+            const selectedPrice = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType)?.price || dynamicCourse?.price || 0;
+            const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
+            const discount = (selectedPrice + addonsTotal) * 0.03;
+            const totalAmount = (selectedPrice + addonsTotal) - discount;
+            const balanceDue = Math.max(0, totalAmount - (Number(formData.amountPaid) || 0));
 
             return (
             <div className="step-content animate-fadeIn">
