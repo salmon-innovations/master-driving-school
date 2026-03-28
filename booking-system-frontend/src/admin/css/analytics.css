@@ -252,6 +252,7 @@
 .analytics-view .chart-wrapper {
     position: relative;
     z-index: 1;
+    width: 100%;
 }
 
 .analytics-view .chart-loading {

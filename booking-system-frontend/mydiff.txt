@@ -1,0 +1,467 @@
+﻿diff --git a/src/admin/WalkInEnrollment.jsx b/temp_good_utf8.jsx
+index 3aae702..d908850 100644
+--- a/src/admin/WalkInEnrollment.jsx
++++ b/temp_good_utf8.jsx
+@@ -1,4 +1,4 @@
+-import React, { useState, useEffect } from 'react';
++∩╗┐import React, { useState, useEffect } from 'react';
+ import { useNotification } from '../context/NotificationContext';
+ import { branchesAPI, coursesAPI, schedulesAPI, adminAPI } from '../services/api';
+ import './css/walkInEnrollment.css';
+@@ -8,11 +8,11 @@ const logo = '/images/logo.png';
+ 
+ const CONVENIENCE_FEE = 25;
+ const DEFAULT_ADDONS = [
+-    { id: 'addon-reviewer', name: 'Driving School Reviewer', price: 30, icon: '≡ƒôû' },
+-    { id: 'addon-tips', name: 'Vehicle Maintenance Tips', price: 20, icon: '≡ƒöº' }
++    { id: 'addon-reviewer', name: 'Driving School Reviewer', price: 30, icon: 'Γëí╞Æ├┤├╗' },
++    { id: 'addon-tips', name: 'Vehicle Maintenance Tips', price: 20, icon: 'Γëí╞Æ├╢┬║' }
+ ];
+ 
+-// getZipFromAddress handles zip lookup ΓÇö imported from '../utils/philippineZipCodes'
++// getZipFromAddress handles zip lookup ╬ô├ç├╢ imported from '../utils/philippineZipCodes'
+ // For branch auto-fill, reuse getZipFromAddress since branch names
+ // (e.g. 'Manila', 'Antipolo') are included in the comprehensive city map.
+ const getZipForBranch = (name) => getZipFromAddress(name);
+@@ -72,7 +72,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+ 
+     // All PDC slots for calendar display (loaded upfront, used to show slot pills on calendar days)
+     const [pdcAllSlots, setPdcAllSlots] = useState([]);
+-    // Pre-filtered PDC slots for the calendar ΓÇö only slots matching the selected course type & transmission
++    // Pre-filtered PDC slots for the calendar ╬ô├ç├╢ only slots matching the selected course type & transmission
+     const [pdcCalendarSlots, setPdcCalendarSlots] = useState([]);
+ 
+     // Course availability check for Step 2
+@@ -468,7 +468,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+         const isTricycle = courseName.includes('tricycle');
+         const isB1B2 = courseName.includes('b1') || courseName.includes('b2') ||
+             courseName.includes('van') || courseName.includes('l300');
+-        // Determine target transmission ΓÇö applies to ALL vehicle types (motorcycle, car, etc.)
++        // Determine target transmission ╬ô├ç├╢ applies to ALL vehicle types (motorcycle, car, etc.)
+         const wantsAT = courseTypeVal.includes('automatic') || courseTypeVal === 'carat';
+         const wantsMT = !wantsAT && (courseTypeVal.includes('manual') || courseTypeVal === 'carmt');
+         const filtered = pdcAllSlots.filter(s => {
+@@ -477,7 +477,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+             // Do not force a strict course-name contains match here.
+             // Many slots store generic values (e.g. "manual"/"automatic") in course_type,
+             // which previously hid valid slots from Step 3 calendar.
+-            // Vehicle bucket filter ΓÇö exclude slots for the wrong vehicle type
++            // Vehicle bucket filter ╬ô├ç├╢ exclude slots for the wrong vehicle type
+             if (isMoto && !ct.includes('motorcycle')) return false;
+             if (isTricycle && !ct.includes('tricycle')) return false;
+             if (isB1B2 && !(ct.includes('b1') || ct.includes('b2'))) return false;
+@@ -485,7 +485,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                 if (ct.includes('motorcycle') || ct.includes('tricycle') ||
+                     ct.includes('b1') || ct.includes('b2')) return false;
+             }
+-            // Transmission match ΓÇö strictly applied to ALL vehicle types when a type is chosen
++            // Transmission match ╬ô├ç├╢ strictly applied to ALL vehicle types when a type is chosen
+             const slotTx = (s.transmission || '').toLowerCase();
+             const isUniversalTx = slotTx === 'both' || slotTx === 'any' || slotTx === 'all' || !slotTx;
+             
+@@ -529,7 +529,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                 // B1/B2 Van-L300
+                 if (isB1B2)
+                     return pdcSlots.some(s => { const ct = (s.course_type || '').toLowerCase(); return ct.includes('b1') || ct.includes('b2'); });
+-                // Motorcycle ΓÇö checked BEFORE manual/automatic so a motorcycle course
++                // Motorcycle ╬ô├ç├╢ checked BEFORE manual/automatic so a motorcycle course
+                 // saved with course_type='Manual' is matched correctly via its name
+                 if (isMoto)
+                     return pdcSlots.some(s => (s.course_type || '').toLowerCase().includes('motorcycle'));
+@@ -549,7 +549,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                         const tx = (s.transmission || '').toLowerCase();
+                         return tx.includes('manual') || tx === 'mt';
+                     });
+-                // Unknown type ΓÇö be strict: don't assume any slot qualifies
++                // Unknown type ╬ô├ç├╢ be strict: don't assume any slot qualifies
+                 return false;
+             };
+             const avail = {};
+@@ -688,7 +688,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+ 
+     const handleLettersOnly = (e) => {
+         const { name, value } = e.target;
+-        const lettersOnly = value.replace(/[^a-zA-Z\s\-'├▒├æ]/g, '');
++        const lettersOnly = value.replace(/[^a-zA-Z\s\-'Γö£ΓûÆΓö£├ª]/g, '');
+         setFormData(prev => ({ ...prev, [name]: lettersOnly }));
+         if (formErrors[name]) {
+             setFormErrors(prev => ({ ...prev, [name]: '' }));
+@@ -1373,8 +1373,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                         const minPrice = Math.min(...pkg.typeOptions.map(opt => opt.price)) + CONVENIENCE_FEE;
+                         const maxPrice = Math.max(...pkg.typeOptions.map(opt => opt.price)) + CONVENIENCE_FEE;
+                         const priceDisplay = minPrice === maxPrice
+-                            ? `Γé▒${minPrice.toLocaleString()}`
+-                            : `Γé▒${minPrice.toLocaleString()} - Γé▒${maxPrice.toLocaleString()}`;
++                            ? `╬ô├⌐ΓûÆ${minPrice.toLocaleString()}`
++                            : `╬ô├⌐ΓûÆ${minPrice.toLocaleString()} - ╬ô├⌐ΓûÆ${maxPrice.toLocaleString()}`;
+                         const isAvailable = courseAvailability[pkg.id] !== false;
+                         const availChecked = pkg.id in courseAvailability;
+                         const canSelect = availChecked && isAvailable;
+@@ -1396,9 +1396,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                 <div className="course-info">
+                                     <h4>{pkg.category}</h4>
+                                     <h3>{pkg.name}</h3>
+-                                    <p className="duration">ΓÅ▒ {pkg.duration}</p>
++                                    <p className="duration">╬ô├àΓûÆ {pkg.duration}</p>
+                                     <ul className="features">
+-                                        {pkg.features.slice(0, 3).map((f, i) => <li key={i}>Γ£ô {f}</li>)}
++                                        {pkg.features.slice(0, 3).map((f, i) => <li key={i}>╬ô┬ú├┤ {f}</li>)}
+                                     </ul>
+                                     <button
+                                         type="button"
+@@ -1591,7 +1591,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+             const renderPromoSlotCard = (slot, isSelected, onClick, chip) => {
+                 const availLow = slot.available_slots < 5;
+                 const slotDateLabel = slot.end_date && slot.date !== slot.end_date
+-                    ? `${new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ΓÇô ${new Date(slot.end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
++                    ? `${new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ╬ô├ç├┤ ${new Date(slot.end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                     : new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+                 return (
+                     <div key={slot.id} className={`slot-card${isSelected ? ' slot-card--selected' : ''}`} onClick={onClick}>
+@@ -1779,8 +1779,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                     <div className="schedule-banner" style={{ marginBottom: '20px', background: 'linear-gradient(135deg, #fef3c780, #fde68a40)', borderColor: '#f59e0b', borderWidth: '1.5px' }}>
+                         <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#92400e" strokeWidth="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></svg>
+                         <div className="schedule-banner__body">
+-                            <div className="schedule-banner__title" style={{ color: '#92400e' }}>Promo Bundle ΓÇö 2-Step Schedule</div>
+-                            <div className="schedule-banner__desc" style={{ color: '#78350f' }}>Step 1: Select TDC schedule ┬╖ Step 2: Select PDC schedule</div>
++                            <div className="schedule-banner__title" style={{ color: '#92400e' }}>Promo Bundle ╬ô├ç├╢ 2-Step Schedule</div>
++                            <div className="schedule-banner__desc" style={{ color: '#78350f' }}>Step 1: Select TDC schedule Γö¼Γòû Step 2: Select PDC schedule</div>
+                         </div>
+                         <div className="schedule-banner__actions">
+                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+@@ -1789,7 +1789,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                         {idx > 0 && <div style={{ width: '16px', height: '2px', background: '#d97706' }} />}
+                                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                             <div style={{ width: '26px', height: '26px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '0.72rem', background: item.done ? '#22c55e' : item.active ? 'var(--primary-color)' : '#e5e7eb', color: item.done || item.active ? '#fff' : '#6b7280' }}>
+-                                                {item.done ? 'Γ£ô' : idx + 1}
++                                                {item.done ? '╬ô┬ú├┤' : idx + 1}
+                                             </div>
+                                             <span style={{ fontSize: '0.72rem', fontWeight: '800', color: '#92400e' }}>{item.label}</span>
+                                         </div>
+@@ -1806,7 +1806,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                             <div className="schedule-banner__body">
+                                 <div className="schedule-banner__title">TDC Schedule Selected</div>
+                                 <div className="schedule-banner__desc">
+-                                    <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> ΓÇö {formData.scheduleSession} ({formData.scheduleTime})
++                                    <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> ╬ô├ç├╢ {formData.scheduleSession} ({formData.scheduleTime})
+                                 </div>
+                             </div>
+                             <div className="schedule-banner__actions">
+@@ -1850,7 +1850,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                 </div>
+                             </div>
+                             <h4 className="slots-header">
+-                                Available TDC Schedules ΓÇö {promoTdcViewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
++                                Available TDC Schedules ╬ô├ç├╢ {promoTdcViewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                             </h4>
+                             {loadingPromoTdc ? (
+                                 <div className="slots-loading">Loading TDC slots...</div>
+@@ -1878,9 +1878,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                         <div className="schedule-banner__desc">
+                                             Day 1: <strong>{new Date(formData.scheduleDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>
+                                             {pdcIsHalfDay && formData.promoPdcSlotId2 && (
+-                                                <> ┬╖ Day 2: <strong>{new Date(formData.promoPdcDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong></>
++                                                <> Γö¼Γòû Day 2: <strong>{new Date(formData.promoPdcDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong></>
+                                             )}
+-                                             ΓÇö {formData.scheduleSession2}
++                                             ╬ô├ç├╢ {formData.scheduleSession2}
+                                         </div>
+                                     </div>
+                                     <div className="schedule-banner__actions">
+@@ -1914,7 +1914,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                             </div>
+                                             {promoPdcDate && (
+                                                 <div className="slots-section">
+-                                                    <h4 className="slots-header">PDC Slots ΓÇö {promoPdcDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</h4>
++                                                    <h4 className="slots-header">PDC Slots ╬ô├ç├╢ {promoPdcDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</h4>
+                                                     {loadingPromoPdc ? (
+                                                         <div className="slots-loading">Loading slots...</div>
+                                                     ) : promoPdcFilteredSlots.length === 0 ? (
+@@ -1949,7 +1949,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                     </div>
+                                     {promoPdcDate2 && (
+                                         <div className="slots-section">
+-                                            <h4 className="slots-header">Day 2 Slots ΓÇö {promoPdcDate2.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</h4>
++                                            <h4 className="slots-header">Day 2 Slots ╬ô├ç├╢ {promoPdcDate2.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</h4>
+                                             {loadingPromoPdc2 ? (
+                                                 <div className="slots-loading">Loading slots...</div>
+                                             ) : promoPdcFiltered2Slots.length === 0 ? (
+@@ -1991,11 +1991,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+             );
+         }
+ // =====================================================================
+-                    // END PROMO ΓÇö regular TDC/PDC flow continues below
++                    // END PROMO ╬ô├ç├╢ regular TDC/PDC flow continues below
+                     // =====================================================================
+ 
+                     return (
+-                    <div className="step-content animate-fadeIn walkin-schedule-theme">
++                    <div className="step-content animate-fadeIn">
+                         <div className="section-title">
+                             <span className="step-badge">3</span>
+                             <h3>Select Schedule</h3>
+@@ -2016,15 +2016,15 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                             <div className={`type-selector-card${formData.courseType ? ' has-selection' : ''}`}>
+                                 <div className="type-selector-title">
+                                     Select Type
+-                                    {formData.course.category === 'PDC' && <span style={{ fontWeight: '400', color: 'var(--secondary-text)', fontSize: '0.82rem' }}>ΓÇö e.g. Manual / Automatic</span>}
+-                                    {formData.course.category === 'TDC' && <span style={{ fontWeight: '400', color: 'var(--secondary-text)', fontSize: '0.82rem' }}>ΓÇö e.g. F2F / Online</span>}
++                                    {formData.course.category === 'PDC' && <span style={{ fontWeight: '400', color: 'var(--secondary-text)', fontSize: '0.82rem' }}>╬ô├ç├╢ e.g. Manual / Automatic</span>}
++                                    {formData.course.category === 'TDC' && <span style={{ fontWeight: '400', color: 'var(--secondary-text)', fontSize: '0.82rem' }}>╬ô├ç├╢ e.g. F2F / Online</span>}
+                                     <span style={{ color: 'red' }}>*</span>
+                                 </div>
+                                 <div className="type-selector-sub">Choose your preferred type before selecting a schedule.</div>
+                                 {checkingTypeAvail && (
+                                     <div style={{ fontSize: '0.78rem', color: 'var(--secondary-text)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
+-                                        Checking slot availabilityΓÇª
++                                        Checking slot availability╬ô├ç┬¬
+                                     </div>
+                                 )}
+                                 <div className="type-btn-group">
+@@ -2038,7 +2038,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                                 type="button"
+                                                 className={`type-btn${formData.courseType === opt.value ? ' active' : ''}${typeDisabled ? ' type-btn--disabled' : ''}${isLoading ? ' type-btn--checking' : ''}`}
+                                                 disabled={typeDisabled || isLoading}
+-                                                title={typeDisabled ? 'No available slots for this type' : isLoading ? 'Checking availabilityΓÇª' : undefined}
++                                                title={typeDisabled ? 'No available slots for this type' : isLoading ? 'Checking availability╬ô├ç┬¬' : undefined}
+                                                 onClick={() => {
+                                                     if (typeDisabled || isLoading) return;
+                                                     setFormData(prev => ({
+@@ -2072,7 +2072,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                 <div className="schedule-banner__body">
+                                     <div className="schedule-banner__title">Day 2 Selection Required</div>
+                                     <div className="schedule-banner__desc">
+-                                        Day 1: <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> ΓÇö {formData.scheduleSession} ({formData.scheduleTime}). Now pick a date for <strong>Day 2</strong>.
++                                        Day 1: <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> ╬ô├ç├╢ {formData.scheduleSession} ({formData.scheduleTime}). Now pick a date for <strong>Day 2</strong>.
+                                     </div>
+                                 </div>
+                                 <div className="schedule-banner__actions">
+@@ -2090,7 +2090,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                     <div className="schedule-banner__body">
+                                         <div className="schedule-banner__title">Schedule Complete</div>
+                                         <div className="schedule-banner__desc">
+-                                            Day 1: <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong>┬á┬╖┬áDay 2: <strong>{new Date(formData.scheduleDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong> ΓÇö {formData.scheduleSession}
++                                            Day 1: <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong>Γö¼├íΓö¼ΓòûΓö¼├íDay 2: <strong>{new Date(formData.scheduleDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong> ╬ô├ç├╢ {formData.scheduleSession}
+                                         </div>
+                                     </div>
+                                     <div className="schedule-banner__actions">
+@@ -2115,7 +2115,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                     <div className="schedule-banner__body">
+                                         <div className="schedule-banner__title">TDC Schedule Selected</div>
+                                         <div className="schedule-banner__desc">
+-                                            <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> ΓÇö {formData.scheduleSession} ({formData.scheduleTime})
++                                            <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> ╬ô├ç├╢ {formData.scheduleSession} ({formData.scheduleTime})
+                                         </div>
+                                     </div>
+                                     <div className="schedule-banner__actions">
+@@ -2136,7 +2136,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                     <div className="schedule-banner__body">
+                                         <div className="schedule-banner__title">Schedule Selected</div>
+                                         <div className="schedule-banner__desc">
+-                                            <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> ΓÇö {formData.scheduleSession} ({formData.scheduleTime})
++                                            <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> ╬ô├ç├╢ {formData.scheduleSession} ({formData.scheduleTime})
+                                         </div>
+                                     </div>
+                                     <div className="schedule-banner__actions">
+@@ -2337,7 +2337,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+ 
+                                 {isTDC && (
+                                     <h4 className="slots-header">
+-                                        Available TDC Schedules ΓÇö {viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
++                                        Available TDC Schedules ╬ô├ç├╢ {viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                                     </h4>
+                                 )}
+ 
+@@ -2345,7 +2345,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                     isSelectingDay2 ? (
+                                         <div className="day2-lock-badge">
+                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+-                                            Showing {formData.scheduleSession} slots only ΓÇö select Day 2
++                                            Showing {formData.scheduleSession} slots only ╬ô├ç├╢ select Day 2
+                                         </div>
+                                     ) : null
+                                 )}
+@@ -2421,7 +2421,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                     </div>
+ 
+                     <div className="form-card-inner">
+-                        {/* ΓöÇΓöÇ Booking Summary Card ΓöÇΓöÇ */}
++                        {/* ╬ô├╢├ç╬ô├╢├ç Booking Summary Card ╬ô├╢├ç╬ô├╢├ç */}
+                         {formData.course && (
+                             <div className="payment-summary-card">
+                                 <div className="payment-summary-card__left">
+@@ -2432,7 +2432,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                         <p className="payment-summary-card__course-name">{formData.course.name}</p>
+                                         <div className="payment-summary-card__meta">
+                                             <span className="payment-summary-card__pill">{formData.course.category}</span>
+-                                            <span className="payment-summary-card__dot">┬╖</span>
++                                            <span className="payment-summary-card__dot">Γö¼Γòû</span>
+                                             <span>{formData.course.duration}</span>
+                                         </div>
+                                     </div>
+@@ -2444,15 +2444,15 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                             {selectedTypeOpt && <span className="payment-summary-card__type-value">{selectedTypeOpt.label}</span>}
+                                         </div>
+                                         <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+-                                            <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>Γé▒{selectedPrice.toLocaleString()}</span>
+-                                            <span className="payment-summary-card__fee-info" style={{ color: 'var(--primary-color)', opacity: 1, fontWeight: '800', fontSize: '0.75rem' }}>+ Γé▒{CONVENIENCE_FEE} Convenience Fee</span>
++                                            <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>╬ô├⌐ΓûÆ{selectedPrice.toLocaleString()}</span>
++                                            <span className="payment-summary-card__fee-info" style={{ color: 'var(--primary-color)', opacity: 1, fontWeight: '800', fontSize: '0.75rem' }}>+ ╬ô├⌐ΓûÆ{CONVENIENCE_FEE} Convenience Fee</span>
+                                         </div>
+                                     </div>
+                                 )}
+                             </div>
+                         )}
+ 
+-                        {/* ΓöÇΓöÇ Add-ons Selection (Standardized placement) ΓöÇΓöÇ */}
++                        {/* ╬ô├╢├ç╬ô├╢├ç Add-ons Selection (Standardized placement) ╬ô├╢├ç╬ô├╢├ç */}
+                         <div className="payment-form-section" style={{ borderTop: '1px solid #e2e8f0', paddingTop: '15px' }}>
+                             <p className="payment-form-section__title">
+                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+@@ -2470,7 +2470,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                             <div className="addon-icon">{addon.icon}</div>
+                                             <div className="addon-info">
+                                                 <div className="addon-name">{addon.name}</div>
+-                                                <div className="addon-price">Γé▒{addon.price.toLocaleString()}</div>
++                                                <div className="addon-price">╬ô├⌐ΓûÆ{addon.price.toLocaleString()}</div>
+                                             </div>
+                                             <div className="addon-check">
+                                                 {isSelected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+@@ -2481,37 +2481,37 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                             </div>
+                         </div>
+ 
+-                        {/* ΓöÇΓöÇ Payment Breakdown ΓöÇΓöÇ */}
++                        {/* ╬ô├╢├ç╬ô├╢├ç Payment Breakdown ╬ô├╢├ç╬ô├╢├ç */}
+                         <div className="payment-breakdown">
+                             <span className="breakdown-title">Final Billing Breakdown</span>
+                             <div className="breakdown-row">
+                                 <span>Course Fee ({formData.courseType || 'Standard'})</span>
+-                                <span>Γé▒{selectedPrice.toLocaleString()}</span>
++                                <span>╬ô├⌐ΓûÆ{selectedPrice.toLocaleString()}</span>
+                             </div>
+                             {formData.addons.map(a => (
+                                 <div key={a.id} className="breakdown-row">
+                                     <span>{a.name}</span>
+-                                    <span>Γé▒{a.price.toLocaleString()}</span>
++                                    <span>╬ô├⌐ΓûÆ{a.price.toLocaleString()}</span>
+                                 </div>
+                             ))}
+                             <div className="breakdown-row" style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px dashed #e2e8f0' }}>
+                                 <span style={{ color: '#64748b' }}>Subtotal</span>
+-                                <span style={{ color: '#64748b' }}>Γé▒{subtotal.toLocaleString()}</span>
++                                <span style={{ color: '#64748b' }}>╬ô├⌐ΓûÆ{subtotal.toLocaleString()}</span>
+                             </div>
+                             <div className="breakdown-row" style={{ color: '#059669', fontWeight: '600' }}>
+                                 <span>3% Discount (Walk-In Promo)</span>
+-                                <span>- Γé▒{discount.toLocaleString()}</span>
++                                <span>- ╬ô├⌐ΓûÆ{discount.toLocaleString()}</span>
+                             </div>
+                             <div className="breakdown-row">
+                                 <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                     Convenience Fee
+                                     <span style={{ fontSize: '0.65rem', padding: '1px 5px', color: '#1a4fba', border: '1px solid #1a4fba', borderRadius: '4px' }}>SEPARATE</span>
+                                 </span>
+-                                <span>Γé▒{CONVENIENCE_FEE.toLocaleString()}</span>
++                                <span>╬ô├⌐ΓûÆ{CONVENIENCE_FEE.toLocaleString()}</span>
+                             </div>
+                             <div className="breakdown-row total">
+                                 <span>Total Amount Due</span>
+-                                <span>Γé▒{totalAmount.toLocaleString()}</span>
++                                <span>╬ô├⌐ΓûÆ{totalAmount.toLocaleString()}</span>
+                             </div>
+ 
+                             {formData.paymentStatus === 'Downpayment' && (
+@@ -2520,12 +2520,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                         <div style={{ fontWeight: '700', color: '#92400e', fontSize: '0.85rem' }}>DOWNPAYMENT (DPT) MODE</div>
+                                         <div style={{ fontSize: '0.75rem', color: '#b45309' }}>50% of total amount required today</div>
+                                     </div>
+-                                    <div style={{ fontWeight: '800', color: '#92400e', fontSize: '1.1rem' }}>Γé▒{requiredAmount.toLocaleString()}</div>
++                                    <div style={{ fontWeight: '800', color: '#92400e', fontSize: '1.1rem' }}>╬ô├⌐ΓûÆ{requiredAmount.toLocaleString()}</div>
+                                 </div>
+                             )}
+                         </div>
+ 
+-                        {/* ΓöÇΓöÇ Payment Form ΓöÇΓöÇ */}
++                        {/* ╬ô├╢├ç╬ô├╢├ç Payment Form ╬ô├╢├ç╬ô├╢├ç */}
+                         <div className="payment-form-section">
+                             <p className="payment-form-section__title">
+                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
+@@ -2580,25 +2580,25 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                             <div className="form-grid">
+                                 <div className="form-group">
+                                     <label>
+-                                        Amount Paid (Γé▒)
++                                        Amount Paid (╬ô├⌐ΓûÆ)
+                                         {formData.paymentStatus === 'Downpayment' && (
+-                                            <span className="field-hint">50% ΓÇö Γé▒{requiredAmount.toLocaleString()} required</span>
++                                            <span className="field-hint">50% ╬ô├ç├╢ ╬ô├⌐ΓûÆ{requiredAmount.toLocaleString()} required</span>
+                                         )}
+                                     </label>
+-                                    <input type="number" name="amountPaid" value={formData.amountPaid} onChange={handleChange} placeholder={`Γé▒${requiredAmount.toLocaleString()}`} required />
++                                    <input type="number" name="amountPaid" value={formData.amountPaid} onChange={handleChange} placeholder={`╬ô├⌐ΓûÆ${requiredAmount.toLocaleString()}`} required />
+                                     {formData.amountPaid && Number(formData.amountPaid) >= requiredAmount && (
+                                         <div className="amount-required-row">
+                                             <span className="amount-required-row__label">Required</span>
+-                                            <span className="amount-required-row__value">Γé▒{requiredAmount.toLocaleString()}</span>
++                                            <span className="amount-required-row__value">╬ô├⌐ΓûÆ{requiredAmount.toLocaleString()}</span>
+                                             {change > 0 && (
+-                                                <span className="amount-change-badge">Change: Γé▒{change.toLocaleString()}</span>
++                                                <span className="amount-change-badge">Change: ╬ô├⌐ΓûÆ{change.toLocaleString()}</span>
+                                             )}
+                                         </div>
+                                     )}
+                                     {formData.amountPaid && Number(formData.amountPaid) > 0 && Number(formData.amountPaid) < requiredAmount && (
+                                         <div className="amount-required-row amount-required-row--short">
+                                             <span className="amount-required-row__label">Still needed</span>
+-                                            <span className="amount-required-row__value">Γé▒{(requiredAmount - Number(formData.amountPaid)).toLocaleString()}</span>
++                                            <span className="amount-required-row__value">╬ô├⌐ΓûÆ{(requiredAmount - Number(formData.amountPaid)).toLocaleString()}</span>
+                                         </div>
+                                     )}
+                                 </div>
+@@ -2623,7 +2623,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+ 
+                         let hint = null;
+                         if (!hasAmount) hint = 'Enter the amount paid to continue.';
+-                        else if (!isEnough) hint = `Amount is short by Γé▒${(requiredAmount - paid).toLocaleString()}.`;
++                        else if (!isEnough) hint = `Amount is short by ╬ô├⌐ΓûÆ${(requiredAmount - paid).toLocaleString()}.`;
+                         else if (needsTxn && !hasTxn) hint = `Enter the ${formData.paymentMethod} transaction number to continue.`;
+ 
+                         return (
+@@ -2686,13 +2686,13 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                 <p><strong>Session:</strong> {formData.scheduleSession || 'Not selected'}</p>
+                                 <p><strong>Time:</strong> {formData.scheduleTime || 'Not selected'}</p>
+                                 <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
+-                                <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>PDC{formData.promoPdcSlotId2 ? ' ΓÇö Day 1' : ''}:</p>
++                                <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>PDC{formData.promoPdcSlotId2 ? ' ╬ô├ç├╢ Day 1' : ''}:</p>
+                                 <p><strong>Date:</strong> {formData.scheduleDate2 ? new Date(formData.scheduleDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not selected'}</p>
+                                 <p><strong>Session:</strong> {formData.scheduleSession2 || 'Not selected'}</p>
+                                 <p><strong>Time:</strong> {formData.scheduleTime2 || 'Not selected'}</p>
+                                 {formData.promoPdcSlotId2 && (
+                                     <>
+-                                        <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', marginTop: '8px', fontSize: '0.85rem' }}>PDC ΓÇö Day 2:</p>
++                                        <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', marginTop: '8px', fontSize: '0.85rem' }}>PDC ╬ô├ç├╢ Day 2:</p>
+                                         <p><strong>Date:</strong> {new Date(formData.promoPdcDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                                         <p><strong>Session:</strong> {formData.promoPdcSession2}</p>
+                                         <p><strong>Time:</strong> {formData.promoPdcTime2}</p>
+@@ -2727,10 +2727,10 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+                                 <p><strong>Transaction No:</strong> {formData.transactionNo}</p>
+                             )}
+                             <p><strong>Payment Status:</strong> {formData.paymentStatus}</p>
+-                            <p><strong>Amount Paid Today:</strong> Γé▒{Number(formData.amountPaid).toLocaleString()}</p>
++                            <p><strong>Amount Paid Today:</strong> ╬ô├⌐ΓûÆ{Number(formData.amountPaid).toLocaleString()}</p>
+                             {formData.paymentStatus === 'Downpayment' && (
+                                 <p style={{ color: '#b45309', fontWeight: '700' }}>
+-                                    <strong>Remaining Balance:</strong> Γé▒{balanceDue.toLocaleString()}
++                                    <strong>Remaining Balance:</strong> ╬ô├⌐ΓûÆ{balanceDue.toLocaleString()}
+                                 </p>
+                             )}
+                         </div>
+@@ -2798,4 +2798,4 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
+         );
+     };
+ 
+-    export default WalkInEnrollment;
+\ No newline at end of file
++    export default WalkInEnrollment;

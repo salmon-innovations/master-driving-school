@@ -17,20 +17,6 @@ const DEFAULT_ADDONS = [
 // (e.g. 'Manila', 'Antipolo') are included in the comprehensive city map.
 const getZipForBranch = (name) => getZipFromAddress(name);
 
-const formatLocalDate = (date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-};
-
-const getMinSchedDate = (daysAhead = 2) => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() + daysAhead);
-    return formatLocalDate(d);
-};
-
 
 const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const { showNotification } = useNotification();
@@ -65,7 +51,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const [selectedScheduleDate, setSelectedScheduleDate] = useState('');
     const [viewDate, setViewDate] = useState(new Date());
     const [loadingSchedule, setLoadingSchedule] = useState(false);
-    const today = formatLocalDate(new Date());
+    const today = new Date().toISOString().split('T')[0];
     const [formErrors, setFormErrors] = useState({});
     const [pdcSessionFilter, setPdcSessionFilter] = useState('All');
     const [tdcTypeFilter, setTdcTypeFilter] = useState('All');
@@ -82,13 +68,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     // Type availability check for Step 3
     const [typeAvailability, setTypeAvailability] = useState({});
     const [checkingTypeAvail, setCheckingTypeAvail] = useState(false);
-
-    // Student search / auto-fill state
-    const [studentSearchQuery, setStudentSearchQuery] = useState('');
-    const [studentSearchResults, setStudentSearchResults] = useState([]);
-    const [studentSearchLoading, setStudentSearchLoading] = useState(false);
-    const [showStudentDropdown, setShowStudentDropdown] = useState(false);
-    const [selectedStudentId, setSelectedStudentId] = useState(null);
 
     const [promoStep, setPromoStep] = useState(1);
     const [promoTdcViewDate, setPromoTdcViewDate] = useState(new Date());
@@ -109,7 +88,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         firstName: '', middleName: '', lastName: '', age: '', gender: '', birthday: '', nationality: '', maritalStatus: '',
         address: '', zipCode: '', birthPlace: '', contactNumbers: '', email: '', emergencyContactPerson: '', emergencyContactNumber: '',
         course: null, courseType: '', branchId: '', branchName: '',
-        selectedCourses: [],
         scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
         scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '',
         promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: '',
@@ -139,15 +117,33 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
         // Build type options array
         const typeOptions = [];
+
         const discount = parseFloat(course.discount) || 0;
+
+        // Price enforcement logic to match requested rates
+        const getEnforcedPrice = (name, type, dbPrice) => {
+            const n = (name || '').toLowerCase();
+            const t = (type || '').toLowerCase();
+            if (n.includes('tdc')) {
+                if (t.includes('online')) return 1200;
+                return 800; // Face-to-Face
+            }
+            if (n.includes('van') || n.includes('l300')) return 5000;
+            if (n.includes('car')) return 4000;
+            if (n.includes('motorcycle')) return 2500;
+            if (n.includes('tricycle')) return 2500;
+            return dbPrice;
+        };
+
+        const enforcedBasePrice = getEnforcedPrice(course.name, course.course_type, branchEffectivePrice);
 
         // Add main course type with its price (branch-adjusted)
         if (course.course_type) {
             typeOptions.push({
                 value: course.course_type.toLowerCase().replace(/\s+/g, '-'),
                 label: course.course_type.toUpperCase(),
-                price: branchEffectivePrice - discount,
-                original_price: branchEffectivePrice,
+                price: enforcedBasePrice - discount,
+                originalPrice: enforcedBasePrice,
                 discount: discount
             });
         }
@@ -156,11 +152,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         if (course.pricing_data && Array.isArray(course.pricing_data)) {
             course.pricing_data.forEach(variation => {
                 const varPrice = parseFloat(variation.price) || 0;
+                const enforcedVarPrice = getEnforcedPrice(course.name, variation.type, varPrice);
                 typeOptions.push({
                     value: variation.type.toLowerCase().replace(/\s+/g, '-'),
                     label: variation.type.toUpperCase(),
-                    price: varPrice - discount,
-                    original_price: varPrice,
+                    price: enforcedVarPrice - discount,
+                    originalPrice: enforcedVarPrice,
                     discount: discount
                 });
             });
@@ -171,8 +168,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             typeOptions.push({
                 value: 'standard',
                 label: 'STANDARD',
-                price: branchEffectivePrice - discount,
-                original_price: branchEffectivePrice,
+                price: enforcedBasePrice - discount,
+                originalPrice: enforcedBasePrice,
                 discount: discount
             });
         }
@@ -229,8 +226,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             hasTypeOption: true,
             typeOptions: typeOptions,
             category: course.category || 'Basic',
-            price: branchEffectivePrice - discount,
-            original_price: branchEffectivePrice,
+            price: enforcedBasePrice - discount,
+            originalPrice: enforcedBasePrice,
             course_type: course.course_type || '',
             description: course.description || 'Professional driving course with comprehensive training'
         };
@@ -463,16 +460,17 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         const filtered = pdcAllSlots.filter(s => {
             const ct = (s.course_type || '').toLowerCase();
             const tx = (s.transmission || '').toLowerCase();
-            // Do not force a strict course-name contains match here.
-            // Many slots store generic values (e.g. "manual"/"automatic") in course_type,
-            // which previously hid valid slots from Step 3 calendar.
-            // Vehicle bucket filter — selectively exclude explicitly wrong vehicle types
-            if (isMoto && (ct.includes('car') || ct.includes('b1') || ct.includes('b2') || ct.includes('tricycle') || ct.includes('l300'))) return false;
-            if (isTricycle && (ct.includes('motorcycle') || ct.includes('moto') || ct.includes('car') || ct.includes('b1') || ct.includes('b2') || ct.includes('van') || ct.includes('l300'))) return false;
-            if (isB1B2 && (ct.includes('motorcycle') || ct.includes('moto') || ct.includes('tricycle') || ct.includes('car'))) return false;
+            // Course name match — slot course_type must match this course's name
+            if (ct) {
+                if (!ct.includes(courseName) && !courseName.includes(ct)) return false;
+            }
+            // Vehicle bucket filter — exclude slots for the wrong vehicle type
+            if (isMoto && !ct.includes('motorcycle')) return false;
+            if (isTricycle && !ct.includes('tricycle')) return false;
+            if (isB1B2 && !(ct.includes('b1') || ct.includes('b2'))) return false;
             if (!isMoto && !isTricycle && !isB1B2) {
-                // If it's a generic car course (not strictly moto, tricycle, or B1B2)
-                if (ct.includes('motorcycle') || ct.includes('moto') || ct.includes('tricycle') || ct.includes('b1') || ct.includes('b2') || ct.includes('van') || ct.includes('l300')) return false;
+                if (ct.includes('motorcycle') || ct.includes('tricycle') ||
+                    ct.includes('b1') || ct.includes('b2')) return false;
             }
             // Transmission match — strictly applied to ALL vehicle types when a type is chosen
             const slotTx = (s.transmission || '').toLowerCase();
@@ -621,61 +619,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         }).finally(() => setCheckingTypeAvail(false));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [step, formData.branchId, formData.course?.id]);
-
-    // Search students for auto-fill
-    const handleStudentSearch = async (query) => {
-        setStudentSearchQuery(query);
-        if (!query || query.trim().length < 2) {
-            setStudentSearchResults([]);
-            setShowStudentDropdown(false);
-            return;
-        }
-        setStudentSearchLoading(true);
-        setShowStudentDropdown(true);
-        try {
-            const res = await adminAPI.searchStudents(query.trim());
-            setStudentSearchResults(res.students || []);
-        } catch (err) {
-            console.error('Student search error:', err);
-            setStudentSearchResults([]);
-        } finally {
-            setStudentSearchLoading(false);
-        }
-    };
-
-    const handleStudentSelect = (student) => {
-        setSelectedStudentId(student.id);
-        setFormData(prev => ({
-            ...prev,
-            firstName: student.first_name || '',
-            middleName: student.middle_name || '',
-            lastName: student.last_name || '',
-            age: student.age ? String(student.age) : '',
-            gender: student.gender || '',
-            birthday: student.birthday ? student.birthday.split('T')[0] : '',
-            nationality: student.nationality || '',
-            maritalStatus: student.marital_status || '',
-            address: student.address || '',
-            zipCode: student.zip_code || '',
-            birthPlace: student.birth_place || '',
-            contactNumbers: student.contact_numbers || '',
-            email: student.email || '',
-            emergencyContactPerson: student.emergency_contact_person || '',
-            emergencyContactNumber: student.emergency_contact_number || '',
-        }));
-        setFormErrors({});
-        setStudentSearchQuery(`${student.first_name} ${student.last_name}`);
-        setShowStudentDropdown(false);
-        setStudentSearchResults([]);
-        showNotification(`✅ Details auto-filled for ${student.first_name} ${student.last_name}`, 'success');
-    };
-
-    const clearStudentSearch = () => {
-        setStudentSearchQuery('');
-        setStudentSearchResults([]);
-        setShowStudentDropdown(false);
-        setSelectedStudentId(null);
-    };
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -899,10 +842,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     showNotification('Please select a different slot for Day 2.', 'warning');
                     return;
                 }
-                if (slot.date === formData.scheduleDate) {
-                    showNotification('Day 2 must be on a different date from Day 1.', 'warning');
-                    return;
-                }
                 if (slot.session !== formData.scheduleSession) {
                     showNotification(`For Day 2, please select the same session type: ${formData.scheduleSession}`, 'warning');
                     return;
@@ -915,6 +854,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     scheduleTime2: slot.time_range
                 }));
                 showNotification('Day 2 selected successfully! Schedule complete.', 'success');
+                nextStep();
             }
         } else {
             // Single slot selection (TDC spans its own end_date backend, or PDC Whole Day)
@@ -930,13 +870,24 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 scheduleTime2: ''
             }));
             showNotification('Schedule selected successfully!', 'success');
+            nextStep();
         }
     };
 
-    const resetScheduleState = () => {
+    const handleCourseSelect = (pkg) => {
+        setFormData(prev => ({
+            ...prev,
+            course: pkg,
+            courseType: '',
+            scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
+            scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '',
+            promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: '',
+            addons: [...DEFAULT_ADDONS]
+        }));
         setSelectedScheduleDate('');
         setScheduleSlots([]);
         setTdcTypeFilter('All');
+        // Reset promo state
         setPromoStep(1);
         setPromoTdcRawSlots([]);
         setPromoPdcCalMonth(new Date());
@@ -947,73 +898,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         setPromoPdcDate2(null);
         setPromoPdcRawSlots2([]);
         setPromoPdcMotorType(null);
-    };
-
-    const handleCourseToggle = (pkg) => {
-        setFormData(prev => {
-            const exists = prev.selectedCourses.find(c => c.id === pkg.id);
-            let updated;
-            if (exists) {
-                updated = prev.selectedCourses.filter(c => c.id !== pkg.id);
-            } else if (pkg.category === 'TDC') {
-                updated = [...prev.selectedCourses.filter(c => c.category !== 'TDC'), pkg];
-            } else if (pkg.category === 'PDC') {
-                updated = [...prev.selectedCourses.filter(c => c.category !== 'PDC'), pkg];
-            } else {
-                updated = [...prev.selectedCourses, pkg];
-            }
-            return { ...prev, selectedCourses: updated, course: null, courseType: '',
-                scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
-                scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '',
-                promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: '' };
-        });
-        resetScheduleState();
-    };
-
-    const handleProceedToStep3 = () => {
-        const sel = formData.selectedCourses;
-        if (!sel || sel.length === 0) return;
-        const tdcCourse = sel.find(c => c.category === 'TDC');
-        const pdcCourse = sel.find(c => c.category === 'PDC');
-        const isBundle = !!(tdcCourse && pdcCourse);
-        let course, courseType;
-        if (isBundle) {
-            const pdcName = (pdcCourse.name || '').toLowerCase();
-            const pdcTypeRaw = (pdcCourse.course_type || '').toLowerCase();
-            let pdcPromoType = 'CarMT';
-            if (pdcName.includes('motorcycle') || pdcTypeRaw.includes('motorcycle')) pdcPromoType = 'Motorcycle';
-            else if (pdcTypeRaw.includes('automatic') || pdcTypeRaw === 'carat') pdcPromoType = 'CarAT';
-            const tdcPromoType = (tdcCourse.course_type || '').toLowerCase().includes('online') ? 'ONLINE' : 'F2F';
-            const totalPrice = (tdcCourse.price || 0) + (pdcCourse.price || 0);
-            course = {
-                id: `bundle-${tdcCourse.id}-${pdcCourse.id}`,
-                name: `Promo Bundle: ${tdcCourse.shortName || tdcCourse.name} + ${pdcCourse.shortName || pdcCourse.name}`,
-                shortName: 'Promo Bundle',
-                category: 'Promo',
-                course_type: `${tdcPromoType}+${pdcPromoType}`,
-                duration: `TDC ${tdcCourse.duration} + PDC ${pdcCourse.duration}`,
-                hasTypeOption: true,
-                typeOptions: [{ value: 'promo-bundle', label: 'PROMO BUNDLE', price: totalPrice, originalPrice: totalPrice, discount: 0 }],
-                price: totalPrice, originalPrice: totalPrice,
-                _tdcCourse: tdcCourse, _pdcCourse: pdcCourse, _isManualBundle: true,
-            };
-            courseType = 'promo-bundle';
-        } else {
-            course = sel[0];
-            courseType = '';
-        }
-        setFormData(prev => ({
-            ...prev, course, courseType,
-            scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
-            scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '',
-            promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: '',
-            addons: [...DEFAULT_ADDONS],
-        }));
-        resetScheduleState();
         setStep(3);
     };
-
-
 
     const nextStep = () => setStep(prev => Math.min(prev + 1, 5));
     const prevStep = () => setStep(prev => Math.max(prev - 1, 1));
@@ -1065,16 +951,10 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 emergencyContactNumber: formData.emergencyContactNumber,
 
                 // Course & Branch
-                courseId: formData.course?._isManualBundle
-                    ? formData.course._tdcCourse?.id
-                    : formData.course?.id,
+                courseId: formData.course?.id,
                 courseCategory: formData.course?.category,
                 courseType: formData.courseType,
                 branchId: formData.branchId,
-                ...(formData.course?._isManualBundle ? {
-                    pdcCourseId: formData.course._pdcCourse?.id,
-                    isManualBundle: true,
-                } : {}),
 
                 // Schedule (supports 1 or 2 slots; for Promo: slot1=TDC, slot2=PDC Day1, promoPdcSlotId2=PDC Day2)
                 scheduleSlotId: formData.scheduleSlotId,
@@ -1132,7 +1012,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 firstName: '', middleName: '', lastName: '', age: '', gender: '', birthday: '', nationality: '', maritalStatus: '',
                 address: '', zipCode: '', birthPlace: '', contactNumbers: '', email: '', emergencyContactPerson: '', emergencyContactNumber: '',
                 course: null, courseType: '', branchId: formData.branchId, branchName: formData.branchName,
-                selectedCourses: [],
                 scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
                 scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '',
                 paymentMethod: 'Cash', amountPaid: '', paymentStatus: 'Full Payment', transactionNo: '',
@@ -1148,133 +1027,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
     const renderStep1 = () => (
         <div className="step-content animate-fadeIn space-y-8">
-            {/* Returning Student Search Bar */}
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-3xl p-6 border-2 border-blue-100 shadow-sm">
-                <div className="flex items-center gap-3 mb-4">
-                    <div className="w-9 h-9 bg-[#2157da] text-white rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
-                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" stroke="white" strokeWidth="2"/><path d="M20 20l-3-3" stroke="white" strokeWidth="2" strokeLinecap="round"/></svg>
-                    </div>
-                    <div>
-                        <h3 className="text-base font-black text-gray-900 leading-tight">Returning Student?</h3>
-                        <p className="text-xs text-blue-600 font-medium">Search by name or email to auto-fill details</p>
-                    </div>
-                    {selectedStudentId && (
-                        <span className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-100 text-green-700 border border-green-200 rounded-full text-xs font-bold">
-                            <svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
-                            Auto-filled
-                        </span>
-                    )}
-                </div>
-                <div style={{ position: 'relative' }}>
-                    <div className="flex gap-3">
-                        <div style={{ position: 'relative', flex: 1 }}>
-                            <div style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
-                                {studentSearchLoading
-                                    ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#3b82f6" strokeWidth="2" strokeDasharray="40" strokeDashoffset="20" style={{ animation: 'spin 1s linear infinite', transformOrigin: 'center' }}/></svg>
-                                    : <svg width="18" height="18" fill="none" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" stroke="#6b7280" strokeWidth="1.8"/><path d="M20 20l-3-3" stroke="#6b7280" strokeWidth="1.8" strokeLinecap="round"/></svg>
-                                }
-                            </div>
-                            <input
-                                type="text"
-                                value={studentSearchQuery}
-                                onChange={e => handleStudentSearch(e.target.value)}
-                                onFocus={() => { if (studentSearchResults.length > 0) setShowStudentDropdown(true); }}
-                                onBlur={() => setTimeout(() => setShowStudentDropdown(false), 200)}
-                                placeholder="Search student by first name, last name, or email…"
-                                className="w-full py-3.5 bg-white border-2 border-blue-100 rounded-2xl outline-none transition-all focus:border-[#2157da] focus:ring-4 focus:ring-blue-50"
-                                style={{ paddingLeft: '44px', paddingRight: studentSearchQuery ? '44px' : '16px' }}
-                            />
-                            {studentSearchQuery && (
-                                <button
-                                    type="button"
-                                    onClick={clearStudentSearch}
-                                    style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)' }}
-                                    className="text-gray-400 hover:text-gray-600 transition-colors"
-                                >
-                                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                    {/* Dropdown Results */}
-                    {showStudentDropdown && (
-                        <div style={{
-                            position: 'absolute',
-                            top: 'calc(100% + 8px)',
-                            left: 0,
-                            right: 0,
-                            background: 'white',
-                            border: '2px solid #dbeafe',
-                            borderRadius: '16px',
-                            boxShadow: '0 12px 40px rgba(33,87,218,0.15)',
-                            zIndex: 100,
-                            overflow: 'hidden',
-                            maxHeight: '320px',
-                            overflowY: 'auto'
-                        }}>
-                            {studentSearchLoading && (
-                                <div style={{ padding: '20px', textAlign: 'center', color: '#6b7280', fontSize: '0.875rem' }}>
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', marginRight: '8px', animation: 'spin 1s linear infinite', transformOrigin: 'center', verticalAlign: 'middle' }}>
-                                        <circle cx="12" cy="12" r="10" stroke="#3b82f6" strokeWidth="2" strokeDasharray="40" strokeDashoffset="20"/>
-                                    </svg>
-                                    Searching students…
-                                </div>
-                            )}
-                            {!studentSearchLoading && studentSearchResults.length === 0 && (
-                                <div style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '0.875rem' }}>
-                                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🔍</div>
-                                    No students found for &ldquo;{studentSearchQuery}&rdquo;
-                                </div>
-                            )}
-                            {!studentSearchLoading && studentSearchResults.map(student => (
-                                <button
-                                    key={student.id}
-                                    type="button"
-                                    onMouseDown={() => handleStudentSelect(student)}
-                                    style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '12px',
-                                        width: '100%',
-                                        padding: '12px 16px',
-                                        background: 'none',
-                                        border: 'none',
-                                        borderBottom: '1px solid #f3f4f6',
-                                        cursor: 'pointer',
-                                        textAlign: 'left',
-                                        transition: 'background 0.15s'
-                                    }}
-                                    onMouseEnter={e => e.currentTarget.style.background = '#eff6ff'}
-                                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                                >
-                                    <div style={{
-                                        width: '38px', height: '38px', flexShrink: 0,
-                                        background: 'linear-gradient(135deg, #2157da, #3b82f6)',
-                                        borderRadius: '50%',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        color: 'white', fontWeight: '800', fontSize: '0.95rem'
-                                    }}>
-                                        {(student.first_name?.[0] || '?').toUpperCase()}
-                                    </div>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontWeight: '700', color: '#111827', fontSize: '0.95rem', marginBottom: '2px' }}>
-                                            {student.first_name} {student.middle_name && student.middle_name !== 'N/A' ? student.middle_name + ' ' : ''}{student.last_name}
-                                        </div>
-                                        <div style={{ fontSize: '0.78rem', color: '#6b7280', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                                            {student.email && <span>📧 {student.email}</span>}
-                                            {student.contact_numbers && <span>📱 {student.contact_numbers}</span>}
-                                        </div>
-                                    </div>
-                                    <div style={{ flexShrink: 0, background: '#dbeafe', color: '#1d4ed8', borderRadius: '8px', padding: '4px 10px', fontSize: '0.72rem', fontWeight: '700' }}>
-                                        Auto-fill
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
-
             {/* Personal Information Card */}
             <div className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-gray-100 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex items-center gap-3 mb-8 pb-4 border-b border-gray-50">
@@ -1580,7 +1332,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         <div className="step-content animate-fadeIn">
             <div className="section-header center mb-8">
                 <h2>Select Course</h2>
-                <p>Choose one or more courses — pick TDC + PDC together for a Promo Bundle</p>
+                <p>Choose the driving course for the client</p>
             </div>
 
             {loading ? (
@@ -1592,113 +1344,72 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     <p>No active courses available at the moment.</p>
                     <p style={{ fontSize: '0.875rem', marginTop: '8px' }}>Please add courses in Course Management to proceed.</p>
                 </div>
-            ) : (() => {
-                const selectedCourses = formData.selectedCourses || [];
-                const selectedTDC = selectedCourses.find(c => c.category === 'TDC');
-                const selectedPDC = selectedCourses.find(c => c.category === 'PDC');
-                const isPromoBundle = !!(selectedTDC && selectedPDC);
-                const bundleRaw = selectedCourses.reduce((s, c) => s + (c.price || 0), 0);
-                const bundleDiscount = isPromoBundle ? bundleRaw * 0.03 : 0;
-                const bundleNet = bundleRaw - bundleDiscount + CONVENIENCE_FEE;
-
-                return (<>
-                    {/* Promo tip */}
-                    {!isPromoBundle && (
-                        <div className="promo-tip-bar">
-                            <span>🎁</span>
-                            <span>Select <strong>1 TDC</strong> + <strong>1 PDC</strong> to unlock a <strong style={{color:'#16a34a'}}>3% Promo Bundle discount</strong></span>
+            ) : (
+                <div className="courses-grid">
+                    {checkingCourseAvail && (
+                        <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '12px', fontSize: '0.875rem', color: 'var(--secondary-text)' }}>
+                            Checking slot availability...
                         </div>
                     )}
+                    {packages.map((pkg) => {
+                        // Get the minimum price from all type options
+                        const minPrice = Math.min(...pkg.typeOptions.map(opt => opt.price)) + CONVENIENCE_FEE;
+                        const maxPrice = Math.max(...pkg.typeOptions.map(opt => opt.price)) + CONVENIENCE_FEE;
+                        const priceDisplay = minPrice === maxPrice
+                            ? `₱${minPrice.toLocaleString()}`
+                            : `₱${minPrice.toLocaleString()} - ₱${maxPrice.toLocaleString()}`;
+                        const isAvailable = courseAvailability[pkg.id] !== false;
+                        const availChecked = pkg.id in courseAvailability;
+                        const canSelect = availChecked && isAvailable;
 
-                    <div className="courses-grid">
-                        {checkingCourseAvail && (
-                            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '12px', fontSize: '0.875rem', color: 'var(--secondary-text)' }}>
-                                Checking slot availability...
-                            </div>
-                        )}
-                        {packages.map((pkg) => {
-                            const minPrice = Math.min(...pkg.typeOptions.map(opt => opt.price));
-                            const maxPrice = Math.max(...pkg.typeOptions.map(opt => opt.price));
-                            const priceDisplay = minPrice === maxPrice ? `₱${minPrice.toLocaleString()}` : `₱${minPrice.toLocaleString()} - ₱${maxPrice.toLocaleString()}`;
-                            const isAvailable = courseAvailability[pkg.id] !== false;
-                            const availChecked = pkg.id in courseAvailability;
-                            const canSelect = availChecked && isAvailable;
-                            const isSelected = selectedCourses.some(c => c.id === pkg.id);
-                            const wouldReplace = (pkg.category === 'PDC' && selectedPDC && selectedPDC.id !== pkg.id)
-                                || (pkg.category === 'TDC' && selectedTDC && selectedTDC.id !== pkg.id);
-
-                            return (
-                                <div key={pkg.id} className={`course-card ${isSelected ? 'selected' : ''} ${availChecked && !isAvailable ? 'no-slots-card' : ''}`}
-                                    style={availChecked && !isAvailable ? { opacity: 0.55, filter: 'grayscale(40%)', pointerEvents: 'none' } : undefined}>
-                                    {isSelected && (
-                                        <div className="course-card-check">✓</div>
+                        return (
+                            <div key={pkg.id} className={`course-card ${formData.course?.id === pkg.id ? 'selected' : ''} ${availChecked && !isAvailable ? 'no-slots-card' : ''}`}
+                                style={availChecked && !isAvailable ? { opacity: 0.55, filter: 'grayscale(40%)', pointerEvents: 'none' } : undefined}>
+                                <div className="course-img">
+                                    <img src={pkg.image} alt={pkg.name} onError={(e) => e.target.style.display = 'none'} />
+                                    <div className="course-overlay">
+                                        <span>{priceDisplay}</span>
+                                    </div>
+                                    {availChecked && !isAvailable && (
+                                        <div style={{ position: 'absolute', top: '8px', right: '8px', background: '#dc2626', color: '#fff', fontSize: '0.65rem', fontWeight: '800', padding: '3px 8px', borderRadius: '20px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                                            No Slots
+                                        </div>
                                     )}
-                                    <div className="course-img">
-                                        <img src={pkg.image} alt={pkg.name} onError={(e) => e.target.style.display = 'none'} />
-                                        <div className="course-overlay"><span>{priceDisplay}</span></div>
-                                        {availChecked && !isAvailable && (
-                                            <div style={{ position: 'absolute', top: '8px', right: '8px', background: '#dc2626', color: '#fff', fontSize: '0.65rem', fontWeight: '800', padding: '3px 8px', borderRadius: '20px', textTransform: 'uppercase' }}>No Slots</div>
-                                        )}
-                                    </div>
-                                    <div className="course-info">
-                                        <h4>{pkg.category}</h4>
-                                        <h3>{pkg.name}</h3>
-                                        <p className="duration">⏱ {pkg.duration}</p>
-                                        <ul className="features">
-                                            {pkg.features.slice(0, 3).map((f, i) => <li key={i}>✓ {f}</li>)}
-                                        </ul>
-                                        <button
-                                            type="button"
-                                            onClick={() => canSelect && handleCourseToggle(pkg)}
-                                            className={`select-pkg-btn${isSelected ? ' select-pkg-btn--selected' : ''}`}
-                                            disabled={!canSelect}
-                                            style={!canSelect ? { background: '#9ca3af', cursor: 'not-allowed', opacity: 0.8 } :
-                                                   isSelected ? { background: 'linear-gradient(135deg,#16a34a,#15803d)' } : undefined}
-                                        >
-                                            {availChecked && !isAvailable ? 'No Available Slots'
-                                                : !availChecked ? 'Checking...'
-                                                : isSelected ? '✓ Selected — Click to Remove'
-                                                : wouldReplace ? `↩ Replace ${pkg.category}`
-                                                : 'Select Course'}
-                                        </button>
-                                    </div>
                                 </div>
-                            );
-                        })}
-                    </div>
+                                <div className="course-info">
+                                    <h4>{pkg.category}</h4>
+                                    <h3>{pkg.name}</h3>
+                                    <p className="duration">⏱ {pkg.duration}</p>
+                                    <ul className="features">
+                                        {pkg.features.slice(0, 3).map((f, i) => <li key={i}>✓ {f}</li>)}
+                                    </ul>
+                                    <button
+                                        type="button"
+                                        onClick={() => canSelect && handleCourseSelect(pkg)}
+                                        className="select-pkg-btn"
+                                        disabled={!canSelect}
+                                        style={!canSelect ? { background: '#9ca3af', cursor: 'not-allowed', opacity: 0.8 } : undefined}
+                                        title={availChecked && !isAvailable ? 'No available slots for this course at the selected branch' : undefined}
+                                    >
+                                        {availChecked && !isAvailable ? 'No Available Slots' : !availChecked ? 'Checking...' : formData.course?.id === pkg.id ? 'Selected' : 'Select Course'}
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
 
-
-
-                    {/* Single course tip */}
-                    {selectedCourses.length === 1 && !isPromoBundle && (
-                        <div className="single-course-hint">
-                            <span>✓ <strong>{selectedCourses[0].shortName || selectedCourses[0].name}</strong> selected</span>
-                            {selectedCourses[0].category === 'PDC' && <span className="hint-tip">💡 Also pick a TDC for Promo Bundle!</span>}
-                            {selectedCourses[0].category === 'TDC' && <span className="hint-tip">💡 Also pick a PDC for Promo Bundle!</span>}
-                        </div>
-                    )}
-
-                    <div className="step-actions">
-                        <button type="button" onClick={prevStep} className="back-btn">
-                            <svg className="mr-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                            </svg>
-                            Back to Form
-                        </button>
-                        {selectedCourses.length > 0 && (
-                            <button type="button" className="next-btn" onClick={handleProceedToStep3}>
-                                {isPromoBundle ? '🎁 Next: Select Schedules' : 'Next: Select Schedule'}
-                                <svg className="ml-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                            </button>
-                        )}
-                    </div>
-                </>);
-            })()}
+            <div className="step-actions">
+                <button type="button" onClick={prevStep} className="back-btn">
+                    <svg className="mr-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                    Back to Form
+                </button>
+            </div>
         </div>
     );
-
 
     const renderStep3 = () => {
         // For TDC: group slots by month for pagination
@@ -1722,7 +1433,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             (formData.scheduleSession.toLowerCase().includes('morning') ||
                 formData.scheduleSession.toLowerCase().includes('afternoon') ||
                 formData.scheduleSession.toLowerCase().includes('4 hours'));
-        const lockedDay1Date = isSelectingDay2 ? formData.scheduleDate : null;
 
         const goToPrevMonth = () => {
             const prev = tdcMonthKeys.filter(k => k < currentMonthKey);
@@ -1738,48 +1448,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 const [y, m] = next[0].split('-').map(Number);
                 setViewDate(new Date(y, m - 1, 1));
             }
-        };
-
-        // =====================================================================
-        // Shared helpers (used by both promo and regular TDC flows)
-        // =====================================================================
-        const slotIcon = (session) => {
-            if (session?.toLowerCase().includes('morning'))
-                return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" /></svg>;
-            if (session?.toLowerCase().includes('afternoon'))
-                return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 18a5 5 0 0 0-10 0" /><line x1="12" y1="2" x2="12" y2="9" /><path d="M4.22 10.22l1.42 1.42" /><path d="M18.36 11.64l1.42-1.42" /><line x1="2" y1="18" x2="22" y2="18" /></svg>;
-            return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>;
-        };
-
-        const renderPromoSlotCard = (slot, isSelected, onClick, chip) => {
-            const availLow = slot.available_slots < 5;
-            const slotDateLabel = slot.end_date && slot.date !== slot.end_date
-                ? `${new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(slot.end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                : new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-            return (
-                <div key={slot.id} className={`slot-card${isSelected ? ' slot-card--selected' : ''}`} onClick={onClick}>
-                    {isSelected && <div className="slot-card__accent" />}
-                    <div className="slot-card__body">
-                        <div className="slot-card__date-row">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                            {slotDateLabel}
-                        </div>
-                        <div className="slot-card__top">
-                            <div className="slot-card__icon">{slotIcon(slot.session)}</div>
-                            <div>
-                                <p className="slot-card__session">{slot.session}</p>
-                                <p className="slot-card__time">{slot.time_range}</p>
-                            </div>
-                        </div>
-                        {chip && <span className="slot-card__chip">{chip}</span>}
-                        <div className="slot-card__footer">
-                            <div className={`slot-card__avail-badge${availLow ? ' slot-card__avail-badge--low' : ''}`}>
-                                {slot.available_slots}<span>/{slot.total_capacity}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            );
         };
 
         // =====================================================================
@@ -1812,28 +1480,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 if (!promoPdcType) return true;
                 const slotTx = (slot.transmission || '').toLowerCase().trim();
                 const slotCT = (slot.course_type || '').toLowerCase().trim();
-                
-                const isManual = slotTx.includes('manual') || slotTx === 'mt' || slotCT.includes('manual') || slotCT === 'mt';
-                const isAuto = slotTx.includes('automatic') || slotTx === 'at' || slotCT.includes('automatic') || slotCT === 'at';
-                const isUniversalTx = slotTx === 'both' || slotTx === 'any' || slotTx === 'all' || (!isManual && !isAuto);
-                
-                const isMotoSlot = slotCT.includes('motorcycle') || slotCT.includes('moto');
-                const isCarSlot = slotCT.includes('car') || slotCT.includes('b1') || slotCT.includes('b2') || slotCT.includes('van') || slotCT.includes('l300') || slotCT.includes('tricycle');
-                
                 if (promoPdcType === 'Motorcycle') {
-                    if (isCarSlot) return false;
-                    if (promoPdcMotorType === 'MT') return isUniversalTx || isManual;
-                    if (promoPdcMotorType === 'AT') return isUniversalTx || isAuto;
+                    if (!slotCT.includes('motorcycle')) return false;
+                    if (promoPdcMotorType === 'MT') return slotTx.includes('manual') || slotTx === 'mt';
+                    if (promoPdcMotorType === 'AT') return slotTx.includes('automatic') || slotTx === 'at';
                     return true;
                 }
-                if (promoPdcType === 'CarAT') {
-                    if (isMotoSlot) return false;
-                    return isUniversalTx || isAuto;
-                }
-                if (promoPdcType === 'CarMT' || promoPdcType === 'Car') {
-                    if (isMotoSlot) return false;
-                    return isUniversalTx || isManual;
-                }
+                if (promoPdcType === 'CarAT') return slotTx.includes('automatic') || slotTx === 'at' || slotTx === 'auto';
+                if (promoPdcType === 'CarMT' || promoPdcType === 'Car') return slotTx.includes('manual') || slotTx === 'mt';
                 return true;
             };
             const promoPdcCalendarSlots = pdcAllSlots.filter(matchPdcSlot);
@@ -1858,10 +1512,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         const tdcEndDate = tdcSlot.end_date || tdcSlot.date;
                         const d = new Date(tdcEndDate + 'T00:00:00');
                         d.setDate(d.getDate() + 2);
-                        return formatLocalDate(d);
+                        return d.toISOString().split('T')[0];
                     }
                 }
-                return getMinSchedDate(2);
+                const d = new Date(today);
+                d.setDate(d.getDate() + 2);
+                return d.toISOString().split('T')[0];
             })();
             const pdcIsHalfDay = promoPdcDay1Session && (
                 promoPdcDay1Session.toLowerCase().includes('morning') ||
@@ -1908,6 +1564,44 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 showNotification('PDC Day 2 selected! Both days complete.', 'success');
             };
 
+            const slotIcon = (session) => {
+                if (session?.toLowerCase().includes('morning'))
+                    return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" /></svg>;
+                if (session?.toLowerCase().includes('afternoon'))
+                    return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 18a5 5 0 0 0-10 0" /><line x1="12" y1="2" x2="12" y2="9" /><path d="M4.22 10.22l1.42 1.42" /><path d="M18.36 11.64l1.42-1.42" /><line x1="2" y1="18" x2="22" y2="18" /></svg>;
+                return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>;
+            };
+
+            const renderPromoSlotCard = (slot, isSelected, onClick, chip) => {
+                const availLow = slot.available_slots < 5;
+                const slotDateLabel = slot.end_date && slot.date !== slot.end_date
+                    ? `${new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(slot.end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                    : new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+                return (
+                    <div key={slot.id} className={`slot-card${isSelected ? ' slot-card--selected' : ''}`} onClick={onClick}>
+                        {isSelected && <div className="slot-card__accent" />}
+                        <div className="slot-card__body">
+                            <div className="slot-card__date-row">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                                {slotDateLabel}
+                            </div>
+                            <div className="slot-card__top">
+                                <div className="slot-card__icon">{slotIcon(slot.session)}</div>
+                                <div>
+                                    <p className="slot-card__session">{slot.session}</p>
+                                    <p className="slot-card__time">{slot.time_range}</p>
+                                </div>
+                            </div>
+                            {chip && <span className="slot-card__chip">{chip}</span>}
+                            <div className="slot-card__footer">
+                                <div className={`slot-card__avail-badge${availLow ? ' slot-card__avail-badge--low' : ''}`}>
+                                    {slot.available_slots}<span>/{slot.total_capacity}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
 
             const renderPromoCalendar = (calMonth, setCalMonth, onDateClick, selectedDate, disabledDateStr, slotsData = []) => {
                 const cy = calMonth.getFullYear(), cm = calMonth.getMonth();
@@ -1925,20 +1619,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             <button className="month-nav-btn-icon" onClick={() => setCalMonth(new Date(cy, cm + 1, 1))}>
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
                             </button>
-                        </div>
-                        <div className="cal-legend-row">
-                            <div className="cal-legend-item morning-legend">
-                                <span className="cal-legend-dot morning-dot"></span>
-                                Morning
-                            </div>
-                            <div className="cal-legend-item afternoon-legend">
-                                <span className="cal-legend-dot afternoon-dot"></span>
-                                Afternoon
-                            </div>
-                            <div className="cal-legend-item whole-legend">
-                                <span className="cal-legend-dot whole-dot"></span>
-                                Whole Day
-                            </div>
                         </div>
                         <div className="calendar-grid-7">
                             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d} className="cal-day-header">{d}</div>)}
@@ -1981,79 +1661,66 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                                     const wholeDaySlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('whole'));
 
                                                     const renderSubBox = (label, slots, type) => {
-                                                        // Hide completely if no slots exist for this session
-                                                        if (!slots || slots.length === 0) return null;
-
                                                         const hasSlots = slots.length > 0;
                                                         const anySelected = hasSlots && slots.some(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id || formData.promoPdcSlotId2 === s.id);
                                                         const isFull = hasSlots && slots.every(s => s.available_slots === 0);
                                                         const hasMultiple = slots.length > 1;
+
+                                                        const statusClass = !hasSlots ? ' empty' : isFull ? ' full' : '';
                                                         const selectedSlotId = hasSlots ? slots.find(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id || formData.promoPdcSlotId2 === s.id)?.id || "" : "";
-
-                                                        const sessionLabel = (() => {
-                                                            const sn = label.toLowerCase();
-                                                            if (sn.includes('morning')) return 'Morning Class';
-                                                            if (sn.includes('afternoon')) return 'Afternoon Class';
-                                                            if (sn.includes('whole')) return 'Whole Day';
-                                                            return label;
-                                                        })();
-
-                                                        const timeStr = slots[0].time_range.toLowerCase().replace(/ - /g, ' / ').replace(/ am/g, 'am').replace(/ pm/g, 'pm');
-
+                                                        
                                                         return (
-                                                            <div
-                                                                key={type}
-                                                                className={`session-sub-box ${type}${anySelected ? ' selected' : ''}${isFull ? ' full' : ''}`}
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    onDateClick(new Date(cy, cm, d));
-                                                                    if (isFull) return;
-                                                                    if (!hasMultiple) {
+                                                                <div 
+                                                                    key={type} 
+                                                                    className={`session-sub-box ${type}${anySelected ? ' selected' : ''}${statusClass}`}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        onDateClick(new Date(cy, cm, d));
+                                                                        if (!hasSlots || isFull) return;
                                                                         if (promoStep === 2 && !formData.scheduleSlotId2) {
                                                                             handlePromoPdcDay1Select(slots[0]);
                                                                         } else if (promoPdcSelectingDay2) {
                                                                             handlePromoPdcDay2Select(slots[0]);
                                                                         }
-                                                                    }
-                                                                }}
-                                                            >
-                                                                <div className="session-sub-content">
-                                                                    <div className="flex items-center justify-between gap-1 leading-none mb-1">
-                                                                        <span className="session-sub-label-text text-[9px] font-black truncate">{sessionLabel}</span>
-                                                                        <span className="session-sub-count-tag text-[8px] font-bold px-1 rounded bg-white/20">
-                                                                            {isFull ? 'FULL' : `${slots[0].available_slots} Slots`}
-                                                                        </span>
+                                                                    }}
+                                                                >
+                                                                    <div className="session-sub-label">
+                                                                        <span>{label}</span>
                                                                     </div>
-                                                                    {hasMultiple ? (
-                                                                        <select
-                                                                            className="session-mini-select"
-                                                                            value={selectedSlotId}
-                                                                            onClick={(e) => e.stopPropagation()}
-                                                                            onChange={(e) => {
-                                                                                const id = parseInt(e.target.value);
-                                                                                const s = slots.find(x => x.id === id);
-                                                                                if (s) {
-                                                                                    onDateClick(new Date(cy, cm, d));
-                                                                                    if (promoStep === 2 && !formData.scheduleSlotId2) {
-                                                                                        handlePromoPdcDay1Select(s);
-                                                                                    } else if (promoPdcSelectingDay2) {
-                                                                                        handlePromoPdcDay2Select(s);
+                                                                    {!hasSlots && <span className="no-slot-tag">NO SLOT</span>}
+                                                                    {hasSlots && isFull && <span className="full-tag">FULL</span>}
+                                                                    {hasSlots && (
+                                                                        hasMultiple ? (
+                                                                            <select 
+                                                                                className="session-mini-select"
+                                                                                value={selectedSlotId}
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                                onChange={(e) => {
+                                                                                    const id = parseInt(e.target.value);
+                                                                                    const s = slots.find(x => x.id === id);
+                                                                                    if (anySelected) return;
+                                                                                    if (s) {
+                                                                                        onDateClick(new Date(cy, cm, d));
+                                                                                        if (promoStep === 2 && !formData.scheduleSlotId2) {
+                                                                                            handlePromoPdcDay1Select(s);
+                                                                                        } else if (promoPdcSelectingDay2) {
+                                                                                            handlePromoPdcDay2Select(s);
+                                                                                        }
                                                                                     }
-                                                                                }
-                                                                            }}
-                                                                        >
-                                                                            <option value="" disabled>Pick Time</option>
-                                                                            {slots.map(s => (
-                                                                                <option key={s.id} value={s.id} disabled={s.available_slots === 0}>
-                                                                                    {s.time_range} ({s.available_slots === 0 ? 'FULL' : `${s.available_slots}S`})
-                                                                                </option>
-                                                                            ))}
-                                                                        </select>
-                                                                    ) : (
-                                                                        <div className="session-sub-time-mini text-[7px] font-medium opacity-80">{timeStr}</div>
+                                                                                }}
+                                                                            >
+                                                                                <option value="" disabled>Pick Time</option>
+                                                                                {slots.map(s => (
+                                                                                    <option key={s.id} value={s.id} disabled={s.available_slots === 0}>
+                                                                                        {s.time_range} ({s.available_slots === 0 ? 'FULL' : `${s.available_slots}S`})
+                                                                                    </option>
+                                                                                ))}
+                                                                            </select>
+                                                                        ) : (
+                                                                            <div className="session-sub-time">{slots[0].time_range}</div>
+                                                                        )
                                                                     )}
                                                                 </div>
-                                                            </div>
                                                         );
                                                     };
 
@@ -2312,7 +1979,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     // =====================================================================
 
                     return (
-                    <div className="step-content animate-fadeIn walkin-schedule-theme">
+                    <div className="step-content animate-fadeIn">
                         <div className="section-title">
                             <span className="step-badge">3</span>
                             <h3>Select Schedule</h3>
@@ -2490,24 +2157,25 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
                                     </button>
                                 </div>
-                                <div className="cal-legend-row">
-                                    <div className="cal-legend-item morning-legend">
-                                        <span className="cal-legend-dot morning-dot"></span>
-                                        Morning
-                                    </div>
-                                    <div className="cal-legend-item afternoon-legend">
-                                        <span className="cal-legend-dot afternoon-dot"></span>
-                                        Afternoon
-                                    </div>
-                                    <div className="cal-legend-item whole-legend">
-                                        <span className="cal-legend-dot whole-dot"></span>
-                                        Whole Day
-                                    </div>
-                                </div>
                                 <div className="calendar-grid-7">
                                     {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
                                         <div key={day} className="cal-day-header">{day}</div>
                                     ))}
+                                    {/* Legend integration */}
+                                    <div className="cal-legend-minimal" style={{ gridColumn: 'span 7', display: 'flex', gap: '15px', justifyContent: 'center', padding: '10px 0', borderBottom: '1px solid var(--border-color)', marginBottom: '5px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.7rem', fontWeight: '800', color: '#9a3412' }}>
+                                            <div style={{ width: '8px', height: '8px', background: 'rgba(249, 115, 22, 0.1)', border: '1px solid #fed7aa', borderRadius: '2px' }}></div>
+                                            Morning
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.7rem', fontWeight: '800', color: '#713f12' }}>
+                                            <div style={{ width: '8px', height: '8px', background: 'rgba(254, 252, 232, 1)', border: '1px solid #fde68a', borderRadius: '2px' }}></div>
+                                            Afternoon
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.7rem', fontWeight: '800', color: '#1e3a5f' }}>
+                                            <div style={{ width: '8px', height: '8px', background: 'rgba(239, 246, 255, 1)', border: '1px solid #bfdbfe', borderRadius: '2px' }}></div>
+                                            Whole Day
+                                        </div>
+                                    </div>
                                     {(() => {
                                         const year = viewDate.getFullYear();
                                         const month = viewDate.getMonth();
@@ -2532,10 +2200,10 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                             if (isToday) cls += ' cal-day--today';
                                             days.push(
                                                 <div key={d} className={cls} onClick={() => !isDisabled && setSelectedScheduleDate(dateStr)}>
-                                                    <div className="cal-day-header-mini flex items-center justify-between px-2 pt-2 pb-1">
-                                                         <span className={`cal-day-num text-[13px] font-bold ${isToday ? 'text-[#2157da]' : ''}`}>{d}</span>
-                                                         {isToday && <div className="w-1.5 h-1.5 rounded-full bg-[#2157da] opacity-60 flex-shrink-0" />}
-                                                     </div>
+                                                    <div className="cal-day-header-mini">
+                                                        <span className="cal-day-num">{d}</span>
+                                                        {isToday && <span className="cal-day--today-dot" />}
+                                                    </div>
                                                     <div className="day-slots-container">
                                                         {(() => {
                                                             const morningSlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('morning'));
@@ -2543,74 +2211,61 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                                             const wholeDaySlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('whole'));
 
                                                             const renderSubBox = (label, slots, type) => {
-                                                                     // Hide completely if no slots exist for this session
-                                                                     if (!slots || slots.length === 0) return null;
+                                                                // Always show the box, but handle empty slots as "No Slots"
+                                                                const hasSlots = slots.length > 0;
+                                                                const anySelected = hasSlots && slots.some(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id);
+                                                                const selectedSlotId = hasSlots ? slots.find(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id)?.id || "" : "";
+                                                                const allFull = hasSlots && slots.every(s => s.available_slots === 0);
+                                                                const hasMultiple = slots.length > 1;
 
-                                                                     const hasSlots = slots.length > 0;
-                                                                     const isSelected = hasSlots && slots.some(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id);
-                                                                     const currentSlotId = hasSlots ? slots.find(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id)?.id || "" : "";
-                                                                     const allFull = hasSlots && slots.every(s => s.available_slots === 0);
-                                                                     const hasMultiple = slots.length > 1;
+                                                                const statusClass = !hasSlots ? ' empty' : allFull ? ' full' : '';
+                                                                
+                                                                return (
+                                                                    <div 
+                                                                        key={type} 
+                                                                        className={`session-sub-box ${type}${anySelected ? ' selected' : ''}${statusClass}`}
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            setSelectedScheduleDate(dateStr);
+                                                                            if (!hasSlots || allFull) return;
+                                                                            if (!hasMultiple) handleScheduleSelect(slots[0]);
+                                                                        }}
+                                                                    >
+                                                                        <div className="session-sub-label">
+                                                                            <span>{label}</span>
+                                                                        </div>
+                                                                        {!hasSlots && <span className="no-slot-tag">NO SLOT</span>}
+                                                                        {hasSlots && allFull && <span className="full-tag">FULL</span>}
+                                                                        {hasSlots && (
+                                                                             hasMultiple ? (
+                                                                                 <select 
+                                                                                     className="session-mini-select"
+                                                                                     value={selectedSlotId}
+                                                                                     onClick={(e) => e.stopPropagation()}
+                                                                                     onChange={(e) => {
+                                                                                         const id = parseInt(e.target.value);
+                                                                                         const s = slots.find(x => x.id === id);
+                                                                                         if (s) {
+                                                                                             setSelectedScheduleDate(dateStr);
+                                                                                             handleScheduleSelect(s);
+                                                                                         }
+                                                                                     }}
+                                                                                 >
+                                                                                     <option value="" disabled>Pick Time</option>
+                                                                                     {slots.map(s => (
+                                                                                         <option key={s.id} value={s.id} disabled={s.available_slots === 0}>
+                                                                                             {s.time_range} ({s.available_slots === 0 ? 'FULL' : `${s.available_slots}S`})
+                                                                                         </option>
+                                                                                     ))}
+                                                                                 </select>
+                                                                             ) : (
+                                                                                 <div className="session-sub-time">{slots[0].time_range}</div>
+                                                                             )
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            };
 
-                                                                     const sessionLabel = (() => {
-                                                                         const sn = label.toLowerCase();
-                                                                         if (sn.includes('morning')) return 'Morning Class';
-                                                                         if (sn.includes('afternoon')) return 'Afternoon Class';
-                                                                         if (sn.includes('whole')) return 'Whole Day';
-                                                                         return label;
-                                                                     })();
-
-                                                                     const timeStr = slots[0].time_range.toLowerCase().replace(/ - /g, ' / ').replace(/ am/g, 'am').replace(/ pm/g, 'pm');
-                                                                     
-                                                                     return (
-                                                                         <div 
-                                                                             key={type} 
-                                                                             className={`session-sub-box ${type}${isSelected ? ' selected' : ''}${allFull ? ' full' : ''}`}
-                                                                             onClick={(e) => {
-                                                                                 e.stopPropagation();
-                                                                                 setSelectedScheduleDate(dateStr);
-                                                                                 if (allFull) return;
-                                                                                 if (!hasMultiple) handleScheduleSelect(slots[0]);
-                                                                             }}
-                                                                         >
-                                                                             <div className="session-sub-content">
-                                                                                 <div className="flex items-center justify-between gap-1 leading-none mb-1">
-                                                                                     <span className="session-sub-label-text text-[9px] font-black truncate">{sessionLabel}</span>
-                                                                                     <span className="session-sub-count-tag text-[8px] font-bold px-1 rounded bg-white/20">
-                                                                                         {allFull ? 'FULL' : `${slots[0].available_slots} Slots`}
-                                                                                     </span>
-                                                                                 </div>
-                                                                                 
-                                                                                 {hasSlots && (
-                                                                                     hasMultiple ? (
-                                                                                         <select 
-                                                                                             className="session-mini-select"
-                                                                                             value={currentSlotId}
-                                                                                             onClick={(e) => e.stopPropagation()}
-                                                                                             onChange={(e) => {
-                                                                                                 const id = parseInt(e.target.value);
-                                                                                                 const s = slots.find(x => x.id === id);
-                                                                                                 if (s) {
-                                                                                                     setSelectedScheduleDate(dateStr);
-                                                                                                     handleScheduleSelect(s);
-                                                                                                 }
-                                                                                             }}
-                                                                                         >
-                                                                                             <option value="" disabled>Pick Time</option>
-                                                                                             {slots.map(s => (
-                                                                                                 <option key={s.id} value={s.id} disabled={s.available_slots === 0}>
-                                                                                                     {s.time_range} ({s.available_slots} Slots)
-                                                                                                 </option>
-                                                                                             ))}
-                                                                                         </select>
-                                                                                     ) : (
-                                                                                         <div className="session-sub-time-mini text-[7px] font-medium opacity-80">{timeStr}</div>
-                                                                                     )
-                                                                                 )}
-                                                                             </div>
-                                                                         </div>
-                                                                     );
-                                                                 };
                                                             return (
                                                                 <>
                                                                     {renderSubBox('Morning', morningSlots, 'morning')}
@@ -2629,7 +2284,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             </div>
                         )
                     }
-
 
                     {
                         formData.courseType && (isTDC || (!isTDC && selectedScheduleDate)) && (
@@ -2704,28 +2358,23 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                         </div>
                                     ) : null;
                                 })()}
+                                <div className="step-actions">
+                                    <button type="button" className="back-btn" onClick={prevStep}>
+                                        Back
+                                    </button>
+                                    {!formData.courseType ? (
+                                        <div style={{ fontSize: '0.875rem', color: '#dc2626', fontStyle: 'italic' }}>
+                                            Please select a course type above to proceed.
+                                        </div>
+                                    ) : !isTDC && !selectedScheduleDate && !formData.scheduleSlotId ? (
+                                        <div style={{ fontSize: '0.875rem', color: 'var(--secondary-text)', fontStyle: 'italic' }}>
+                                            Please select a date from the calendar to view slots.
+                                        </div>
+                                    ) : null}
+                                </div>
                             </div>
                         )
                     }
-
-                    {/* Always-visible Back button + Next when schedule is fully picked */}
-                    <div className="step-actions step-actions--always mt-8">
-                        <button type="button" className="back-btn" onClick={prevStep}>
-                            <svg className="mr-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                            </svg>
-                            Back
-                        </button>
-                        {/* Show Next button when schedule is fully selected */}
-                        {formData.scheduleSlotId && (!isSelectingDay2 || formData.scheduleSlotId2) && (
-                            <button type="button" className="next-btn" onClick={nextStep}>
-                                Next: Enrollment
-                                <svg className="ml-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                            </button>
-                        )}
-                    </div>
                 </div>
             );
         };
@@ -2734,24 +2383,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
             const selectedTypeOpt = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType);
             const selectedPrice = selectedTypeOpt?.price || dynamicCourse?.price || 0;
-            const originalPrice = selectedTypeOpt?.original_price || dynamicCourse?.original_price || 0;
             const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
-            
-            let courseTypeDisplay = '';
-            if (isPromo) {
-                const tdcDisplay = promoTdcType === 'F2F' ? 'TDC F2F' : `TDC ${promoTdcType || 'F2F'}`;
-                let pdcDisplay = `PDC ${promoPdcType || 'Motorcycle'}`;
-                if (promoPdcType === 'Motorcycle' && promoPdcMotorType) {
-                    pdcDisplay = `PDC Motorcycle (${promoPdcMotorType === 'MT' ? 'Manual' : 'Automatic'})`;
-                } else if (promoPdcType === 'CarAT') {
-                    pdcDisplay = 'PDC Car (Automatic)';
-                } else if (promoPdcType === 'CarMT' || promoPdcType === 'Car') {
-                    pdcDisplay = 'PDC Car (Manual)';
-                }
-                courseTypeDisplay = `${tdcDisplay} + ${pdcDisplay}`;
-            } else if (selectedTypeOpt) {
-                courseTypeDisplay = selectedTypeOpt.label;
-            }
             
             // Subtotal includes course + addons
             const subtotal = selectedPrice + addonsTotal;
@@ -2773,119 +2405,38 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
                     <div className="form-card-inner">
                         {/* ── Booking Summary Card ── */}
-                        {/* ── Booking Summary Card(s) ── */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {formData.course && !isPromo && (
-                                <div className="payment-summary-card">
-                                    <div className="payment-summary-card__left">
-                                        <div className="payment-summary-card__icon">
-                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
-                                        </div>
-                                        <div>
-                                            <p className="payment-summary-card__course-name">{formData.course.name}</p>
-                                            <div className="payment-summary-card__meta">
-                                                <span className="payment-summary-card__pill">{formData.course.category}</span>
-                                                <span className="payment-summary-card__dot">·</span>
-                                                <span>{formData.course.duration}</span>
-                                                {courseTypeDisplay && (
-                                                    <>
-                                                        <span className="payment-summary-card__dot">·</span>
-                                                        <span style={{ fontWeight: '700', color: 'var(--primary-color)' }}>{courseTypeDisplay}</span>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
+                        {formData.course && (
+                            <div className="payment-summary-card">
+                                <div className="payment-summary-card__left">
+                                    <div className="payment-summary-card__icon">
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
                                     </div>
-                                    <div className="payment-summary-card__right">
-                                        {selectedTypeOpt && (
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                                                <span className="payment-summary-card__type-label" style={{ margin: 0 }}>TYPE</span>
-                                                <span className="payment-summary-card__type-value">{selectedTypeOpt.label}</span>
-                                            </div>
-                                        )}
-                                        <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                                            {originalPrice > selectedPrice && (
-                                                <span className="payment-summary-card__price" style={{ fontSize: '0.9rem', color: '#94a3b8', textDecoration: 'line-through', fontWeight: 'bold' }}>
-                                                    ₱{originalPrice.toLocaleString()}
-                                                </span>
-                                            )}
-                                            <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>
-                                                ₱{selectedPrice.toLocaleString()}
-                                            </span>
+                                    <div>
+                                        <p className="payment-summary-card__course-name">{formData.course.name}</p>
+                                        <div className="payment-summary-card__meta">
+                                            <span className="payment-summary-card__pill">{formData.course.category}</span>
+                                            <span className="payment-summary-card__dot">·</span>
+                                            <span>{formData.course.duration}</span>
                                         </div>
                                     </div>
                                 </div>
-                            )}
-
-                            {formData.course && isPromo && formData.course._tdcCourse && (
-                                <div className="payment-summary-card">
-                                    <div className="payment-summary-card__left">
-                                        <div className="payment-summary-card__icon">
-                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
-                                        </div>
-                                        <div>
-                                            <p className="payment-summary-card__course-name">{formData.course._tdcCourse.name}</p>
-                                            <div className="payment-summary-card__meta">
-                                                <span className="payment-summary-card__pill">TDC</span>
-                                                <span className="payment-summary-card__dot">·</span>
-                                                <span>{formData.course._tdcCourse.duration}</span>
-                                                <span className="payment-summary-card__dot">·</span>
-                                                <span style={{ fontWeight: '700', color: 'var(--primary-color)' }}>{promoTdcType === 'F2F' ? 'FACE-TO-FACE' : 'ONLINE'}</span>
-                                            </div>
-                                        </div>
-                                    </div>
+                                {(selectedTypeOpt || isPromo) && (
                                     <div className="payment-summary-card__right">
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                                            <span className="payment-summary-card__type-label" style={{ margin: 0 }}>PROMO</span>
-                                            <span className="payment-summary-card__type-value">SUB-COURSE</span>
+                                            {selectedTypeOpt && <span className="payment-summary-card__type-label" style={{ margin: 0 }}>TYPE</span>}
+                                            {selectedTypeOpt && <span className="payment-summary-card__type-value">{selectedTypeOpt.label}</span>}
                                         </div>
-                                        <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                                            <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>
-                                                ₱{(formData.course._tdcCourse.price || 0).toLocaleString()}
-                                            </span>
+                                        <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                            <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>₱{selectedPrice.toLocaleString()}</span>
+                                            <span className="payment-summary-card__fee-info" style={{ color: 'var(--primary-color)', opacity: 1, fontWeight: '800', fontSize: '0.75rem' }}>+ ₱{CONVENIENCE_FEE} Convenience Fee</span>
                                         </div>
                                     </div>
-                                </div>
-                            )}
+                                )}
+                            </div>
+                        )}
 
-                            {formData.course && isPromo && formData.course._pdcCourse && (
-                                <div className="payment-summary-card">
-                                    <div className="payment-summary-card__left">
-                                        <div className="payment-summary-card__icon">
-                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
-                                        </div>
-                                        <div>
-                                            <p className="payment-summary-card__course-name">{formData.course._pdcCourse.name}</p>
-                                            <div className="payment-summary-card__meta">
-                                                <span className="payment-summary-card__pill">PDC</span>
-                                                <span className="payment-summary-card__dot">·</span>
-                                                <span>{formData.course._pdcCourse.duration}</span>
-                                                <span className="payment-summary-card__dot">·</span>
-                                                <span style={{ fontWeight: '700', color: 'var(--primary-color)', textTransform: 'uppercase' }}>
-                                                    {promoPdcType === 'Motorcycle' && promoPdcMotorType 
-                                                        ? `Motorcycle (${promoPdcMotorType === 'MT' ? 'Manual' : 'Automatic'})` 
-                                                        : promoPdcType === 'CarAT' ? 'Car (Automatic)' : promoPdcType === 'CarMT' || promoPdcType === 'Car' ? 'Car (Manual)' : promoPdcType}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="payment-summary-card__right">
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                                            <span className="payment-summary-card__type-label" style={{ margin: 0 }}>PROMO</span>
-                                            <span className="payment-summary-card__type-value">SUB-COURSE</span>
-                                        </div>
-                                        <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                                            <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>
-                                                ₱{(formData.course._pdcCourse.price || 0).toLocaleString()}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* ── Add-ons Selection ── */}
-                        <div className="payment-form-section addons-section">
+                        {/* ── Add-ons Selection (Standardized placement) ── */}
+                        <div className="payment-form-section" style={{ borderTop: '1px solid #e2e8f0', paddingTop: '15px' }}>
                             <p className="payment-form-section__title">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
                                 Optional Add-ons
@@ -3088,14 +2639,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             );
         };
 
-        const renderStep5 = () => {
-            const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not selected';
-
-            // Determine schedule label prefixes
-            const isTdcCourse = formData.course?.category === 'TDC';
-            const sessionPrefix = isTdcCourse ? 'TDC' : (formData.course?.category === 'PDC' ? 'PDC' : '');
-
-            return (
+        const renderStep5 = () => (
             <div className="step-content animate-fadeIn">
                 <div className="section-title">
                     <span className="step-badge">5</span>
@@ -3103,116 +2647,66 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 </div>
 
                 <div className="review-container">
-                    {/* ── Student Info ── */}
                     <div className="review-section">
                         <h4>Student Info</h4>
-                        <p><strong>Name:</strong> {formData.firstName} {formData.middleName && formData.middleName !== 'N/A' ? formData.middleName + ' ' : ''}{formData.lastName}</p>
-                        <p><strong>Contact:</strong> {formData.contactNumbers}{formData.email ? ` | ${formData.email}` : ''}</p>
-                        <p><strong>Address:</strong> {formData.address}{formData.zipCode ? `, ${formData.zipCode}` : ''}</p>
+                        <p><strong>Name:</strong> {formData.firstName} {formData.middleName} {formData.lastName}</p>
+                        <p><strong>Contact:</strong> {formData.contactNumbers} | {formData.email}</p>
+                        <p><strong>Address:</strong> {formData.address}</p>
                     </div>
-
-                    {/* ── Course & Branch ── */}
                     <div className="review-section">
-                        <h4>Course &amp; Branch</h4>
-                        {isPromo && formData.course?._tdcCourse ? (
-                            <>
-                                <p>
-                                    <strong>Course:</strong>
-                                    {formData.course._tdcCourse.name}
-                                </p>
-                                <p>
-                                    <strong>Type:</strong>
-                                    {promoTdcType === 'F2F' ? 'f2f' : 'online'}
-                                </p>
-                                <div style={{ borderTop: '1px solid var(--border-color)', margin: '12px 0' }} />
-                                <p>
-                                    <strong>Course:</strong>
-                                    {formData.course._pdcCourse?.name}
-                                </p>
-                                <p>
-                                    <strong>Type:</strong>
-                                    {promoPdcType === 'Motorcycle' && promoPdcMotorType
-                                        ? (promoPdcMotorType === 'MT' ? 'manual' : 'automatic')
-                                        : promoPdcType === 'CarAT' ? 'automatic'
-                                        : 'manual'}
-                                </p>
-                            </>
-                        ) : (
-                            <>
-                                <p><strong>Course:</strong> {formData.course?.name}</p>
-                                <p><strong>Type:</strong> {formData.courseType}</p>
-                            </>
-                        )}
-                        {formData.addons?.length > 0 && (
-                            <p><strong>Add-ons:</strong> {formData.addons.map(a => a.name).join(', ')}</p>
-                        )}
+                        <h4>Course & Branch</h4>
+                        <p><strong>Course:</strong> {formData.course?.name}</p>
+                        <p><strong>Type:</strong> {formData.courseType}</p>
+                        {formData.addons.length > 0 && <p><strong>Add-ons:</strong> {formData.addons.map(a => a.name).join(', ')}</p>}
                         <p><strong>Branch:</strong> {formatBranchName(formData.branchName)}</p>
                     </div>
-
-                    {/* ── Schedule ── */}
                     <div className="review-section">
                         <h4>Schedule</h4>
                         {isPromo ? (
                             <>
-                                {/* TDC schedule */}
-                                <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 1:</p>
-                                <p><strong>Date:</strong> {fmtDate(formData.scheduleDate)}</p>
+                                <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC:</p>
+                                <p><strong>Date:</strong> {formData.scheduleDate ? new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not selected'}</p>
                                 <p><strong>Session:</strong> {formData.scheduleSession || 'Not selected'}</p>
                                 <p><strong>Time:</strong> {formData.scheduleTime || 'Not selected'}</p>
-
-                                {formData.scheduleDate2 && !formData.promoPdcSlotId2 && (
-                                    <>
-                                        <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
-                                        <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 2:</p>
-                                        <p><strong>Date:</strong> {fmtDate(formData.scheduleDate2)}</p>
-                                        <p><strong>Session:</strong> {formData.scheduleSession2 || 'Not selected'}</p>
-                                        <p><strong>Time:</strong> {formData.scheduleTime2 || 'Not selected'}</p>
-                                    </>
-                                )}
-
-                                <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
+                                <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
                                 <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>PDC{formData.promoPdcSlotId2 ? ' — Day 1' : ''}:</p>
-                                <p><strong>Date:</strong> {fmtDate(formData.scheduleDate2)}</p>
+                                <p><strong>Date:</strong> {formData.scheduleDate2 ? new Date(formData.scheduleDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not selected'}</p>
                                 <p><strong>Session:</strong> {formData.scheduleSession2 || 'Not selected'}</p>
                                 <p><strong>Time:</strong> {formData.scheduleTime2 || 'Not selected'}</p>
-
                                 {formData.promoPdcSlotId2 && (
                                     <>
-                                        <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
-                                        <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>PDC — Day 2:</p>
-                                        <p><strong>Date:</strong> {fmtDate(formData.promoPdcDate2)}</p>
-                                        <p><strong>Session:</strong> {formData.promoPdcSession2 || 'Not selected'}</p>
-                                        <p><strong>Time:</strong> {formData.promoPdcTime2 || 'Not selected'}</p>
+                                        <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', marginTop: '8px', fontSize: '0.85rem' }}>PDC — Day 2:</p>
+                                        <p><strong>Date:</strong> {new Date(formData.promoPdcDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                                        <p><strong>Session:</strong> {formData.promoPdcSession2}</p>
+                                        <p><strong>Time:</strong> {formData.promoPdcTime2}</p>
                                     </>
                                 )}
                             </>
                         ) : formData.scheduleDate2 ? (
                             <>
-                                <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>{sessionPrefix ? `${sessionPrefix} — ` : ''}Day 1:</p>
-                                <p><strong>Date:</strong> {fmtDate(formData.scheduleDate)}</p>
+                                <p style={{ fontWeight: '600', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>Day 1:</p>
+                                <p><strong>Date:</strong> {formData.scheduleDate ? new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not selected'}</p>
                                 <p><strong>Session:</strong> {formData.scheduleSession || 'Not selected'}</p>
                                 <p><strong>Time:</strong> {formData.scheduleTime || 'Not selected'}</p>
-                                <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
-                                <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>{sessionPrefix ? `${sessionPrefix} — ` : ''}Day 2:</p>
-                                <p><strong>Date:</strong> {fmtDate(formData.scheduleDate2)}</p>
+                                <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
+                                <p style={{ fontWeight: '600', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>Day 2:</p>
+                                <p><strong>Date:</strong> {new Date(formData.scheduleDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
                                 <p><strong>Session:</strong> {formData.scheduleSession2 || 'Not selected'}</p>
                                 <p><strong>Time:</strong> {formData.scheduleTime2 || 'Not selected'}</p>
                             </>
                         ) : (
                             <>
-                                <p><strong>Date:</strong> {fmtDate(formData.scheduleDate)}</p>
+                                <p><strong>Date:</strong> {formData.scheduleDate ? new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not selected'}</p>
                                 <p><strong>Session:</strong> {formData.scheduleSession || 'Not selected'}</p>
                                 <p><strong>Time:</strong> {formData.scheduleTime || 'Not selected'}</p>
                             </>
                         )}
                     </div>
-
-                    {/* ── Payment Summary ── */}
                     <div className="review-section">
                         <h4>Payment Summary</h4>
                         <div className="review-payment-grid">
                             <p><strong>Method:</strong> {formData.paymentMethod}</p>
-                            {['GCash', 'Starpay', 'MetroBank'].includes(formData.paymentMethod) && formData.transactionNo && (
+                            {['GCash', 'Starpay'].includes(formData.paymentMethod) && (
                                 <p><strong>Transaction No:</strong> {formData.transactionNo}</p>
                             )}
                             <p><strong>Payment Status:</strong> {formData.paymentStatus}</p>
@@ -3248,14 +2742,13 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 <svg className="mr-2" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
-                                Confirm &amp; Enroll
+                                Confirm & Enroll
                             </>
                         )}
                     </button>
                 </div>
             </div>
-            );
-        };
+        );
 
         return (
             <div className="walk-in-container slide-up">

@@ -302,6 +302,10 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
     const halfDay = !isTDCCourse && isHalfDay(slot.session)
 
     if (!halfDay) {
+      if (selectedSlot && !selectedSlot2 && isHalfDay(selectedSlot.session)) {
+        showNotification(`A Day 1 session (${selectedSlot.session}) is already selected. Please select a matching Day 2 session or click Change to reset.`, 'warning')
+        return
+      }
       // Whole Day / TDC: single selection
       setSelectedSlot(slot)
       setSelectingDay2(false)
@@ -336,6 +340,10 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
     const clickedDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day)
 
     if (!halfDay) {
+      if (selectedSlot && !selectedSlot2 && isHalfDay(selectedSlot.session)) {
+        showNotification(`A Day 1 session (${selectedSlot.session}) is already selected. Please select a matching Day 2 session or click Change to reset.`, 'warning')
+        return
+      }
       setSelectedSlot(slot)
       setSelectedDate(clickedDate)
       setSelectingDay2(false)
@@ -916,7 +924,9 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
               ))}
               {[...Array(daysInMonth)].map((_, index) => {
                 const day = index + 1
-                const isAvailable = isDateAvailable(day)
+                const cellDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day)
+                const isBeforeDay1 = selectingDay2 && selectedDate && cellDate < selectedDate
+                const isAvailable = isDateAvailable(day) && !isBeforeDay1
                 const isToday = new Date().getDate() === day &&
                   new Date().getMonth() === currentMonth.getMonth() &&
                   new Date().getFullYear() === currentMonth.getFullYear()
@@ -1006,19 +1016,28 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                         })();
                         const countLabel = isFullyBooked ? 'FULL' : `${slot.available_slots} Slots`;
 
-                        return (
-                          <div
-                            key={slot.id}
-                            onClick={(e) => { e.stopPropagation(); handleCalendarSlotClick(slot, day); }} className={`w-full text-left rounded-[7px] border px-1.5 py-1 flex flex-col gap-[2px] ${!isFullyBooked ? 'cursor-pointer hover:shadow-md transition-all' : 'cursor-not-allowed'} ${
-                              isSlotSelected
-                                ? 'border-[#2563eb] bg-[#2563eb] text-white shadow-sm'
-                                : isFullyBooked
-                                  ? 'border-red-200 bg-red-50 text-red-500 opacity-70'
-                                  : isTdc
-                                    ? 'border-violet-200 bg-violet-50 text-violet-700'
-                                    : 'border-orange-200 bg-orange-50 text-orange-700'
-                            }`}
-                          >
+                          const isSessionMismatch = selectingDay2 && selectedSlot && slot.session !== selectedSlot.session;
+                          return (
+                            <div
+                              key={slot.id}
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                if (isFullyBooked) return; 
+                                if (isSessionMismatch) {
+                                  showNotification(`For Day 2, please select the same session type: ${selectedSlot.session}`, 'warning');
+                                  return;
+                                }
+                                handleCalendarSlotClick(slot, day); 
+                              }} className={`w-full text-left rounded-[7px] border px-1.5 py-1 flex flex-col gap-[2px] ${!isFullyBooked && !isSessionMismatch ? 'cursor-pointer hover:shadow-md transition-all' : 'cursor-not-allowed'} ${
+                                isSlotSelected
+                                  ? 'border-[#2563eb] bg-[#2563eb] text-white shadow-sm'
+                                  : (isFullyBooked || isSessionMismatch)
+                                    ? 'border-red-200 bg-red-50 text-red-500 opacity-70'
+                                    : isTdc
+                                      ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                      : 'border-orange-200 bg-orange-50 text-orange-700'
+                              }`}
+                            >
                             <div className="flex items-center justify-between gap-1 leading-none">
                               <span className="text-[9px] sm:text-[10px] font-black truncate flex-1 min-w-0">{sessionLabel}</span>
                               <span className={`text-[8px] font-bold flex-shrink-0 px-1 rounded leading-[1.5] ${
@@ -1720,7 +1739,8 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                         {[...Array(promoPdcDay2DaysInMonth)].map((_, i) => {
                           const day = i + 1
                           const cellDate2 = new Date(promoPdcDay2CalMonth.getFullYear(), promoPdcDay2CalMonth.getMonth(), day)
-                          const avail = cellDate2 >= promoPdcMinDate && cellDate2.getDay() !== 0
+                          const isBeforeDay1 = promoPdcDate && cellDate2 < promoPdcDate
+                          const avail = cellDate2 >= promoPdcMinDate && cellDate2.getDay() !== 0 && !isBeforeDay1
                           const isDay1 = promoPdcDate?.getDate() === day && promoPdcDate?.getMonth() === promoPdcDay2CalMonth.getMonth() && promoPdcDate?.getFullYear() === promoPdcDay2CalMonth.getFullYear()
                           const isSel2 = promoPdcDate2?.getDate() === day && promoPdcDate2?.getMonth() === promoPdcDay2CalMonth.getMonth() && promoPdcDate2?.getFullYear() === promoPdcDay2CalMonth.getFullYear()
                           const today = new Date(); today.setHours(0, 0, 0, 0)
@@ -1771,10 +1791,20 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                                   })()
                                   const countLabel = isFullyBooked ? 'FULL' : `${slot.available_slots} Slots`
                                   const timeStr = (slot.time_range || '').toLowerCase().replace(/ - /g, ' / ').replace(/ am/g, 'am').replace(/ pm/g, 'pm')
+                                  const isSessionMismatch = promoPdcSelectingDay2 && promoPdcSlot && slot.session !== promoPdcSlot.session;
                                   return (
-                                    <div key={slot.id} onClick={(e) => { e.stopPropagation(); if (isFullyBooked) return; setPromoPdcDate2(new Date(promoPdcDay2CalMonth.getFullYear(), promoPdcDay2CalMonth.getMonth(), day)); handleSlotClick(slot); }} className={`w-full text-left rounded-[7px] border px-1.5 py-1 flex flex-col gap-[2px] ${!isFullyBooked ? 'cursor-pointer hover:shadow-md transition-all' : 'cursor-not-allowed'} ${
+                                    <div key={slot.id} onClick={(e) => { 
+                                      e.stopPropagation(); 
+                                      if (isFullyBooked) return; 
+                                      if (isSessionMismatch) {
+                                        showNotification(`For Day 2, please select the same session type: ${promoPdcSlot.session}`, 'warning');
+                                        return;
+                                      }
+                                      setPromoPdcDate2(new Date(promoPdcDay2CalMonth.getFullYear(), promoPdcDay2CalMonth.getMonth(), day)); 
+                                      handleSlotClick(slot); 
+                                    }} className={`w-full text-left rounded-[7px] border px-1.5 py-1 flex flex-col gap-[2px] ${!isFullyBooked && !isSessionMismatch ? 'cursor-pointer hover:shadow-md transition-all' : 'cursor-not-allowed'} ${
                                       isSlotSel2 ? 'border-green-500 bg-green-500 text-white shadow-sm'
-                                        : isFullyBooked ? 'border-red-200 bg-red-50 text-red-500 opacity-70'
+                                        : (isFullyBooked || isSessionMismatch) ? 'border-red-200 bg-red-50 text-red-500 opacity-70'
                                           : 'border-orange-200 bg-orange-50 text-orange-700'
                                     }`}>
                                       <div className="flex items-center justify-between gap-1 leading-none">

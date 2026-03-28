@@ -505,8 +505,8 @@ const AnalyticsReports = ({ onNavigate }) => {
                         </div>
                         <div className="header-badge success">Live</div>
                     </div>
-                    <div className="chart-wrapper" style={{ height: '280px' }}>
-                        <ResponsiveContainer width="100%" height="100%">
+                    <div className="chart-wrapper" style={{ height: '280px', width: '100%' }}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                             <PieChart>
                                 <Pie
                                     data={(analyticsData?.courseDistribution || []).map(d => ({ name: d.category, value: parseInt(d.count) || 0 }))}
@@ -608,8 +608,8 @@ const AnalyticsReports = ({ onNavigate }) => {
                             <p>Financial growth trajectory</p>
                         </div>
                     </div>
-                    <div className="chart-wrapper" style={{ height: '280px' }}>
-                        <ResponsiveContainer width="100%" height="100%">
+                    <div className="chart-wrapper" style={{ height: '280px', width: '100%' }}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                             <AreaChart data={analyticsData?.monthlyTrend || []} margin={{ top: 10, right: 30, left: 0, bottom: 20 }}>
                                 <defs>
                                     <linearGradient id="colorTrend" x1="0" y1="0" x2="0" y2="1">
@@ -674,8 +674,8 @@ const AnalyticsReports = ({ onNavigate }) => {
                         </div>
                         <div className="header-badge primary">NEW</div>
                     </div>
-                    <div className="chart-wrapper" style={{ height: '280px' }}>
-                        <ResponsiveContainer width="100%" height="100%">
+                    <div className="chart-wrapper" style={{ height: '280px', width: '100%' }}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                             <BarChart data={analyticsData?.monthlyTrend || []} margin={{ bottom: 20 }}>
                                 <Legend
                                     verticalAlign="top"

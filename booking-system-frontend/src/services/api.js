@@ -549,6 +549,10 @@ export const adminAPI = {
       method: 'POST',
     });
   },
+  // Search students for auto-fill in enrollment
+  searchStudents: async (name) => {
+    return await apiRequest(`/admin/search-students?name=${encodeURIComponent(name)}`);
+  },
 };
 
 // Schedules API

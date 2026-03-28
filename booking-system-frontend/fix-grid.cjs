@@ -1,0 +1,12 @@
+const fs = require("fs");
+const file = "src/admin/WalkInEnrollment.jsx";
+let content = fs.readFileSync(file, "utf8");
+content = content.replace(/className="slots-grid"/g, `className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"`);
+fs.writeFileSync(file, content);
+console.log("Fixed grid");
+const fs = require("fs");
+const file = "src/admin/WalkInEnrollment.jsx";
+let content = fs.readFileSync(file, "utf8");
+content = content.replace(/className="slots-grid"/g, `className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"`);
+fs.writeFileSync(file, content);
+console.log("Fixed grid");

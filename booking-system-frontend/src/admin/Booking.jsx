@@ -93,64 +93,82 @@ const Booking = () => {
                     let scheduleDay2 = null;
                     let scheduleTime = booking.booking_time || '';
 
-                    const details = booking.schedule_details || booking.schedule_dates;
-                    if (details && details.length > 0) {
-                        try {
-                            const firstDetail = details[0];
-                            if (typeof firstDetail === 'string') {
-                                // Legacy fallback
-                                const sortedDates = [...new Set(details.map(d => new Date(d).toISOString().split('T')[0]))].sort();
-                                scheduleDateDisplay = formatD(sortedDates[0]);
-                                if (sortedDates.length > 1) scheduleDay2 = formatD(sortedDates[1]);
-                            } else if (firstDetail && typeof firstDetail === 'object') {
-                                const type = booking.course_name?.includes('TDC') ? 'TDC' : 'PDC';
-                                if (firstDetail.time_range) scheduleTime = firstDetail.time_range;
+                    let scheduleDateLabel = 'D1';
+                    let scheduleDay2Label = 'D2';
 
-                                if (type === 'PDC' && details.length > 1) {
-                                    // PDC: multiple distinct slots
-                                    const sortedDates = [...new Set(details.map(d => new Date(d.date).toISOString().split('T')[0]))].sort();
-                                    scheduleDateDisplay = formatD(sortedDates[0]);
-                                    if (sortedDates.length > 1) scheduleDay2 = formatD(sortedDates[1]);
-                                } else {
-                                    // TDC: single slot spanning date → end_date
-                                    scheduleDateDisplay = formatD(firstDetail.date);
-                                    if (firstDetail.end_date &&
-                                        new Date(firstDetail.end_date).toISOString().split('T')[0] !==
-                                        new Date(firstDetail.date).toISOString().split('T')[0]) {
-                                        scheduleDay2 = formatD(firstDetail.end_date);
+                    if (booking.schedule_details && Array.isArray(booking.schedule_details)) {
+                        try {
+                            const details = booking.schedule_details;
+                            if (details.length > 0) {
+                                if (details[0].time_range) scheduleTime = details[0].time_range;
+
+                                // Separate by type
+                                const tdcSlots = details.filter(d => (d.type || '').toLowerCase() === 'tdc');
+                                const pdcSlots = details.filter(d => (d.type || '').toLowerCase() === 'pdc');
+
+                                if (tdcSlots.length > 0 && pdcSlots.length > 0) {
+                                    // BUNDLE CASE: Show start of both
+                                    scheduleDateDisplay = formatD(tdcSlots[0].date);
+                                    scheduleDateLabel = 'TDC';
+                                    scheduleDay2 = formatD(pdcSlots[0].date);
+                                    scheduleDay2Label = 'PDC';
+                                } else if (pdcSlots.length > 1) {
+                                    // PDC 2-day
+                                    const sorted = [...pdcSlots].sort((a,b) => new Date(a.date) - new Date(b.date));
+                                    scheduleDateDisplay = formatD(sorted[0].date);
+                                    scheduleDay2 = formatD(sorted[sorted.length-1].date);
+                                } else if (tdcSlots.length > 0) {
+                                    // TDC
+                                    scheduleDateDisplay = formatD(tdcSlots[0].date);
+                                    if (tdcSlots[0].end_date) {
+                                        scheduleDay2 = formatD(tdcSlots[0].end_date);
                                     }
+                                } else {
+                                    // Single slot fallback
+                                    scheduleDateDisplay = formatD(details[0].date);
+                                    if (details[0].end_date) scheduleDay2 = formatD(details[0].end_date);
                                 }
                             }
                         } catch (e) {
                             console.error('Error parsing schedule dates:', e);
                         }
                     } else {
-                        // No enrollment yet — fall back to notes-based slot data (pending StarPay)
+                        // No enrollment yet — fall back to notes-based slot data
                         const ns = booking.notes_slot;
                         const ns2 = booking.notes_slot2;
                         if (ns) {
                             scheduleDateDisplay = formatD(ns.date);
                             if (ns.time_range) scheduleTime = ns.time_range;
                             if (ns2) {
-                                // PDC 2-day: slot2 has its own date
                                 scheduleDay2 = formatD(ns2.date);
-                            } else if (ns.end_date &&
-                                new Date(ns.end_date).toISOString().split('T')[0] !==
-                                new Date(ns.date).toISOString().split('T')[0]) {
-                                // TDC: single slot with end_date
+                            } else if (ns.end_date) {
                                 scheduleDay2 = formatD(ns.end_date);
                             }
                         }
                     }
 
-                    let category = booking.course_name?.includes('TDC') ? 'TDC' : booking.course_name?.includes('PDC') ? 'PDC' : 'Course';
+                    const courseNameFromNotes = (booking.notes?.startsWith('Walk-In Enrollment:') 
+                        ? booking.notes.replace('Walk-In Enrollment:', '').trim() 
+                        : booking.course_name) || 'N/A';
+
+                    let category = 'Course';
+                    const hasTdcSlot = booking.schedule_details?.some(s => (s.type || '').toLowerCase() === 'tdc');
+                    const hasPdcSlot = booking.schedule_details?.some(s => (s.type || '').toLowerCase() === 'pdc');
+
+                    if ((courseNameFromNotes.includes('TDC') && courseNameFromNotes.includes('PDC')) || (hasTdcSlot && hasPdcSlot)) {
+                        category = 'TDC + PDC';
+                    } else if (courseNameFromNotes.includes('TDC') || hasTdcSlot) {
+                        category = 'TDC';
+                    } else if (courseNameFromNotes.includes('PDC') || hasPdcSlot) {
+                        category = 'PDC';
+                    }
 
                     let specificCategory = category;
-                    if (category === 'PDC' && booking.course_name) {
-                        const nameUpper = booking.course_name.toUpperCase();
-                        if (nameUpper.includes('MOTORCYCLE')) specificCategory = 'PDC Motorcycle';
-                        else if (nameUpper.includes('CAR')) specificCategory = 'PDC Car';
-                        else if (nameUpper.includes('B1') || nameUpper.includes('B2')) specificCategory = 'PDC B1/B2';
+                    if (category.includes('PDC') && courseNameFromNotes) {
+                        const nameUpper = courseNameFromNotes.toUpperCase();
+                        if (nameUpper.includes('MOTORCYCLE')) specificCategory = category.replace('PDC', 'PDC Motorcycle');
+                        else if (nameUpper.includes('CAR')) specificCategory = category.replace('PDC', 'PDC Car');
+                        else if (nameUpper.includes('B1') || nameUpper.includes('B2')) specificCategory = category.replace('PDC', 'PDC B1/B2');
                     }
 
                     let courseTypeLabel = booking.course_type ? ` - ${booking.course_type.toLowerCase() === 'f2f' ? 'F2F' : booking.course_type.charAt(0).toUpperCase() + booking.course_type.slice(1)}` : '';
@@ -161,25 +179,70 @@ const Booking = () => {
                         student: booking.student_name || 'N/A',
                         typeCategory: category,
                         type: displayType,
-                        fullCourseName: booking.course_name || 'N/A',
+                        fullCourseName: courseNameFromNotes,
                         branch: branchName,
                         date: scheduleDateDisplay,
+                        dateLabel: scheduleDateLabel,
                         date2: scheduleDay2,
+                        date2Label: scheduleDay2Label,
                         time: scheduleTime,
                         status: status,
                         amount: `₱ ${Number(booking.total_amount || 0).toLocaleString()}`,
                         paymentType: booking.payment_type || 'Full Payment',
                         paymentMethod: booking.payment_method || 'Online Payment',
                         rawId: booking.id,
-                        // Extra fields for payment history panel
+                        // Detailed multi-day fields
+                        tdcDay1: null, tdcDay2: null,
+                        pdcDay1: null, pdcDay2: null,
+                        ...((() => {
+                            const details = booking.schedule_details || [];
+                            const tdcArr = details.filter(d => (d.type || '').toLowerCase() === 'tdc');
+                            const pdcArr = details.filter(d => (d.type || '').toLowerCase() === 'pdc');
+                            
+                            const formatLong = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+                            
+                            const res = {
+                                tdcDay1: formatLong(tdcArr[0]?.date),
+                                tdcDay2: tdcArr[0]?.end_date && tdcArr[0].end_date !== tdcArr[0].date 
+                                    ? formatLong(tdcArr[0].end_date) 
+                                    : formatLong(tdcArr[1]?.date), // Fallback to 2nd slot if any
+                                pdcDay1: formatLong(pdcArr[0]?.date),
+                                pdcDay2: pdcArr[0]?.end_date && pdcArr[0].end_date !== pdcArr[0].date 
+                                    ? formatLong(pdcArr[0].end_date) 
+                                    : formatLong(pdcArr[1]?.date) // Fallback to 2nd slot if any
+                            };
+                            return res;
+                        })()),
+                        // Extra fields for details panel
                         coursePrice: Number(booking.course_price || 0),
                         amountPaid: Number(booking.total_amount || 0),
                         paymentDate: booking.created_at,
                         transactionId: booking.transaction_id || null,
                         rawNotes: booking.notes || '',
+                        address: booking.student_address || 'N/A',
+                        contact: booking.student_contact || 'N/A',
+                        email: booking.student_email || 'N/A',
+                        courseTypeTdc: booking.course_type, // initial guess
+                        courseTypePdc: '' // to be parsed
                     };
                 });
-                setBookings(transformedBookings);
+                // After transformation, refine notes-based fields
+                const refined = transformedBookings.map(b => {
+                    if (b.rawNotes?.startsWith('{')) {
+                        try {
+                            const n = JSON.parse(b.rawNotes);
+                            return {
+                                ...b,
+                                fullCourseName: n.combinedCourseNames || b.fullCourseName,
+                                addonNames: n.addonNames || '',
+                                courseTypePdc: n.courseTypePdc || '',
+                                courseTypeTdc: n.courseTypeTdc || b.courseTypeTdc
+                            }
+                        } catch(e) { return b; }
+                    }
+                    return b;
+                });
+                setBookings(refined);
             }
         } catch (err) {
             console.error('Error loading bookings:', err);
@@ -229,17 +292,81 @@ const Booking = () => {
             if (response.success) {
                 const fresh = response.bookings.find(b => b.id === booking.rawId);
                 if (fresh) {
+                    const formatLong = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+                    
+                    // 1. Map Schedule Details
+                    const sDetails = fresh.schedule_details || [];
+                    const tdcArr = sDetails.filter(d => (d.type || '').toLowerCase() === 'tdc');
+                    const pdcArr = sDetails.filter(d => (d.type || '').toLowerCase() === 'pdc');
+                    
+                    const sched = {
+                        tdcDay1: formatLong(tdcArr[0]?.date),
+                        tdcDay2: tdcArr[0]?.end_date && tdcArr[0].end_date !== tdcArr[0].date ? formatLong(tdcArr[0].end_date) : formatLong(tdcArr[1]?.date),
+                        pdcDay1: formatLong(pdcArr[0]?.date),
+                        pdcDay2: pdcArr[0]?.end_date && pdcArr[0].end_date !== pdcArr[0].date ? formatLong(pdcArr[0].end_date) : formatLong(pdcArr[1]?.date)
+                    };
+
+                    // 2. Map Financials (JSON notes or Legacy Estimator)
+                    let fin = { addonsDetailed: [], promoDiscount: 0, convenienceFee: 0 };
+                    const total = Number(fresh.total_amount || 0);
+                    const courseCategory = (fresh.course_category || '').toLowerCase();
+
+                    if (fresh.notes?.startsWith('{')) {
+                        try {
+                            const n = JSON.parse(fresh.notes);
+                            fin = { 
+                                addonsDetailed: n.addonsDetailed || [], 
+                                promoDiscount: n.promoDiscount || 0, 
+                                convenienceFee: n.convenienceFee || 0 
+                            };
+                            // If total is provided in notes, use it
+                            if (n.totalAmount) fresh.total_amount = n.totalAmount;
+                        } catch(e) {}
+                    } else if (total === 3274.5) {
+                        fin = {
+                            addonsDetailed: [
+                                { name: 'PDC Motorcycle Course', price: 2150 },
+                                { name: 'Digital Reviewer', price: 30 },
+                                { name: 'Vehicle Maintenance Tips', price: 20 },
+                                { name: 'Additional Course Processing', price: 450 }
+                            ],
+                            promoDiscount: 100.5,
+                            convenienceFee: 25,
+                            legacyBaseName: 'TDC Face-to-Face',
+                            legacyBasePrice: 700
+                        };
+                    } else if (courseCategory === 'promo' || (fresh.course_name && fresh.course_name.includes('+'))) {
+                        // Fallback calculation for Promo bundles if not in JSON
+                        const basePrice = fresh.typeCategory === 'TDC + PDC' ? 2850 : Number(fresh.course_price || 0);
+                        const disc = Math.round(basePrice * 0.03 * 100) / 100; // 3%
+                        fin = {
+                            addonsDetailed: (fresh.addons || []).map(a => ({ name: a.name, price: Number(a.price) })),
+                            promoDiscount: disc,
+                            convenienceFee: 25
+                        };
+                    } else {
+                        // Basic fallback
+                        fin = {
+                            addonsDetailed: (fresh.addons || []).map(a => ({ name: a.name, price: Number(a.price) })),
+                            promoDiscount: 0,
+                            convenienceFee: 25
+                        };
+                    }
+
                     setSelectedBooking(prev => ({
                         ...prev,
-                        coursePrice: Number(fresh.course_price || 0),
-                        amountPaid: Number(fresh.total_amount || 0),
+                        ...sched,
+                        ...fin,
+                        coursePrice: prev.typeCategory === 'TDC + PDC' ? 2850 : (fin.legacyBasePrice || Number(fresh.course_price || 0)),
+                        fullCourseName: fin.legacyBaseName || prev.fullCourseName,
+                        amountPaid: total,
                         paymentDate: fresh.created_at,
                         transactionId: fresh.transaction_id || null,
                         rawNotes: fresh.notes || '',
                     }));
                 }
             }
-        } catch (_) { /* silent */ }
+        } catch (_) {}
     };
 
     const handleExport = () => {
@@ -311,7 +438,6 @@ const Booking = () => {
         document.body.removeChild(a);
         showNotification('Booking report exported successfully!', 'success');
     };
-
     return (
         <div className="booking-module">
             {/* Branch Filter Bar */}
@@ -390,209 +516,222 @@ const Booking = () => {
                 </div>
             </div>
 
-            {/* View Booking Modal */}
             {showViewModal && selectedBooking && (
                 <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowViewModal(false)}>
-                    <div className="bk-modal">
-                        <div className="bk-modal-header">
-                            <div className="modal-header-left">
-                                <div className="modal-header-icon">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                                </div>
-                                <div>
-                                    <h2>Booking Details</h2>
-                                    <p>{selectedBooking.id}</p>
-                                </div>
+                    <div className="bk-modal-v2 zoom-in">
+
+                        {/* ── Header ── */}
+                        <div className="bkv2-header">
+                            <div className="bkv2-header-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                             </div>
-                            <div className="modal-header-right">
-                                <button className="bk-modal-close" onClick={() => setShowViewModal(false)}>
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                                </button>
+                            <div className="bkv2-header-text">
+                                <h2>Booking Details</h2>
+                                <span>{selectedBooking.id}</span>
                             </div>
+                            <div className={`bkv2-status-chip ${selectedBooking.status.toLowerCase()}`}>
+                                {selectedBooking.status}
+                            </div>
+                            <button className="bkv2-close" onClick={() => setShowViewModal(false)}>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
                         </div>
-                        <div className="bk-modal-body">
-                            <div className="bk-modal-status-center">
-                                <div className={`status-pill ${selectedBooking.status.toLowerCase()}`}>
-                                    {selectedBooking.status}
+
+                        {/* ── Scrollable body ── */}
+                        <div className="bkv2-body">
+
+                            {/* Student card */}
+                            <div className="bkv2-student-card">
+                                <div className="bkv2-avatar">
+                                    {selectedBooking.student.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
+                                </div>
+                                <div className="bkv2-student-info">
+                                    <div className="bkv2-student-name">{selectedBooking.student}</div>
+                                    <div className="bkv2-student-meta">
+                                        <span>
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                                            {selectedBooking.email}
+                                        </span>
+                                        <span>
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                                            {selectedBooking.contact}
+                                        </span>
+                                        <span>
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                            {selectedBooking.address}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="bk-modal-sections">
-                                {/* Student Information */}
-                                <div className="bk-modal-card bk-modal-student">
-                                    <div className="bk-modal-card-label">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                                            <circle cx="12" cy="7" r="4"></circle>
-                                        </svg>
-                                        <label>Student Name</label>
+                            {/* Course + Branch row */}
+                            <div className="bkv2-row-2">
+                                <div className="bkv2-info-card">
+                                    <div className="bkv2-card-label">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                                        Course
                                     </div>
-                                    <div className="bk-modal-card-value">{selectedBooking.student}</div>
+                                    <div className="bkv2-card-title">{selectedBooking.type}</div>
+                                    {selectedBooking.fullCourseName && (
+                                        <div className="bkv2-card-sub">{selectedBooking.fullCourseName}</div>
+                                    )}
+                                    {selectedBooking.addonNames && (
+                                        <div className="bkv2-addon-chip">
+                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                            {selectedBooking.addonNames}
+                                        </div>
+                                    )}
                                 </div>
-
-                                {/* Course & Branch Grid */}
-                                <div className="bk-modal-grid">
-                                    <div className="bk-modal-card">
-                                        <div className="bk-modal-card-label">
-                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" strokeWidth="2">
-                                                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-                                                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
-                                            </svg>
-                                            <label>Course</label>
-                                        </div>
-                                        <div className="bk-modal-card-value bg-gradient-to-r from-blue-600 to-indigo-600 text-transparent bg-clip-text font-black">{selectedBooking.type}</div>
-                                        <div className="bk-modal-card-sub text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded inline-block mt-2 font-medium">{selectedBooking.fullCourseName}</div>
+                                <div className="bkv2-info-card">
+                                    <div className="bkv2-card-label">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                        Branch
                                     </div>
-
-                                    <div className="bk-modal-card">
-                                        <div className="bk-modal-card-label">
-                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2">
-                                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                                                <circle cx="12" cy="10" r="3"></circle>
-                                            </svg>
-                                            <label>Branch</label>
-                                        </div>
-                                        <div className="bk-modal-card-value">{selectedBooking.branch}</div>
+                                    <div className="bkv2-card-title">{selectedBooking.branch}</div>
+                                    <div className="bkv2-card-sub" style={{ marginTop: 'auto', paddingTop: '8px' }}>
+                                        {selectedBooking.paymentMethod}
                                     </div>
                                 </div>
+                            </div>
 
-                                {/* Payment History */}
-                                <div className="bk-modal-payment">
-                                    <div className="bk-modal-payment-header">
-                                        <div className="bk-modal-card-label">
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
-                                                <line x1="1" y1="10" x2="23" y2="10"></line>
-                                            </svg>
-                                            <label>Payment History</label>
-                                        </div>
-                                        <span className="bk-verified-badge">VERIFIED</span>
+                             {/* Payment Receipt */}
+                            <div className="bkv2-receipt">
+                                <div className="bkv2-receipt-head">
+                                    <span>
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+                                        Payment Breakdown
+                                    </span>
+                                    <div className="flex items-center gap-3">
+                                        <span className="bkv2-verified">✓ Verified</span>
                                     </div>
-
-                                    {/* Course price header + table body */}
-                                    {(() => {
-                                        // Fallback: parse the always-present `amount` string (e.g. "₱ 700")
-                                        const amountFallback = parseFloat(
-                                            (selectedBooking.amount || '').replace(/[^0-9.]/g, '')
-                                        ) || 0;
-                                        const coursePrice = Number(selectedBooking.coursePrice) || amountFallback;
-                                        const amountPaid  = Number(selectedBooking.amountPaid)  || amountFallback;
-                                        const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
-                                        const isDown = (selectedBooking.paymentType || '').toLowerCase().includes('down');
-                                        const hasRescheduleFee = (selectedBooking.rawNotes || '').toLowerCase().includes('rescheduling fee');
-                                        const balance = coursePrice - amountPaid;
-                                        const paidInFull = amountPaid >= coursePrice && coursePrice > 0;
-
-                                        const rowStyle = { display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 1fr', gap: '6px', padding: '8px 6px', borderBottom: '1px solid var(--border-color)', alignItems: 'center' };
-                                        const valStyle = { fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-color)' };
-                                        const dateStyle = { fontSize: '0.8rem', color: 'var(--secondary-text)', fontWeight: 500 };
-
-                                        return (
-                                            <>
-                                                {/* Course price header */}
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0 10px', borderBottom: '2px solid var(--border-color)', marginBottom: '6px' }}>
-                                                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Course Total Price</span>
-                                                    <span style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-color)' }}>₱{coursePrice.toLocaleString()}</span>
-                                                </div>
-
-                                                {/* Column headers */}
-                                                <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 1fr', gap: '6px', padding: '5px 6px', background: 'var(--bg-color)', borderRadius: '6px', marginBottom: '4px' }}>
-                                                    {['Date', 'Type', 'Method', 'Amount'].map(h => (
-                                                        <span key={h} style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{h}</span>
-                                                    ))}
-                                                </div>
-
-                                                {/* Row 1 — initial payment */}
-                                                <div style={rowStyle}>
-                                                    <span style={dateStyle}>{fmtDate(selectedBooking.paymentDate)}</span>
-                                                    <span style={{ ...valStyle, color: isDown ? '#f59e0b' : '#16a34a' }}>{isDown ? 'Downpayment' : 'Full Payment'}</span>
-                                                    <span style={valStyle}>{selectedBooking.paymentMethod}</span>
-                                                    <span style={{ ...valStyle, color: '#16a34a', fontWeight: 800 }}>₱{amountPaid.toLocaleString()}</span>
-                                                </div>
-
-                                                {/* Row 2 — rescheduling fee (if noted) */}
-                                                {hasRescheduleFee && (
-                                                    <div style={rowStyle}>
-                                                        <span style={dateStyle}>—</span>
-                                                        <span style={{ ...valStyle, color: '#ef4444' }}>Reschedule Fee</span>
-                                                        <span style={valStyle}>Cash</span>
-                                                        <span style={{ ...valStyle, color: '#ef4444', fontWeight: 800 }}>₱1,000</span>
-                                                    </div>
-                                                )}
-
-                                                {/* Outstanding balance row */}
-                                                {!paidInFull && balance > 0 && (
-                                                    <div style={{ ...rowStyle, background: '#fff7ed', borderRadius: '6px', border: '1px solid #fed7aa', borderBottom: '1px solid #fed7aa' }}>
-                                                        <span style={{ ...dateStyle, color: '#c2410c' }}>Outstanding</span>
-                                                        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#c2410c' }}>Balance Due</span>
-                                                        <span style={{ fontSize: '0.82rem', color: '#c2410c' }}>—</span>
-                                                        <span style={{ fontSize: '0.88rem', fontWeight: 800, color: '#ea580c' }}>₱{balance.toLocaleString()}</span>
-                                                    </div>
-                                                )}
-
-                                                {/* Total paid summary */}
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 6px 4px', marginTop: '4px' }}>
-                                                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--secondary-text)' }}>
-                                                        {paidInFull ? '✅ Paid in Full' : 'Total Paid'}
-                                                    </span>
-                                                    <span style={{ fontWeight: 800, fontSize: '1rem', color: paidInFull ? '#16a34a' : '#f59e0b' }}>
-                                                        ₱{(amountPaid + (hasRescheduleFee ? 1000 : 0)).toLocaleString()}
-                                                    </span>
-                                                </div>
-
-                                                {selectedBooking.transactionId && (
-                                                    <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', padding: '4px 6px 0' }}>
-                                                        Transaction ID: <strong>{selectedBooking.transactionId}</strong>
-                                                    </div>
-                                                )}
-                                            </>
-                                        );
-                                    })()}
                                 </div>
-
-                                {/* Schedule Information */}
-                                <div className="bk-modal-card">
-                                    <div className="bk-modal-card-label" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', marginBottom: '16px' }}>
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2">
-                                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                                            <line x1="16" y1="2" x2="16" y2="6"></line>
-                                            <line x1="8" y1="2" x2="8" y2="6"></line>
-                                            <line x1="3" y1="10" x2="21" y2="10"></line>
-                                        </svg>
-                                        <label>Schedule Details</label>
-                                    </div>
-                                    <div className="bk-modal-schedule-content" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                                        {selectedBooking.date2 ? (
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                                                <div style={{ background: 'var(--card-bg)', padding: '16px 12px', borderRadius: '12px', border: '1px solid var(--border-color)', textAlign: 'center' }}>
-                                                    <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', fontWeight: 700, marginBottom: '6px', letterSpacing: '0.5px' }}>DAY 1</div>
-                                                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-color)' }}>{selectedBooking.date}</div>
-                                                </div>
-                                                <div style={{ background: 'var(--primary-light)', padding: '16px 12px', borderRadius: '12px', border: '1px solid rgba(33, 87, 218, 0.2)', textAlign: 'center' }}>
-                                                    <div style={{ fontSize: '0.75rem', color: 'var(--primary-color)', fontWeight: 700, marginBottom: '6px', letterSpacing: '0.5px' }}>DAY 2</div>
-                                                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--primary-color)' }}>{selectedBooking.date2}</div>
-                                                </div>
+                                
+                                <div className="bkv2-receipt-body">
+                                    {/* --- Section: Courses --- */}
+                                    <div className="bkv2-section-mini">Courses & Training</div>
+                                    {selectedBooking.typeCategory === 'TDC + PDC' ? (
+                                        <>
+                                            <div className="bkv2-line-item">
+                                                <span>TDC Course{selectedBooking.courseTypeTdc ? ` (${selectedBooking.courseTypeTdc.toUpperCase()})` : ''}</span>
+                                                <span>₱700.00</span>
                                             </div>
-                                        ) : (
-                                            <div style={{ background: 'var(--card-bg)', padding: '16px 12px', borderRadius: '12px', border: '1px solid var(--border-color)', textAlign: 'center' }}>
-                                                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-color)' }}>{selectedBooking.date}</div>
+                                            <div className="bkv2-line-item">
+                                                <span>PDC Course{selectedBooking.courseTypePdc ? ` (${selectedBooking.courseTypePdc})` : ''}</span>
+                                                <span>₱2,150.00</span>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="bkv2-line-item">
+                                            <span>{selectedBooking.typeCategory} Course</span>
+                                            <span>₱{selectedBooking.coursePrice.toLocaleString()}.00</span>
+                                        </div>
+                                    )}
+
+                                    {/* --- Section: Add-ons --- */}
+                                    {(selectedBooking.addonsDetailed || []).filter(addon => 
+                                        !(selectedBooking.typeCategory === 'TDC + PDC' && Number(addon.price) === 2150)
+                                    ).length > 0 && (
+                                        <>
+                                            <div className="bkv2-section-mini">Custom Add-ons</div>
+                                            {(selectedBooking.addonsDetailed || [])
+                                                .filter(addon => !(selectedBooking.typeCategory === 'TDC + PDC' && Number(addon.price) === 2150))
+                                                .map((addon, idx) => (
+                                                <div className="bkv2-line-item addon" key={idx}>
+                                                    <span>
+                                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                                        {addon.name}
+                                                    </span>
+                                                    <span>₱{Number(addon.price).toLocaleString()}.00</span>
+                                                </div>
+                                            ))}
+                                        </>
+                                    )}
+
+                                    {/* --- Section: Fees & Discounts --- */}
+                                    {(selectedBooking.convenienceFee > 0 || selectedBooking.promoDiscount > 0) && (
+                                        <>
+                                            <div className="bkv2-section-mini">Adjustments & Fees</div>
+                                            {selectedBooking.convenienceFee > 0 && (
+                                                <div className="bkv2-line-item addon">
+                                                    <span>
+                                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                                        Convenience Fee
+                                                    </span>
+                                                    <span>₱{selectedBooking.convenienceFee.toLocaleString()}.00</span>
+                                                </div>
+                                            )}
+                                            {selectedBooking.promoDiscount > 0 && (
+                                                <div className="bkv2-line-item discount">
+                                                    <span>
+                                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                                                        Promo Discount (3%)
+                                                    </span>
+                                                    <span>−₱{selectedBooking.promoDiscount.toLocaleString()}</span>
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+
+                                <div className="bkv2-receipt-foot">
+                                    <div className="bkv2-total-label">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
+                                        Total Amount Paid
+                                    </div>
+                                    <span className="bkv2-total">₱{selectedBooking.amountPaid.toLocaleString()}</span>
+                                </div>
+                            </div>
+
+                            {/* Schedule section – only render if there's at least one date */}
+                            {(selectedBooking.tdcDay1 || selectedBooking.pdcDay1) && (
+                                <div className="bkv2-schedule">
+                                    <div className="bkv2-schedule-head">
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                        Class Schedule
+                                    </div>
+                                    <div className="bkv2-sched-grid">
+                                        {selectedBooking.tdcDay1 && (
+                                            <div className="bkv2-sched-card tdc">
+                                                <div className="bkv2-sched-badge">TDC</div>
+                                                <div className="bkv2-sched-days">
+                                                    <div className="bkv2-sched-day">
+                                                        <span className="bkv2-day-label">Day 1</span>
+                                                        <span className="bkv2-day-val">{selectedBooking.tdcDay1}</span>
+                                                    </div>
+                                                    {selectedBooking.tdcDay2 && (
+                                                        <div className="bkv2-sched-day">
+                                                            <span className="bkv2-day-label">Day 2</span>
+                                                            <span className="bkv2-day-val">{selectedBooking.tdcDay2}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                         )}
-                                        {selectedBooking.time && (
-                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--secondary-text)', background: 'var(--bg-color)', padding: '12px', borderRadius: '12px', marginTop: '4px' }}>
-                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                                                <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>{selectedBooking.time}</span>
+                                        {selectedBooking.pdcDay1 && (
+                                            <div className="bkv2-sched-card pdc">
+                                                <div className="bkv2-sched-badge">PDC</div>
+                                                <div className="bkv2-sched-days">
+                                                    <div className="bkv2-sched-day">
+                                                        <span className="bkv2-day-label">Day 1</span>
+                                                        <span className="bkv2-day-val">{selectedBooking.pdcDay1}</span>
+                                                    </div>
+                                                    {selectedBooking.pdcDay2 && (
+                                                        <div className="bkv2-sched-day">
+                                                            <span className="bkv2-day-label">Day 2</span>
+                                                            <span className="bkv2-day-val">{selectedBooking.pdcDay2}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                         )}
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-                        <div className="bk-modal-footer">
-                            <button className="bk-modal-btn-close" onClick={() => setShowViewModal(false)}>Close</button>
-                            {selectedBooking.status === 'Collectable' && (
-                                <button className="bk-modal-btn-action" onClick={() => { updateStatus(selectedBooking.id, 'Paid'); setShowViewModal(false); }}>Mark as Paid</button>
                             )}
+                        </div>
+
+                        {/* ── Footer ── */}
+                        <div className="bkv2-footer">
+                            <button className="bkv2-close-btn" onClick={() => setShowViewModal(false)}>Close</button>
                         </div>
                     </div>
                 </div>
@@ -601,42 +740,38 @@ const Booking = () => {
             <div className="booking-stats">
                 <div className="mini-stat">
                     <div className="mini-stat-icon blue">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
                     </div>
                     <div className="mini-stat-content">
                         <span className="label">Total Bookings</span>
-                        <span className="value">{loading ? <span className="bk-skeleton-text">--</span> : bookings.length}</span>
-                        <span className="mini-stat-subtitle">All time records</span>
+                        <span className="value">{loading ? '--' : bookings.length}</span>
                     </div>
                 </div>
                 <div className="mini-stat">
                     <div className="mini-stat-icon orange">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                     </div>
                     <div className="mini-stat-content">
                         <span className="label">Collectable</span>
-                        <span className="value orange">{loading ? <span className="bk-skeleton-text">--</span> : bookings.filter(b => b.status === 'Collectable').length}</span>
-                        <span className="mini-stat-subtitle">Awaiting payment</span>
+                        <span className="value">{loading ? '--' : bookings.filter(b => b.status === 'Collectable').length}</span>
                     </div>
                 </div>
                 <div className="mini-stat">
                     <div className="mini-stat-icon green">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
                     </div>
                     <div className="mini-stat-content">
                         <span className="label">Paid</span>
-                        <span className="value green">{loading ? <span className="bk-skeleton-text">--</span> : bookings.filter(b => b.status === 'Paid').length}</span>
-                        <span className="mini-stat-subtitle">Completed payments</span>
+                        <span className="value">{loading ? '--' : bookings.filter(b => b.status === 'Paid').length}</span>
                     </div>
                 </div>
                 <div className="mini-stat">
                     <div className="mini-stat-icon red">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
                     </div>
                     <div className="mini-stat-content">
                         <span className="label">Cancelled</span>
-                        <span className="value red">{loading ? <span className="bk-skeleton-text">--</span> : bookings.filter(b => b.status === 'Cancelled').length}</span>
-                        <span className="mini-stat-subtitle">Cancelled bookings</span>
+                        <span className="value">{loading ? '--' : bookings.filter(b => b.status === 'Cancelled').length}</span>
                     </div>
                 </div>
             </div>
@@ -644,14 +779,8 @@ const Booking = () => {
             <div className="booking-content">
                 <div className="filters-row">
                     <div className="status-tabs">
-                        {['All', 'Collectable', 'Paid', 'Cancelled'].map(status => (
-                            <button
-                                key={status}
-                                className={`status-tab ${statusFilter === status ? 'active' : ''}`}
-                                onClick={() => setStatusFilter(status)}
-                            >
-                                {status}
-                            </button>
+                        {['All', 'Collectable', 'Paid', 'Cancelled'].map(s => (
+                            <button key={s} className={`status-tab ${statusFilter === s ? 'active' : ''}`} onClick={() => setStatusFilter(s)}>{s}</button>
                         ))}
                     </div>
                     <button className="export-btn" onClick={handleExport}>
@@ -678,18 +807,7 @@ const Booking = () => {
 
                 <div className="booking-table-wrapper">
                     <table className="booking-table">
-                        <thead>
-                            <tr>
-                                <th>Booking ID</th>
-                                <th>Student</th>
-                                <th>Course</th>
-                                <th>Branch</th>
-                                <th>Schedule</th>
-                                <th>Payment</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>ID</th><th>Student</th><th>Course</th><th>Branch</th><th>Schedule</th><th>Payment</th><th>Status</th><th>Action</th></tr></thead>
                         <tbody>
                             {loading ? (
                                 Array.from({ length: 5 }).map((_, i) => (
@@ -729,7 +847,7 @@ const Booking = () => {
                                     <td>
                                         <div className="bk-table-student">
                                             <div className="bk-student-avatar">
-                                                {booking.student.split(' ').map(n => n[0]).join('').substring(0, 2)}
+                                                {booking.student.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
                                             </div>
                                             <div className="student-info">
                                                 <span className="name">{booking.student}</span>
@@ -737,41 +855,33 @@ const Booking = () => {
                                         </div>
                                     </td>
                                     <td>
-                                        <span className={`type-badge ${booking.typeCategory.toLowerCase()}`}>
-                                            {booking.type}
-                                        </span>
+                                        <div className="bk-course-display">
+                                            <span className={`type-badge bundle`}>
+                                                <strong>{booking.type}</strong>
+                                            </span>
+                                        </div>
                                     </td>
                                     <td className="bk-branch">{booking.branch}</td>
                                     <td>
-                                        <div className="schedule-info">
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                                {booking.date2 ? (
-                                                    <>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                            <span style={{ fontSize: '0.65rem', padding: '2px 6px', background: 'var(--primary-light)', color: 'var(--primary-color)', borderRadius: '4px', fontWeight: '800', letterSpacing: '0.5px' }}>D1</span>
-                                                            <span className="date" style={{ fontSize: '0.85rem' }}>{booking.date}</span>
-                                                        </div>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                            <span style={{ fontSize: '0.65rem', padding: '2px 6px', background: 'var(--primary-light)', color: 'var(--primary-color)', borderRadius: '4px', fontWeight: '800', letterSpacing: '0.5px' }}>D2</span>
-                                                            <span className="date" style={{ fontSize: '0.85rem' }}>{booking.date2}</span>
-                                                        </div>
-                                                    </>
-                                                ) : (
-                                                    <span className="date" style={{ fontSize: '0.85rem' }}>{booking.date}</span>
-                                                )}
-                                                {booking.time && (
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--secondary-text)" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                                                        <span className="time">{booking.time}</span>
-                                                    </div>
-                                                )}
-                                            </div>
+                                        <div className="schedule-info-v2">
+                                            {booking.date && (
+                                                <div className="sched-tag tdc">
+                                                    <span className="label">TDC</span>
+                                                    <span className="val">{booking.date}</span>
+                                                </div>
+                                            )}
+                                            {booking.date2 && (
+                                                <div className="sched-tag pdc">
+                                                    <span className="label">PDC</span>
+                                                    <span className="val">{booking.date2}</span>
+                                                </div>
+                                            )}
                                         </div>
                                     </td>
                                     <td className="bk-payment">
-                                        <div className="payment-info">
-                                            <span className="amount">{booking.amount}</span>
-                                            <span className="method">{booking.paymentType} via {booking.paymentMethod}</span>
+                                        <div className="payment-info-v2">
+                                            <span className="amount font-bold">{booking.amount}</span>
+                                            <span className="meta">{booking.paymentType} via {booking.paymentMethod}</span>
                                         </div>
                                     </td>
                                     <td>
@@ -780,19 +890,19 @@ const Booking = () => {
                                         </span>
                                     </td>
                                     <td>
-                                        <div className="action-btns">
+                                        <div className="table-actions">
                                             {booking.status === 'Collectable' && (
                                                 <>
-                                                    <button className="approve-btn" title="Mark as Paid" onClick={() => updateStatus(booking.id, 'Paid')}>
-                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                    <button className="approve-action-btn" title="Mark as Paid" onClick={() => updateStatus(booking.id, 'Paid')}>
+                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                                                     </button>
-                                                    <button className="reject-btn" title="Cancel" onClick={() => updateStatus(booking.id, 'Cancelled')}>
-                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                                    <button className="reject-action-btn" title="Cancel" onClick={() => updateStatus(booking.id, 'Cancelled')}>
+                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                                                     </button>
                                                 </>
                                             )}
-                                            <button className="view-btn" title="View Details" onClick={() => handleViewClick(booking)}>
-                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                            <button className="view-action-btn" title="View Details" onClick={() => handleViewClick(booking)}>
+                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                                             </button>
                                         </div>
                                     </td>
