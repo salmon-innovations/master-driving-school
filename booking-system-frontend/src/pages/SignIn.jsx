@@ -21,7 +21,7 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
       try {
         const user = JSON.parse(userStr)
         const role = (user.role || 'student').toLowerCase()
-        if (role === 'admin') {
+        if (role === 'admin' || role === 'super_admin') {
           onNavigate('admin')
         } else if (role === 'staff') {
           onNavigate('staff-dashboard')
@@ -81,7 +81,8 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
         // Call the real API
         const response = await authAPI.login({
           email: formData.email,
-          password: formData.password,
+          password: btoa(unescape(encodeURIComponent(formData.password))),
+          isEncoded: true,
         })
 
         // Handle expected unverified state without treating it as a failed login error.
@@ -115,12 +116,12 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
         // Navigate based on role
         const role = (response.user.role || 'student').toLowerCase();
 
-        if (role === 'admin') {
+        if (role === 'admin' || role === 'super_admin') {
           onNavigate('admin')
         } else if (role === 'staff') {
           onNavigate('staff-dashboard')
         } else {
-          onNavigate('branches')
+          onNavigate('home')
         }
       } catch (error) {
         if (import.meta.env.DEV) {

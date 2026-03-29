@@ -1,0 +1,56 @@
+﻿[dotenv@17.2.3] injecting env (28) from .env -- tip: ≡ƒöÉ prevent committing .env to code: https://dotenvx.com/precommit
+? Connected to PostgreSQL database
+[
+  {
+    "id": 13,
+    "name": "Master Driving School Bocaue Bulacan Branch"
+  },
+  {
+    "id": 3,
+    "name": "Master Driving School Mandaluyong Branch"
+  },
+  {
+    "id": 10,
+    "name": "Master Prime Driving School Bacoor Branch"
+  },
+  {
+    "id": 6,
+    "name": "Master Prime Driving School Meycauayan Branch"
+  },
+  {
+    "id": 8,
+    "name": "Masters Prime Holdings Corp. Binan Branch"
+  },
+  {
+    "id": 4,
+    "name": "Master Driving School Marikina Branch"
+  },
+  {
+    "id": 12,
+    "name": "Master Driving School Valenzuela Branch"
+  },
+  {
+    "id": 11,
+    "name": "Master Driving School San Mateo Branch"
+  },
+  {
+    "id": 7,
+    "name": "Master Driving School Malabon Branch"
+  },
+  {
+    "id": 9,
+    "name": "Master Prime Holdings Corp. Las Pi├▒as Branch"
+  },
+  {
+    "id": 1,
+    "name": "Master Driving School V-luna Main Branch"
+  },
+  {
+    "id": 2,
+    "name": "Master Driving School Antipolo Branch"
+  },
+  {
+    "id": 5,
+    "name": "Master Driving School Pasig Branch"
+  }
+]

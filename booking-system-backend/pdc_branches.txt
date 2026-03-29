@@ -1,0 +1,88 @@
+﻿[dotenv@17.2.3] injecting env (28) from .env -- tip: ≡ƒôí add observability to secrets: https://dotenvx.com/ops
+? Connected to PostgreSQL database
+[
+  {
+    "id": 7,
+    "date": "2026-03-25",
+    "branch_id": 1,
+    "transmission": "Manual",
+    "course_type": "Practical Driving Course(PDC) - (MOTORCYCLE)"
+  },
+  {
+    "id": 13,
+    "date": "2026-03-25",
+    "branch_id": 1,
+    "transmission": "Manual",
+    "course_type": "Practical Driving Course(PDC) - (MOTORCYCLE)"
+  },
+  {
+    "id": 15,
+    "date": "2026-03-26",
+    "branch_id": 1,
+    "transmission": "Manual",
+    "course_type": "Practical Driving Course(PDC) - (MOTORCYCLE)"
+  },
+  {
+    "id": 10,
+    "date": "2026-03-26",
+    "branch_id": 1,
+    "transmission": "Manual",
+    "course_type": "Practical Driving Course(PDC) - (MOTORCYCLE)"
+  },
+  {
+    "id": 11,
+    "date": "2026-03-27",
+    "branch_id": 1,
+    "transmission": "Manual",
+    "course_type": "Practical Driving Course(PDC) - (MOTORCYCLE)"
+  },
+  {
+    "id": 18,
+    "date": "2026-03-27",
+    "branch_id": 1,
+    "transmission": "Manual",
+    "course_type": "Practical Driving Course(PDC) - (MOTORCYCLE)"
+  },
+  {
+    "id": 16,
+    "date": "2026-03-28",
+    "branch_id": 1,
+    "transmission": "Manual",
+    "course_type": "Practical Driving Course(PDC) - (MOTORCYCLE)"
+  },
+  {
+    "id": 12,
+    "date": "2026-03-28",
+    "branch_id": 1,
+    "transmission": "Manual",
+    "course_type": "Practical Driving Course(PDC) - (MOTORCYCLE)"
+  },
+  {
+    "id": 8,
+    "date": "2026-03-30",
+    "branch_id": 1,
+    "transmission": "Manual",
+    "course_type": "Practical Driving Course(PDC) - (MOTORCYCLE)"
+  },
+  {
+    "id": 14,
+    "date": "2026-03-30",
+    "branch_id": 1,
+    "transmission": "Manual",
+    "course_type": "Practical Driving Course(PDC) - (MOTORCYCLE)"
+  },
+  {
+    "id": 9,
+    "date": "2026-03-31",
+    "branch_id": 1,
+    "transmission": "Manual",
+    "course_type": "Practical Driving Course(PDC) - (MOTORCYCLE)"
+  },
+  {
+    "id": 17,
+    "date": "2026-03-31",
+    "branch_id": 1,
+    "transmission": "Manual",
+    "course_type": "Practical Driving Course(PDC) - (MOTORCYCLE)"
+  }
+]

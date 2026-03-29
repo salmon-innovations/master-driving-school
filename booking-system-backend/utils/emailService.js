@@ -616,7 +616,7 @@ const sendPasswordEmail = async (email, password, firstName, role) => {
               <p>${EMAIL_CONTENT.newAccount.loginPrompt}</p>
               
               <p style="text-align: center;">
-                <a href="${EMAIL_CONTENT.newAccount.buttonUrl || process.env.FRONTEND_URL + '/signin' || 'http://localhost:5173/signin'}" class="btn" style="display: inline-block; padding: 12px 24px; background-color: #2157da; color: #ffffff !important; text-decoration: none; border-radius: 5px; margin-top: 15px; font-weight: bold;">${EMAIL_CONTENT.newAccount.loginButtonText}</a>
+                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/signin" class="btn" style="display: inline-block; padding: 12px 24px; background-color: #2157da; color: #ffffff !important; text-decoration: none; border-radius: 5px; margin-top: 15px; font-weight: bold;">${EMAIL_CONTENT.newAccount.loginButtonText}</a>
               </p>
             </div>
             <div class="footer">
@@ -681,28 +681,76 @@ const computeTDCDay2 = (dateString) => {
   return null;
 };
 
-// Send walk-in enrollment confirmation email with schedule, password, and verification code
-const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, verificationCode, enrollmentDetails) => {
+// Send walk-in enrollment confirmation email with schedule, password, verification code, and optional PDF add-ons
+const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, verificationCode, enrollmentDetails, hasReviewer = false, hasVehicleTips = false) => {
   try {
     const transporter = createTransporter();
     const { courseName, courseCategory, courseType, branchName, branchAddress, scheduleDate, scheduleSession, scheduleTime, scheduleDate2, scheduleSession2, scheduleTime2, paymentMethod, amountPaid, paymentStatus } = enrollmentDetails;
 
     const isTDC = (courseCategory || '').toUpperCase() === 'TDC';
+    const isPromo = (courseCategory || '').toLowerCase() === 'promo';
     const formattedDate = formatDisplayDate(scheduleDate);
+    
+    const schedules = [];
+    // Day 1 (Always present)
+    schedules.push({
+      label: isTDC || isPromo ? 'TDC — Day 1' : 'Day 1',
+      date: formattedDate,
+      session: scheduleSession,
+      time: scheduleTime
+    });
 
-    // Dynamically fulfill Day 2 for TDC directly, or bind to passed 2nd slots if PDC
-    const effectiveDate2 = (isTDC && !scheduleDate2) ? computeTDCDay2(scheduleDate) : formatDisplayDate(scheduleDate2);
-    const effectiveSession2 = (isTDC && !scheduleSession2) ? scheduleSession : scheduleSession2;
-    const effectiveTime2 = (isTDC && !scheduleTime2) ? scheduleTime : scheduleTime2;
+    // TDC Day 2
+    const { scheduleEndDate, pdcDate1, pdcSession1, pdcTime1, pdcDate2, pdcSession2, pdcTime2 } = enrollmentDetails;
+    const tdcDay2 = scheduleEndDate ? formatDisplayDate(scheduleEndDate) : (isTDC || isPromo ? computeTDCDay2(scheduleDate) : null);
+    if (tdcDay2) {
+      schedules.push({
+        label: isTDC || isPromo ? 'TDC — Day 2' : 'Day 2',
+        date: tdcDay2,
+        session: scheduleSession,
+        time: scheduleTime
+      });
+    }
+
+    // PDC Day 1
+    if (pdcDate1) {
+      schedules.push({
+        label: 'PDC — Day 1',
+        date: formatDisplayDate(pdcDate1),
+        session: pdcSession1 || 'Morning',
+        time: pdcTime1 || '08:00 AM - 12:00 PM'
+      });
+    }
+
+    // PDC Day 2
+    if (pdcDate2) {
+      schedules.push({
+        label: 'PDC — Day 2',
+        date: formatDisplayDate(pdcDate2),
+        session: pdcSession2 || 'Morning',
+        time: pdcTime2 || '08:00 AM - 12:00 PM'
+      });
+    }
+
     const isDownpayment = paymentStatus && paymentStatus.toLowerCase().includes('downpayment');
     const courseNameLower = (courseName || '').toLowerCase();
     const isB1B2 = courseNameLower.includes('b1') || courseNameLower.includes('b2') || courseNameLower.includes('van') || courseNameLower.includes('l300');
     const isTricycle = courseNameLower.includes('a1') || courseNameLower.includes('tricycle');
 
+    const path = require('path');
+    const attachments = [];
+    if (hasReviewer) {
+      attachments.push({ filename: 'Driving-School-Reviewer.pdf', path: path.join(__dirname, 'AddOns', 'MASTER-TDC-PDC-REVIEWER-AND-GUIDE.pdf') });
+    }
+    if (hasVehicleTips) {
+      attachments.push({ filename: 'Vehicle-Maintenance-Guide.pdf', path: path.join(__dirname, 'AddOns', 'Vehicle-Maintenance-Guide.pdf') });
+    }
+
     const mailOptions = {
       from: getFromAddress(),
       to: email,
       subject: EMAIL_CONTENT.walkIn.subject,
+      attachments,
       html: `
         <!DOCTYPE html>
         <html>
@@ -722,8 +770,9 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
             .detail-value { font-weight: 600; color: #1f2937; font-size: 14px; float: right; text-align: right; width: 55%; word-wrap: break-word; }
             .schedule-highlight { background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%); border: 2px solid #3b82f6; border-radius: 12px; padding: 20px; margin: 20px 0; text-align: center; }
             .schedule-highlight h3 { color: #1a4fba; margin: 0 0 15px 0; font-size: 18px; }
-            .schedule-date { font-size: 22px; font-weight: 800; color: #1e40af; margin: 5px 0; }
-            .schedule-session { font-size: 16px; color: #3b82f6; margin: 5px 0; }
+            .schedule-date { font-size: 20px; font-weight: 800; color: #1e40af; margin: 5px 0; }
+            .schedule-session { font-size: 15px; color: #3b82f6; margin: 3px 0; font-weight: 600; }
+            .schedule-time { font-size: 13px; color: #6b7280; margin-top: 2px; }
             .credentials { background: #fff; border: 2px solid #1a4fba; padding: 20px; margin: 20px 0; border-radius: 10px; }
             .credentials h3 { color: #1a4fba; margin-top: 0; }
             .password-box { font-family: 'Courier New', monospace; font-size: 20px; font-weight: bold; color: #1a4fba; padding: 12px; background-color: #f0f4ff; border-radius: 8px; margin: 10px 0; text-align: center; letter-spacing: 2px; }
@@ -753,25 +802,15 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
               
               <div class="schedule-highlight">
                 <h3>${EMAIL_CONTENT.walkIn.scheduleHeading}</h3>
-                ${effectiveDate2 ? `
-                <div style="margin-bottom: 15px;">
-                  <div style="font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 1</div>
-                  <div class="schedule-date">${formattedDate}</div>
-                  <div class="schedule-session">${scheduleSession}</div>
-                  <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${scheduleTime}</div>
-                </div>
-                <hr style="border: none; border-top: 2px dashed #93c5fd; margin: 15px 0;">
-                <div>
-                  <div style="font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 2</div>
-                  <div class="schedule-date">${effectiveDate2}</div>
-                  <div class="schedule-session">${effectiveSession2}</div>
-                  <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${effectiveTime2}</div>
-                </div>
-                ` : `
-                <div class="schedule-date">${formattedDate}</div>
-                <div class="schedule-session">${scheduleSession}</div>
-                <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${scheduleTime}</div>
-                `}
+                ${schedules.map((s, idx) => `
+                  <div style="margin-bottom: ${idx === schedules.length - 1 ? '0' : '15px'};">
+                    <div style="font-size: 11px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px;">${s.label}</div>
+                    <div class="schedule-date">${s.date}</div>
+                    <div class="schedule-session">${s.session}</div>
+                    <div class="schedule-time">${s.time}</div>
+                  </div>
+                  ${idx === schedules.length - 1 ? '' : '<hr style="border: none; border-top: 2px dashed #93c5fd; margin: 15px 0;">'}
+                `).join('')}
               </div>
 
               <div class="section">
@@ -782,8 +821,19 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Type:&nbsp;&nbsp;</span>
-                  <span class="detail-value">${(courseType || 'N/A').toUpperCase()}</span>
+                  <span class="detail-value">${(() => {
+                    const tdcLabel = courseType ? `${courseType.toUpperCase()} (TDC)` : '';
+                    const pdcLabel = enrollmentDetails.courseTypePdc ? `${enrollmentDetails.courseTypePdc.toUpperCase()} (PDC)` : '';
+                    if (tdcLabel && pdcLabel) return `${tdcLabel} + ${pdcLabel}`;
+                    return (courseType || 'N/A').toUpperCase();
+                  })()}</span>
                 </div>
+                ${enrollmentDetails.addonNames ? `
+                <div class="detail-row">
+                  <span class="detail-label">Add-ons:&nbsp;&nbsp;</span>
+                  <span class="detail-value">${enrollmentDetails.addonNames}</span>
+                </div>
+                ` : ''}
                 <div class="detail-row">
                   <span class="detail-label">Branch:&nbsp;&nbsp;</span>
                   <span class="detail-value">${branchName}</span>
@@ -823,8 +873,9 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
                 <p style="margin: 6px 0 0; color: #1e3a8a;">${EMAIL_CONTENT.vehicleRental.tricycleNote}</p>
               </div>
               ` : ''}
-
-              <div class="credentials">
+              
+              ${enrollmentDetails.isNewUser ? `
+               <div class="credentials">
                 <h3>${EMAIL_CONTENT.walkIn.credentialsHeading}</h3>
                 <p>${EMAIL_CONTENT.walkIn.credentialsIntro}</p>
                 <p><strong>Email:</strong> ${email}</p>
@@ -842,6 +893,33 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
                 <p style="font-size: 13px; color: #6b7280;">${EMAIL_CONTENT.walkIn.verifyExpiry}</p>
               </div>
 
+              <p style="text-align: center; margin-top: 25px;">
+                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify-email?email=${encodeURIComponent(email)}" class="btn">${EMAIL_CONTENT.walkIn.verifyButtonText}</a>
+              </p>
+              ` : `
+               <div class="credentials" style="background: #f0fdf4; border-color: #15803d;">
+                <h3 style="color: #15803d; border-bottom: 2px solid #dcfce7; padding-bottom: 10px;">✅ Re-enrollment Successful</h3>
+                <p style="margin-top: 15px;">Welcome back! Your new course has been successfully linked to your existing account: <strong>${email}</strong>.</p>
+                <p>You can use your current password to log in and manage your schedule.</p>
+              </div>
+              
+              <p style="text-align: center; margin-top: 25px;">
+                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/signin" class="btn">Log In to Your Account</a>
+              </p>
+              `}
+
+              ${(hasReviewer || hasVehicleTips) ? `
+              <div class="requirements" style="background: #ecfdf5; border-left: 4px solid #10b981; margin: 20px 0; border-radius: 8px;">
+                <h4 style="color: #065f46; margin: 0 0 8px 0;">🎉 Your Digital Learning Materials Are Attached!</h4>
+                <p style="margin: 0; font-size: 14px; color: #064e3b;">We've included the following master guides to help you start your training:</p>
+                <ul style="margin: 10px 0 0; padding-left: 20px; color: #064e3b; font-size: 14px;">
+                  ${hasReviewer ? '<li><strong>Driving School Reviewer</strong> (Master TDC & PDC Guide)</li>' : ''}
+                  ${hasVehicleTips ? '<li><strong>Vehicle Maintenance Tips</strong> (Complete Maintenance Guide)</li>' : ''}
+                </ul>
+                <p style="margin-top: 10px; font-size: 13px; font-style: italic; color: #065f46;">Check the attachments of this email to download your copies.</p>
+              </div>
+              ` : ''}
+
               <div class="requirements">
                 <h4>${EMAIL_CONTENT.requirements.heading}</h4>
                 <ul>
@@ -856,9 +934,6 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
                 </ol>
               </div>
 
-              <p style="text-align: center; margin-top: 25px;">
-                <a href="${EMAIL_CONTENT.walkIn.buttonUrl || process.env.FRONTEND_URL + '/verify-email?email=' + encodeURIComponent(email) || 'http://localhost:5173/verify-email?email=' + encodeURIComponent(email)}" class="btn">${EMAIL_CONTENT.walkIn.verifyButtonText}</a>
-              </p>
             </div>
             <div class="footer">
               <p>&copy; ${EMAIL_CONTENT.copyrightYear} ${EMAIL_CONTENT.schoolName}. All rights reserved.</p>
@@ -868,8 +943,25 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
         </body>
         </html>
       `,
-      text: `Hello ${firstName} ${lastName}!\n\nYour walk-in enrollment has been successfully processed.\n\nSchedule Day 1: ${formattedDate}\nSession: ${scheduleSession}\nTime: ${scheduleTime}\n${effectiveDate2 ? `\nSchedule Day 2: ${effectiveDate2}\nSession: ${effectiveSession2}\nTime: ${effectiveTime2}\n` : ''}Course: ${courseName} (${courseType})\nBranch: ${branchName}\n\nLogin Credentials:\nEmail: ${email}\nPassword: ${password}\n\nVerification Code: ${verificationCode}\n\nPlease verify your email to activate your account.\n\n${isDownpayment ? `REMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n\n` : ''}${isB1B2 ? `VEHICLE RENTAL NOTE: For PDC - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}${isTricycle ? `VEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}IMPORTANT: Change your password after first login.\n\nMaster Driving School`,
     };
+
+    // Construct plain text version
+    let plainText = `Hello ${firstName} ${lastName}!\n\nYour walk-in enrollment has been successfully processed.\n\nYOUR TRAINING SCHEDULE:\n`;
+    plainText += schedules.map(s => `${s.label}: ${s.date}\nSession: ${s.session} (${s.time})`).join('\n\n');
+    plainText += `\n\nCourse: ${courseName} (${courseType})\nBranch: ${branchName}\n`;
+    
+    if (enrollmentDetails.isNewUser) {
+      plainText += `\nLogin Credentials:\nEmail: ${email}\nPassword: ${password}\n\nVerification Code: ${verificationCode}\n`;
+    } else {
+      plainText += `\nWelcome back! Your new course has been linked to your existing account (${email}).\n`;
+    }
+
+    if (isDownpayment) plainText += `\nREMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n`;
+    if (isB1B2) plainText += `\nVEHICLE RENTAL NOTE: For PDC - B1/B2, students are required to rent their own VAN or L300.\n`;
+    if (isTricycle) plainText += `\nVEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle.\n`;
+    
+    plainText += `\nMaster Driving School`;
+    mailOptions.text = plainText;
 
     const info = await sendMailWithFallback(transporter, mailOptions);
     console.log('✅ Walk-in enrollment email sent to:', email);
@@ -1126,7 +1218,7 @@ const sendNoShowEmail = async (email, firstName, lastName, enrollmentDetails) =>
               </div>
               
               <div style="text-align: center; margin-top: 30px;">
-                <a href="" class="btn"></a>
+                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/profile" class="btn">${EMAIL_CONTENT.noShow.loginButtonText}</a>
               </div>
             </div>
           </div>
@@ -1188,7 +1280,7 @@ const sendNewsPromoEmail = async (email, firstName, newsTitle, newsDescription, 
               </div>
 
               <div style="text-align: center; margin-top: 25px;">
-                <a href="" style="display: inline-block; padding: 12px 24px; background-color: #1a4fba; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;"></a>
+                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}" style="display: inline-block; padding: 12px 24px; background-color: #1a4fba; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">${EMAIL_CONTENT.news.visitButton}</a>
               </div>
             </div>
             <div class="footer">
@@ -1346,7 +1438,7 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
               ` : ''}
 
               <p style="text-align:center;margin-top:20px;">
-                <a href=""
+                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/profile"
                    style="display:inline-block;padding:12px 28px;background:linear-gradient(135deg,#1a4fba,#3b82f6);color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">
                   ${EMAIL_CONTENT.receipt.viewAccountButton}
                 </a>

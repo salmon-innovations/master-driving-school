@@ -13,7 +13,8 @@ import AnalyticsReports from './AnalyticsReports';
 import CRMManagement from './CRM';
 import { useTheme } from '../context/ThemeContext';
 import { useNotification } from '../context/NotificationContext';
-import { authAPI, adminAPI, notificationsAPI } from '../services/api';
+import { authAPI, adminAPI, notificationsAPI, MEDIA_BASE_URL } from '../services/api';
+import { resolveAvatar } from '../utils/avatarUtils';
 import {
     AreaChart,
     Area,
@@ -163,6 +164,10 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
     const allowedAdminTabs = useMemo(() => {
         const role = String(adminProfile.rawRole || '').toLowerCase();
+        // super_admin gets everything
+        if (role === 'super_admin') {
+            return new Set([...ALWAYS_ALLOWED_ADMIN_TABS, ...Object.keys(ADMIN_TAB_PERMISSION_MAP)]);
+        }
         const fallbackPermissions = ADMIN_DEFAULT_PERMISSIONS_BY_ROLE[role] || [];
         const effectivePermissions = normalizePermissions(userPermissions).length > 0
             ? normalizePermissions(userPermissions)
@@ -346,10 +351,12 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         phone: user.contactNumbers || '+63 912 345 6789',
                         branch: user.branchName || 'Main Office',
                         branchId: user.branchId || null,
-                        role: user.role === 'admin' ? 'Super Admin' :
-                            user.role === 'staff' ? 'Staff' : 'User',
+                        gender: user.gender || null,
+                        role: user.role === 'super_admin' ? 'Super Admin' :
+                              user.role === 'admin' ? 'Admin' :
+                              user.role === 'staff' ? 'Staff' : 'User',
                         rawRole: user.role || 'staff',
-                        avatar: null
+                        avatar: user.avatar || null,
                     });
                     setUserPermissions(normalizePermissions(user.permissions));
                 }
@@ -422,14 +429,28 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
     const fileInputRef = useRef(null);
 
-    const handleImageUpload = (e) => {
+    const handleImageUpload = async (e) => {
         const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setAdminProfile(prev => ({ ...prev, avatar: reader.result }));
-            };
-            reader.readAsDataURL(file);
+        if (!file) return;
+        if (file.size > 5 * 1024 * 1024) {
+            showNotification('Image must be smaller than 5MB', 'error');
+            return;
+        }
+        // Show a preview immediately
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setAdminProfile(prev => ({ ...prev, avatar: reader.result }));
+        };
+        reader.readAsDataURL(file);
+        // Upload to server
+        try {
+            const response = await authAPI.uploadAvatar(file);
+            if (response.success) {
+                setAdminProfile(prev => ({ ...prev, avatar: response.avatarUrl }));
+                showNotification('Profile picture updated!', 'success');
+            }
+        } catch (err) {
+            showNotification(err.message || 'Failed to upload profile picture', 'error');
         }
     };
 
@@ -447,6 +468,15 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         confirmPassword: ''
     });
 
+    // Opens the edit modal and syncs form data at click time (avoids infinite useEffect loop)
+    const openEditProfileModal = (tab = 'personal') => {
+        setProfileFormData({ ...adminProfile });
+        setEditProfileTab(tab);
+        setShowEditProfileModal(true);
+    };
+
+    const [sessionTimedOut, setSessionTimedOut] = useState(false);
+
 
     // Clock update effect
     useEffect(() => {
@@ -456,13 +486,47 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         return () => clearInterval(timer);
     }, []);
 
-    const handleLogout = () => {
+    const handleLogout = (timedOut = false) => {
         localStorage.removeItem('token');
         localStorage.removeItem('userToken');
         localStorage.removeItem('user');
+        if (timedOut) {
+            setSessionTimedOut(true);
+            return; // show the overlay; user clicks "Sign In Again" to navigate
+        }
         if (setIsLoggedIn) setIsLoggedIn(false);
         onNavigate('signin');
     };
+
+    // ── Session Timeout ────────────────────────────────────────
+    useEffect(() => {
+        const SETTINGS_KEY = 'mds_admin_settings';
+        const getTimeoutMs = () => {
+            try {
+                const saved = localStorage.getItem(SETTINGS_KEY);
+                const parsed = saved ? JSON.parse(saved) : {};
+                const minutes = Number(parsed.sessionTimeout) || 60;
+                return Math.max(5, minutes) * 60 * 1000;
+            } catch { return 60 * 60 * 1000; }
+        };
+
+        let timeoutId;
+
+        const resetTimer = () => {
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => handleLogout(true), getTimeoutMs());
+        };
+
+        const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
+        ACTIVITY_EVENTS.forEach(evt => window.addEventListener(evt, resetTimer, { passive: true }));
+
+        resetTimer(); // start the timer on mount
+
+        return () => {
+            clearTimeout(timeoutId);
+            ACTIVITY_EVENTS.forEach(evt => window.removeEventListener(evt, resetTimer));
+        };
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleProfileClick = () => {
         setActiveTab('profile');
@@ -474,25 +538,75 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         setShowProfileModal(false);
     };
 
-    const handleUpdateProfile = (e) => {
+    const handleUpdateProfile = async (e) => {
         e.preventDefault();
-        setAdminProfile(prev => ({
-            ...profileFormData,
-            avatar: prev.avatar // Preserve the avatar
-        }));
-        setShowEditProfileModal(false);
-        showNotification('Profile updated successfully!', 'success');
+        try {
+            // Split name into first, middle, last
+            const nameParts = (profileFormData.name || '').trim().split(/\s+/);
+            let firstName = '', middleName = '', lastName = '';
+
+            if (nameParts.length === 1) {
+                firstName = nameParts[0];
+            } else if (nameParts.length === 2) {
+                firstName = nameParts[0];
+                lastName = nameParts[1];
+            } else {
+                firstName = nameParts[0];
+                lastName = nameParts[nameParts.length - 1];
+                middleName = nameParts.slice(1, -1).join(' ');
+            }
+
+            const updateData = {
+                firstName,
+                middleName,
+                lastName,
+                email: profileFormData.email,
+                contactNumbers: profileFormData.phone,
+                // Add any other fields mapped in backend if needed
+            };
+
+            const response = await authAPI.updateProfile(updateData);
+            
+            if (response.user) {
+                const user = response.user;
+                setAdminProfile(prev => ({
+                    ...prev,
+                    name: `${user.first_name} ${user.middle_name || ''} ${user.last_name}`.trim().replace(/\s+/g, ' '),
+                    email: user.email,
+                    phone: user.contact_numbers,
+                    // If branch is updated by backend, sync it too
+                    branch: user.branchName || prev.branch
+                }));
+                showNotification('Profile updated successfully!', 'success');
+                setShowEditProfileModal(false);
+            }
+        } catch (error) {
+            showNotification(error.message || 'Failed to update profile', 'error');
+        }
     };
 
-    const handleChangePassword = (e) => {
+    const handleChangePassword = async (e) => {
         e.preventDefault();
         if (passwordData.newPassword !== passwordData.confirmPassword) {
             showNotification('Passwords do not match!', 'error');
             return;
         }
-        setShowEditProfileModal(false);
-        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
-        showNotification('Password changed successfully!', 'success');
+        if (passwordData.newPassword.length < 8) {
+            showNotification('New password must be at least 8 characters.', 'error');
+            return;
+        }
+        try {
+            await authAPI.changePassword({
+                currentPassword: passwordData.currentPassword,
+                newPassword: passwordData.newPassword,
+            });
+            setShowEditProfileModal(false);
+            setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+            showNotification('Password changed successfully!', 'success');
+        } catch (error) {
+            const msg = error?.message || 'Failed to change password. Please try again.';
+            showNotification(msg, 'error');
+        }
     };
 
 
@@ -585,6 +699,53 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     };
 
     return (
+        <>
+        {/* Session Expired Overlay */}
+        {sessionTimedOut && (
+            <div style={{
+                position: 'fixed', inset: 0, zIndex: 99999,
+                background: 'rgba(10,15,30,0.82)',
+                backdropFilter: 'blur(6px)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+                <div style={{
+                    background: 'var(--card-bg, #fff)',
+                    borderRadius: '20px',
+                    padding: '48px 40px 40px',
+                    maxWidth: '420px', width: '90%',
+                    textAlign: 'center',
+                    boxShadow: '0 25px 60px rgba(0,0,0,0.35)',
+                }}>
+                    <div style={{
+                        width: 64, height: 64, borderRadius: '50%',
+                        background: 'linear-gradient(135deg,#f59e0b,#ef4444)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        margin: '0 auto 20px',
+                    }}>
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                        </svg>
+                    </div>
+                    <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--primary-text,#0f172a)', marginBottom: 10 }}>
+                        Session Expired
+                    </h2>
+                    <p style={{ fontSize: '0.9rem', color: 'var(--secondary-text,#64748b)', marginBottom: 28, lineHeight: 1.6 }}>
+                        Your session has timed out due to inactivity.<br/>Please sign in again to continue.
+                    </p>
+                    <button
+                        onClick={() => { if (setIsLoggedIn) setIsLoggedIn(false); onNavigate('signin'); }}
+                        style={{
+                            width: '100%', padding: '12px 0', borderRadius: 12, border: 'none',
+                            background: 'linear-gradient(135deg,#1a4fba,#2563eb)',
+                            color: '#fff', fontSize: '0.95rem', fontWeight: 600,
+                            cursor: 'pointer',
+                        }}
+                    >
+                        Sign In Again
+                    </button>
+                </div>
+            </div>
+        )}
         <div className={`dashboard-container ${isSidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
             <Sidebar
                 isSidebarOpen={isSidebarOpen}
@@ -745,11 +906,12 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                 title="Admin Account"
                                 onClick={() => setShowProfileModal(!showProfileModal)}
                             >
-                                {adminProfile.avatar ? (
-                                    <img src={adminProfile.avatar} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                                ) : (
-                                    <span>AD</span>
-                                )}
+                                <img
+                                    src={resolveAvatar(adminProfile.avatar, adminProfile.gender, MEDIA_BASE_URL)}
+                                    alt="Profile"
+                                    style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                    onError={e => { e.target.src = '/images/Defualt_profile_male.png'; }}
+                                />
                             </div>
 
                             {showProfileModal && (
@@ -759,11 +921,12 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                         <div className="profile-dropdown-header">
                                             <div className="profile-info-display">
                                                 <div className="large-profile-circle">
-                                                    {adminProfile.avatar ? (
-                                                        <img src={adminProfile.avatar} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                                                    ) : (
-                                                        "AD"
-                                                    )}
+                                                    <img
+                                                    src={resolveAvatar(adminProfile.avatar, adminProfile.gender, MEDIA_BASE_URL)}
+                                                    alt="Profile"
+                                                    style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                                    onError={e => { e.target.src = '/images/Defualt_profile_male.png'; }}
+                                                />
                                                 </div>
                                                 <div className="profile-text">
                                                     <h3>{adminProfile.name}</h3>
@@ -858,7 +1021,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                             <span style={{ fontSize: '14px' }}>No revenue data available yet</span>
                                         </div>
                                     ) : (
-                                        <ResponsiveContainer>
+                                        <ResponsiveContainer width="100%" height={300}>
                                             <AreaChart
                                                 data={revenueData}
                                                 margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
@@ -930,7 +1093,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                             <span style={{ fontSize: '14px' }}>No enrollment data available yet</span>
                                         </div>
                                     ) : (
-                                        <ResponsiveContainer>
+                                        <ResponsiveContainer width="100%" height={300}>
                                             <BarChart
                                                 data={enrollmentData}
                                                 margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
@@ -1176,11 +1339,12 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                             }}></div>
                             <div className="profile-info-main">
                                 <div className="profile-avatar-large" onClick={triggerFileInput} title="Change Profile Picture">
-                                    {adminProfile.avatar ? (
-                                        <img src={adminProfile.avatar} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                                    ) : (
-                                        "AD"
-                                    )}
+                                    <img
+                                        src={resolveAvatar(adminProfile.avatar, adminProfile.gender, MEDIA_BASE_URL)}
+                                        alt="Profile"
+                                        style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                        onError={e => { e.target.src = '/images/male.jpg'; }}
+                                    />
                                     <div className="avatar-overlay">
                                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
                                     </div>
@@ -1197,11 +1361,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                     <p>{adminProfile.email}</p>
                                     <span className="role-badge">{adminProfile.role}</span>
                                 </div>
-                                <button className="edit-profile-btn" onClick={() => {
-                                    setProfileFormData({ ...adminProfile });
-                                    setEditProfileTab('personal');
-                                    setShowEditProfileModal(true);
-                                }}>Edit Profile</button>
+                                <button className="edit-profile-btn" onClick={() => openEditProfileModal('personal')}>Edit Profile</button>
                             </div>
                         </div>
 
@@ -1234,10 +1394,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                     <div className="info-item">
                                         <label>Password</label>
                                         <p>••••••••••••</p>
-                                        <button className="change-btn" onClick={() => {
-                                            setEditProfileTab('security');
-                                            setShowEditProfileModal(true);
-                                        }}>Change</button>
+                                        <button className="change-btn" onClick={() => openEditProfileModal('security')}>Change</button>
                                     </div>
                                     <div className="info-item">
                                         <label>2FA Status</label>
@@ -1400,6 +1557,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                 )}
             </main>
         </div>
+        </>
     );
 };
 
@@ -1513,3 +1671,4 @@ const NotificationPage = ({ notifications, markAsRead, deleteNotification, clear
 
 
 export default Admin;
+

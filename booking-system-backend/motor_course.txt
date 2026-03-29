@@ -1,0 +1,16 @@
+﻿[dotenv@17.2.3] injecting env (28) from .env -- tip: ≡ƒöÉ encrypt with Dotenvx: https://dotenvx.com
+? Connected to PostgreSQL database
+[
+  {
+    "id": 3,
+    "name": "Practical Driving Course(PDC) - (MOTORCYCLE)",
+    "category": "PDC",
+    "course_type": "Automatic",
+    "pricing_data": [
+      {
+        "type": "Manual",
+        "price": 2150
+      }
+    ]
+  }
+]

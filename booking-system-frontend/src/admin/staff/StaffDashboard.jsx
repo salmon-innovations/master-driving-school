@@ -9,7 +9,8 @@ import NewsEvents from '../NewsEvents';
 import CRMManagement from '../CRM';
 import { useTheme } from '../../context/ThemeContext';
 import { useNotification } from '../../context/NotificationContext';
-import { authAPI, adminAPI, notificationsAPI } from '../../services/api';
+import { authAPI, adminAPI, notificationsAPI, MEDIA_BASE_URL } from '../../services/api';
+import { resolveAvatar } from '../../utils/avatarUtils';
 import {
     AreaChart,
     Area,
@@ -312,10 +313,12 @@ const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
                         phone: user.contactNumbers || '+63 912 345 6789',
                         branch: user.branchName || 'Main Office',
                         branchId: user.branchId || null,
-                        role: user.role === 'admin' ? 'Super Admin' :
-                            user.role === 'staff' ? 'Staff' : 'User',
+                        gender: user.gender || null,
+                        role: user.role === 'super_admin' ? 'Super Admin' :
+                              user.role === 'admin' ? 'Admin' :
+                              user.role === 'staff' ? 'Staff' : 'User',
                         rawRole: user.role || 'staff',
-                        avatar: null
+                        avatar: user.avatar || null,
                     });
                     setUserPermissions(normalizePermissions(user.permissions));
                 }
@@ -388,14 +391,26 @@ const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
 
     const fileInputRef = useRef(null);
 
-    const handleImageUpload = (e) => {
+    const handleImageUpload = async (e) => {
         const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setAdminProfile(prev => ({ ...prev, avatar: reader.result }));
-            };
-            reader.readAsDataURL(file);
+        if (!file) return;
+        if (file.size > 5 * 1024 * 1024) {
+            showNotification('Image must be smaller than 5MB', 'error');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setAdminProfile(prev => ({ ...prev, avatar: reader.result }));
+        };
+        reader.readAsDataURL(file);
+        try {
+            const response = await authAPI.uploadAvatar(file);
+            if (response.success) {
+                setAdminProfile(prev => ({ ...prev, avatar: response.avatarUrl }));
+                showNotification('Profile picture updated!', 'success');
+            }
+        } catch (err) {
+            showNotification(err.message || 'Failed to upload profile picture', 'error');
         }
     };
 
@@ -720,11 +735,12 @@ const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
                                 title="Admin Account"
                                 onClick={() => setShowProfileModal(!showProfileModal)}
                             >
-                                {adminProfile.avatar ? (
-                                    <img src={adminProfile.avatar} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                                ) : (
-                                    <span>AD</span>
-                                )}
+                                <img
+                                    src={resolveAvatar(adminProfile.avatar, adminProfile.gender, MEDIA_BASE_URL)}
+                                    alt="Profile"
+                                    style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                    onError={e => { e.target.src = '/images/Defualt_profile_male.png'; }}
+                                />
                             </div>
 
                             {showProfileModal && (
@@ -734,11 +750,12 @@ const StaffDashboard = ({ onNavigate, setIsLoggedIn }) => {
                                         <div className="profile-dropdown-header">
                                             <div className="profile-info-display">
                                                 <div className="large-profile-circle">
-                                                    {adminProfile.avatar ? (
-                                                        <img src={adminProfile.avatar} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                                                    ) : (
-                                                        "AD"
-                                                    )}
+                                                <img
+                                                    src={resolveAvatar(adminProfile.avatar, adminProfile.gender, MEDIA_BASE_URL)}
+                                                    alt="Profile"
+                                                    style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                                    onError={e => { e.target.src = '/images/Defualt_profile_male.png'; }}
+                                                />
                                                 </div>
                                                 <div className="profile-text">
                                                     <h3>{adminProfile.name}</h3>

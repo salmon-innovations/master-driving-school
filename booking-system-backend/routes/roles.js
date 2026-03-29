@@ -5,10 +5,10 @@ const { authenticateToken } = require('../middleware/auth');
 
 // Middleware to check admin privileges
 const isAdmin = (req, res, next) => {
-    if (!req.user || !['admin'].includes(req.user.role)) {
-        return res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
-    }
-    next();
+  if (req.user.role !== 'admin' && req.user.role !== 'staff' && req.user.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
+  }
+  next();
 };
 
 // All routes are protected and require admin

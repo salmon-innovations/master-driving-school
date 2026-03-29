@@ -56,6 +56,7 @@ const ALL_PERMISSION_KEYS = PERMISSION_GROUPS.flatMap((group) => group.permissio
 const ALLOWED_PERMISSION_KEYS = new Set(ALL_PERMISSION_KEYS);
 
 const ROLE_PERMISSION_PRESETS = {
+  super_admin: [...ALL_PERMISSION_KEYS],
   admin: [...ALL_PERMISSION_KEYS],
   staff: [
     'operations.schedules.manage',
@@ -194,8 +195,12 @@ const getAllBookings = async (req, res) => {
     let userBranchId = null;
     if (userRole === 'staff') {
       const userRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [userId]);
-      userBranchId = userRow.rows[0]?.branch_id || null;
-      console.log(`🔍 [getAllBookings] Role: ${userRole}, branch_id from DB: ${userBranchId}`);
+      if (userRow.rows.length > 0) {
+        userBranchId = userRow.rows[0].branch_id;
+        console.log(`🔍 [getAllBookings] Role: ${userRole}, branch_id from DB: ${userBranchId}`);
+      } else {
+        console.warn(`⚠️ [getAllBookings] Staff user ID ${userId} not found in database.`);
+      }
     }
 
     const queryParams = [];
@@ -227,6 +232,7 @@ const getAllBookings = async (req, res) => {
              u.first_name || ' ' || COALESCE(u.middle_name || ' ', '') || u.last_name as student_name,
              u.email as student_email,
              u.contact_numbers as student_contact,
+             u.address as student_address,
              c.name as course_name, 
              c.price as course_price,
              br.name as branch_name, 
@@ -238,17 +244,9 @@ const getAllBookings = async (req, res) => {
                )
                FROM schedule_enrollments se
                JOIN schedule_slots ss ON se.slot_id = ss.id
-               WHERE se.student_id = b.user_id
-                 AND CASE
-                   WHEN b.payment_type = 'Reschedule Fee' THEN
-                     se.enrollment_status NOT IN ('cancelled', 'no-show')
-                   ELSE
-                     se.id = (
-                       SELECT MIN(se2.id)
-                       FROM schedule_enrollments se2
-                       WHERE se2.student_id = b.user_id
-                     )
-                 END
+               WHERE 
+                 se.booking_id = b.id OR
+                 (se.booking_id IS NULL AND se.student_id = b.user_id AND se.enrollment_status NOT IN ('cancelled', 'no-show'))
              ) as schedule_details,
              -- Fallback slot 1 from notes JSON (for pending StarPay bookings not yet enrolled)
              (
@@ -259,7 +257,7 @@ const getAllBookings = async (req, res) => {
                    WHEN b.notes IS NOT NULL
                      AND b.notes ~ '^\{'
                      AND (b.notes::jsonb->>'scheduleSlotId') IS NOT NULL
-                     AND (b.notes::jsonb->>'scheduleSlotId') != 'null'
+                     AND (b.notes::jsonb->>'scheduleSlotId') ~ '^[0-9]+$'
                    THEN CAST(b.notes::jsonb->>'scheduleSlotId' AS INTEGER)
                    ELSE NULL
                  END
@@ -274,7 +272,7 @@ const getAllBookings = async (req, res) => {
                    WHEN b.notes IS NOT NULL
                      AND b.notes ~ '^\{'
                      AND (b.notes::jsonb->>'scheduleSlotId2') IS NOT NULL
-                     AND (b.notes::jsonb->>'scheduleSlotId2') != 'null'
+                     AND (b.notes::jsonb->>'scheduleSlotId2') ~ '^[0-9]+$'
                    THEN CAST(b.notes::jsonb->>'scheduleSlotId2' AS INTEGER)
                    ELSE NULL
                  END
@@ -345,6 +343,38 @@ const getAllUsers = async (req, res) => {
   } catch (error) {
     console.error('Get all users error:', error);
     res.status(500).json({ error: 'Server error while fetching users' });
+  }
+};
+
+// Search students for auto-fill in enrollment
+const searchStudents = async (req, res) => {
+  try {
+    const { name } = req.query;
+    if (!name || name.trim().length < 2) {
+      return res.json({ success: true, students: [] });
+    }
+
+    const searchPattern = `%${name.trim()}%`;
+    const query = `
+      SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.role, 
+             u.contact_numbers, u.address, u.gender, u.age, u.birthday, 
+             u.status, u.birth_place, u.nationality, u.marital_status, u.zip_code,
+             u.emergency_contact_person, u.emergency_contact_number
+      FROM users u
+      WHERE (u.first_name ILIKE $1 OR u.last_name ILIKE $1 OR u.email ILIKE $1)
+      AND (u.role = 'student' OR u.role = 'walkin_student')
+      LIMIT 10
+    `;
+
+    const result = await pool.query(query, [searchPattern]);
+
+    res.json({
+      success: true,
+      students: result.rows,
+    });
+  } catch (error) {
+    console.error('Search students error:', error);
+    res.status(500).json({ error: 'Server error while searching students' });
   }
 };
 
@@ -789,10 +819,15 @@ const toggleUserStatus = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Get current status
-    const userResult = await pool.query('SELECT status FROM users WHERE id = $1', [id]);
+    // Get current user data
+    const userResult = await pool.query('SELECT status, role FROM users WHERE id = $1', [id]);
     if (userResult.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Protect super_admin accounts from being deactivated by anyone
+    if (userResult.rows[0].role === 'super_admin') {
+      return res.status(403).json({ error: 'Super Admin accounts cannot be deactivated.' });
     }
 
     const currentStatus = (userResult.rows[0].status || 'active').toLowerCase();
@@ -875,14 +910,15 @@ const walkInEnrollment = async (req, res) => {
       firstName, middleName, lastName, age, gender, birthday,
       nationality, maritalStatus, address, zipCode, birthPlace,
       contactNumbers, email, emergencyContactPerson, emergencyContactNumber,
-      courseId, courseCategory, courseType, branchId,
+      courseId, courseIds, courseCategory, courseType, courseTypePdc, branchId,
       scheduleSlotId, scheduleDate,
       scheduleSlotId2, scheduleDate2,
+      promoPdcSlotId2, promoPdcDate2,
       paymentMethod, amountPaid, paymentStatus,
-      enrolledBy
+      enrolledBy, addons = []
     } = req.body;
 
-    console.log('🔍 Walk-in enrollment received - Day2 data:', { scheduleSlotId2, scheduleDate2, courseCategory, courseType });
+    console.log('🔍 Walk-in enrollment received - TDC:', courseType, 'PDC:', courseTypePdc);
 
     // Parse branchId to integer (comes as string from frontend select)
     const parsedBranchId = parseInt(branchId, 10);
@@ -900,67 +936,106 @@ const walkInEnrollment = async (req, res) => {
       return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
     }
 
-    // Pre-flight check: Slot availability and B1/B2 Global Capacity Rule
-    const slotCheck = await pool.query('SELECT date, course_type, available_slots FROM schedule_slots WHERE id = $1', [scheduleSlotId]);
-    if (slotCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Selected schedule slot not found' });
-    }
-    const { date: slotDate, course_type: slotCourseType, available_slots: slotAvailable } = slotCheck.rows[0];
-    if (slotAvailable <= 0) {
-      return res.status(400).json({ error: 'The selected slot is fully booked' });
-    }
-    if (slotCourseType && (slotCourseType.toLowerCase().includes('b1') || slotCourseType.toLowerCase().includes('b2'))) {
-      const b1b2Check = await pool.query(`
-        SELECT 1 FROM schedule_slots 
-        WHERE date = $1 
-          AND (course_type ILIKE '%B1%' OR course_type ILIKE '%B2%')
-          AND available_slots < total_capacity
-      `, [slotDate]);
-      if (b1b2Check.rows.length > 0) {
-        return res.status(400).json({ error: 'The B1/B2 Van/L300 unit is already fully booked for this date across all branches.' });
-      }
+    // Pre-flight check: Slot availability (all slots!)
+    const slotsToCheck = [scheduleSlotId, scheduleSlotId2, promoPdcSlotId2].filter(Boolean);
+    for (const slotId of slotsToCheck) {
+        const slotCheck = await pool.query('SELECT date, course_type, available_slots FROM schedule_slots WHERE id = $1', [slotId]);
+        if (slotCheck.rows.length === 0) {
+          return res.status(404).json({ error: `Selected schedule slot ${slotId} not found` });
+        }
+        const { date: slotDate, course_type: slotCourseType, available_slots: slotAvailable } = slotCheck.rows[0];
+        if (slotAvailable <= 0) {
+          return res.status(400).json({ error: `The selected slot on ${slotDate} is fully booked` });
+        }
+        if (slotCourseType && (slotCourseType.toLowerCase().includes('b1') || slotCourseType.toLowerCase().includes('b2'))) {
+          const b1b2Check = await pool.query(`
+            SELECT 1 FROM schedule_slots 
+            WHERE date = $1 
+              AND (course_type ILIKE '%B1%' OR course_type ILIKE '%B2%')
+              AND available_slots < total_capacity
+          `, [slotDate]);
+          if (b1b2Check.rows.length > 0) {
+            return res.status(400).json({ error: `The B1/B2 unit is already fully booked for ${slotDate}.` });
+          }
+        }
     }
 
     await client.query('BEGIN');
 
-    // 1. Check if user already exists with this email
+    // 1. Handle user account (create or retrieve/update existing)
     const existingUser = await client.query('SELECT id FROM users WHERE email = $1', [email]);
+    let userId;
+    let generatedPassword = null;
+    let verificationCode = null;
+    let isNewUser = false;
+
     if (existingUser.rows.length > 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'A user with this email already exists. Please use a different email.' });
+      userId = existingUser.rows[0].id;
+      // Update existing user details (to keep the profile data current)
+      await client.query(
+        `UPDATE users SET
+          first_name = $1, middle_name = $2, last_name = $3,
+          address = $4, age = $5, gender = $6, birthday = $7,
+          birth_place = $8, nationality = $9, marital_status = $10,
+          contact_numbers = $11, zip_code = $12,
+          emergency_contact_person = $13, emergency_contact_number = $14
+        WHERE id = $15`,
+        [
+          firstName, middleName || null, lastName, address, age, gender, birthday,
+          birthPlace, nationality, maritalStatus, contactNumbers, zipCode,
+          emergencyContactPerson, emergencyContactNumber, userId
+        ]
+      );
+      console.log('✅ Existing user updated:', userId);
+    } else {
+      isNewUser = true;
+      // 2. Generate password and verification code
+      generatedPassword = generateRandomPassword();
+      const hashedPassword = await bcrypt.hash(generatedPassword, 10);
+      verificationCode = generateVerificationCode();
+      const codeExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // 3. Create user account with 'walkin_student' role
+      const userResult = await client.query(
+        `INSERT INTO users (
+          first_name, middle_name, last_name, email, password,
+          address, age, gender, birthday, birth_place,
+          nationality, marital_status, contact_numbers, zip_code,
+          emergency_contact_person, emergency_contact_number,
+          role, branch_id, status, is_verified,
+          verification_code, verification_code_expires
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+        RETURNING id`,
+        [
+          firstName, middleName || null, lastName, email, hashedPassword,
+          address, age, gender, birthday, birthPlace,
+          nationality, maritalStatus, contactNumbers, zipCode,
+          emergencyContactPerson, emergencyContactNumber,
+          'walkin_student', parsedBranchId, 'active', false,
+          verificationCode, codeExpires
+        ]
+      );
+      userId = userResult.rows[0].id;
+      console.log('✅ User created:', userId);
     }
-
-    // 2. Generate password and verification code
-    const generatedPassword = generateRandomPassword();
-    const hashedPassword = await bcrypt.hash(generatedPassword, 10);
-    const verificationCode = generateVerificationCode();
-    const codeExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-    // 3. Create user account with 'walkin_student' role
-    const userResult = await client.query(
-      `INSERT INTO users (
-        first_name, middle_name, last_name, email, password,
-        address, age, gender, birthday, birth_place,
-        nationality, marital_status, contact_numbers, zip_code,
-        emergency_contact_person, emergency_contact_number,
-        role, branch_id, status, is_verified,
-        verification_code, verification_code_expires
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-      RETURNING id, first_name, last_name, email`,
-      [
-        firstName, middleName || null, lastName, email, hashedPassword,
-        address, age, gender, birthday, birthPlace,
-        nationality, maritalStatus, contactNumbers, zipCode,
-        emergencyContactPerson, emergencyContactNumber,
-        'walkin_student', parsedBranchId, 'active', false,
-        verificationCode, codeExpires
-      ]
-    );
-    const newUser = userResult.rows[0];
-    console.log('✅ User created:', newUser.id);
 
     // 4. Create booking record
     const bookingStatus = paymentStatus === 'Full Payment' ? 'paid' : 'collectable';
+    const primaryCourseId = Array.isArray(courseIds) ? courseIds[0] : courseId;
+    
+    // Fetch all course names for accurate display in booking table
+    let combinedCourseNames = '';
+    try {
+      const idsToFetch = Array.isArray(courseIds) ? courseIds : [courseId];
+      const namesResult = await client.query('SELECT id, name FROM courses WHERE id = ANY($1)', [idsToFetch]);
+      const nameMap = {};
+      namesResult.rows.forEach(r => nameMap[r.id] = r.name);
+      combinedCourseNames = idsToFetch.map(id => nameMap[id]).filter(Boolean).join(' + ');
+    } catch (e) {
+      console.error('Error fetching combined names:', e);
+      combinedCourseNames = 'Custom Bundle';
+    }
+
     const bookingResult = await client.query(
       `INSERT INTO bookings (
         user_id, course_id, branch_id, booking_date, 
@@ -969,89 +1044,132 @@ const walkInEnrollment = async (req, res) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING id`,
       [
-        newUser.id, courseId, parsedBranchId, scheduleDate,
+        userId, primaryCourseId, parsedBranchId, scheduleDate,
         amountPaid, paymentStatus, paymentMethod, bookingStatus,
-        'walk-in', courseType, enrolledBy, 'Walk-in enrollment'
+        'walk-in', courseType || (Array.isArray(courseIds) ? 'Bundle' : null), enrolledBy, 
+        JSON.stringify({
+          displayNotes: `Walk-In Enrollment: ${combinedCourseNames}`,
+          combinedCourseNames,
+          addonNames: (addons || []).map(a => typeof a === 'object' ? a.name : a).filter(Boolean).join(', '),
+          addonsDetailed: (addons || []).map(a => ({ name: a.name, price: a.price || 0 })),
+          courseTypePdc,
+          courseTypeTdc: courseType,
+          subtotal: req.body.subtotal || 0,
+          promoDiscount: req.body.promoDiscount || 0,
+          convenienceFee: req.body.convenienceFee || 0
+        })
       ]
     );
     console.log('✅ Booking created:', bookingResult.rows[0].id);
 
-    // 5. Enroll student in schedule slot(s)
-    await client.query(
-      `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
-       VALUES ($1, $2, 'enrolled')`,
-      [scheduleSlotId, newUser.id]
-    );
-    console.log('✅ Schedule enrollment created (Day 1)');
+    // 6. Slot capacity management (Loops through all passed slots)
+    const allSlots = [
+      { id: scheduleSlotId, date: scheduleDate, label: 'Day 1' },
+      { id: scheduleSlotId2, date: scheduleDate2, label: 'Day 2' },
+      { id: promoPdcSlotId2, date: promoPdcDate2, label: 'Promo PDC Day 2' }
+    ].filter(s => s.id);
 
-    // 6. Decrement available slots
-    await client.query(
-      `UPDATE schedule_slots SET available_slots = available_slots - 1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1 AND available_slots > 0`,
-      [scheduleSlotId]
-    );
-    console.log('✅ Slot capacity decremented (Day 1)');
-
-    // If TDC (2-day course), enroll in second slot too
-    if (scheduleSlotId2 && scheduleDate2) {
-      await client.query(
-        `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
-         VALUES ($1, $2, 'enrolled')`,
-        [scheduleSlotId2, newUser.id]
+    for (const slot of allSlots) {
+      const enrollResult = await client.query(
+        `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status, booking_id)
+         VALUES ($1, $2, 'enrolled', $3)
+         ON CONFLICT (slot_id, student_id) 
+         DO UPDATE SET booking_id = EXCLUDED.booking_id
+         RETURNING (xmax = 0) AS is_new_enrollment`,
+        [slot.id, userId, bookingResult.rows[0].id]
       );
-      console.log('✅ Schedule enrollment created (Day 2)');
-
-      await client.query(
-        `UPDATE schedule_slots SET available_slots = available_slots - 1, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $1 AND available_slots > 0`,
-        [scheduleSlotId2]
-      );
-      console.log('✅ Slot capacity decremented (Day 2)');
+      
+      const isNewEnrollment = enrollResult.rows[0].is_new_enrollment;
+      
+      if (isNewEnrollment) {
+        await client.query(
+          `UPDATE schedule_slots SET available_slots = GREATEST(available_slots - 1, 0), updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [slot.id]
+        );
+        console.log(`✅ New enrollment created & capacity updated for ${slot.label}`);
+      } else {
+        console.log(`✅ Existing enrollment updated/re-linked for ${slot.label} (no capacity change)`);
+      }
     }
 
     await client.query('COMMIT');
 
     // 7. Get course and branch details for email
-    const courseResult = await pool.query('SELECT name, category FROM courses WHERE id = $1', [courseId]);
+    const courseResult = await pool.query('SELECT category FROM courses WHERE id = $1', [courseId]);
     const branchResult = await pool.query('SELECT name, address FROM branches WHERE id = $1', [parsedBranchId]);
-    const slotResult = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [scheduleSlotId]);
-
-    const courseName = courseResult.rows[0]?.name || 'N/A';
+    
+    // Fetch slot details for up to 3 slots (TDC, PDC Day 1, PDC Day 2)
+    const slotResult = await pool.query('SELECT session, time_range, end_date FROM schedule_slots WHERE id = $1', [scheduleSlotId]);
+    
+    const courseNameEmail = combinedCourseNames || 'Driving Course';
     const courseCat = courseCategory || courseResult.rows[0]?.category || 'PDC';
     const branchName = branchResult.rows[0]?.name || 'N/A';
     const branchAddress = branchResult.rows[0]?.address || '';
     const scheduleSession = slotResult.rows[0]?.session || 'N/A';
     const scheduleTime = slotResult.rows[0]?.time_range || 'N/A';
+    const scheduleEndDate = slotResult.rows[0]?.end_date || null;
 
-    // Get Day 2 schedule details for TDC
-    let scheduleSession2Email = null;
-    let scheduleTime2Email = null;
-    let scheduleDate2Email = null;
+    // Get PDC Day 1 details
+    let pdcSession1 = null;
+    let pdcTime1 = null;
+    let pdcDate1 = null;
     if (scheduleSlotId2 && scheduleDate2) {
       const slot2Result = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [scheduleSlotId2]);
-      scheduleSession2Email = slot2Result.rows[0]?.session || 'N/A';
-      scheduleTime2Email = slot2Result.rows[0]?.time_range || 'N/A';
-      scheduleDate2Email = scheduleDate2;
+      pdcSession1 = slot2Result.rows[0]?.session || 'N/A';
+      pdcTime1 = slot2Result.rows[0]?.time_range || 'N/A';
+      pdcDate1 = scheduleDate2;
     }
+
+    // Get PDC Day 2 details
+    let pdcSession2 = null;
+    let pdcTime2 = null;
+    let pdcDate2 = null;
+    if (promoPdcSlotId2 && promoPdcDate2) {
+      const promoSlot2Result = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [promoPdcSlotId2]);
+      pdcSession2 = promoSlot2Result.rows[0]?.session || 'N/A';
+      pdcTime2 = promoSlot2Result.rows[0]?.time_range || 'N/A';
+      pdcDate2 = promoPdcDate2;
+    }
+
+    // Detect if Digital Add-ons were selected
+    const hasReviewer = Array.isArray(addons) && addons.some(a => 
+      (typeof a === 'string' && (a === 'addon-reviewer' || a.includes('Reviewer'))) ||
+      (a && typeof a === 'object' && (a.id === 'addon-reviewer' || (a.name && a.name.includes('Reviewer'))))
+    );
+    const hasVehicleTips = Array.isArray(addons) && addons.some(a => 
+      (typeof a === 'string' && (a === 'addon-tips' || a.includes('Maintenance'))) ||
+      (a && typeof a === 'object' && (a.id === 'addon-tips' || (a.name && a.name.includes('Maintenance'))))
+    );
+
+    // Construct a list of all add-on names for display
+    const addonNames = (addons || []).map(a => typeof a === 'object' ? a.name : a).filter(Boolean).join(', ');
 
     // 8. Send walk-in enrollment confirmation email
     try {
       await sendWalkInEnrollmentEmail(email, firstName, lastName, generatedPassword, verificationCode, {
-        courseName,
+        courseName: courseNameEmail,
         courseCategory: courseCat,
         courseType,
+        courseTypePdc, // Pass both types for bundles
         branchName,
         branchAddress,
         scheduleDate,
         scheduleSession,
         scheduleTime,
-        scheduleDate2: scheduleDate2Email,
-        scheduleSession2: scheduleSession2Email,
-        scheduleTime2: scheduleTime2Email,
+        scheduleEndDate, // For TDC Auto-Day 2
+        pdcDate1,
+        pdcSession1,
+        pdcTime1,
+        pdcDate2,
+        pdcSession2,
+        pdcTime2,
         paymentMethod,
         amountPaid,
-        paymentStatus
-      });
+        paymentStatus,
+        addonNames, // Added for accuracy in enrollment details box
+        isNewUser // Pass flag to control credentials display in email
+      }, hasReviewer, hasVehicleTips);
       console.log('✅ Enrollment email sent to:', email);
     } catch (emailError) {
       console.error('⚠️ Failed to send enrollment email:', emailError.message);
@@ -1062,7 +1180,7 @@ const walkInEnrollment = async (req, res) => {
       success: true,
       message: 'Walk-in enrollment completed successfully. Confirmation email sent to student.',
       data: {
-        userId: newUser.id,
+        userId: userId,
         bookingId: bookingResult.rows[0].id,
         email: email,
         emailSent: true
@@ -1878,6 +1996,7 @@ module.exports = {
   toggleUserStatus,
   resetUserPassword,
   walkInEnrollment,
+  searchStudents,
   getAllTransactions,
   getUnpaidBookings,
   getFunnelData,

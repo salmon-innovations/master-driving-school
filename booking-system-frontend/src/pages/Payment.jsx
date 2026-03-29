@@ -11,7 +11,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
   const [showTermsModal, setShowTermsModal] = useState(false)
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false)
   // StarPay QR state
-  const [starpayQR, setStarpayQR] = useState(null) // { codeUrl, msgId, bookingId }
+  const [starpayQR, setStarpayQR] = useState(null) // { codeUrl, msgId, bookingId, amount }
   const [qrStatus, setQrStatus] = useState('pending') // pending|success|failed
   const [showPaymentSuccess, setShowPaymentSuccess] = useState(false)
   const [countdown, setCountdown] = useState(5)
@@ -274,7 +274,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         throw new Error('Failed to initialize StarPay QR payment.')
       }
 
-      setStarpayQR({ codeUrl, msgId, bookingId })
+      setStarpayQR({ codeUrl, msgId, bookingId, amount: finalAmount })
       setQrStatus('pending')
       setIsProcessing(false)
 
@@ -408,7 +408,8 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                   {/* Full Payment */}
                   <button
                     onClick={() => setPaymentType("full")}
-                    className={`group relative text-left p-4 sm:p-5 rounded-xl border-2 transition-all duration-200 ${paymentType === "full" ? "border-[#2157da] bg-blue-50 shadow-md" : "border-gray-200 hover:border-blue-200 hover:bg-gray-50"}`}
+                    disabled={!!starpayQR || isProcessing}
+                    className={`group relative text-left p-4 sm:p-5 rounded-xl border-2 transition-all duration-200 ${(!!starpayQR || isProcessing) ? 'opacity-60 cursor-not-allowed' : ''} ${paymentType === "full" ? "border-[#2157da] bg-blue-50 shadow-md" : "border-gray-200 hover:border-blue-200 hover:bg-gray-50"}`}
                   >
                     <div className="flex items-center justify-between mb-3">
                       <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${paymentType === "full" ? 'bg-[#2157da]' : 'bg-gray-100 group-hover:bg-blue-100'}`}>
@@ -429,7 +430,8 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                   {/* Downpayment */}
                   <button
                     onClick={() => setPaymentType("downpayment")}
-                    className={`group relative text-left p-4 sm:p-5 rounded-xl border-2 transition-all duration-200 ${paymentType === "downpayment" ? "border-[#2157da] bg-blue-50 shadow-md" : "border-gray-200 hover:border-blue-200 hover:bg-gray-50"}`}
+                    disabled={!!starpayQR || isProcessing}
+                    className={`group relative text-left p-4 sm:p-5 rounded-xl border-2 transition-all duration-200 ${(!!starpayQR || isProcessing) ? 'opacity-60 cursor-not-allowed' : ''} ${paymentType === "downpayment" ? "border-[#2157da] bg-blue-50 shadow-md" : "border-gray-200 hover:border-blue-200 hover:bg-gray-50"}`}
                   >
                     <div className="flex items-center justify-between mb-3">
                       <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${paymentType === "downpayment" ? 'bg-[#2157da]' : 'bg-gray-100 group-hover:bg-blue-100'}`}>
@@ -453,7 +455,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
               </div>
 
               {/* Step 2 – Payment Method */}
-              <div className={`bg-white rounded-2xl shadow-sm border overflow-hidden transition-all duration-300 ${!paymentType ? 'opacity-40 pointer-events-none border-gray-100' : 'opacity-100 border-gray-100'}`}>
+              <div className={`bg-white rounded-2xl shadow-sm border overflow-hidden transition-all duration-300 ${(!paymentType || !!starpayQR || isProcessing) ? 'opacity-40 pointer-events-none border-gray-100' : 'opacity-100 border-gray-100'}`}>
                 <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100 bg-gray-50/60">
                   <div className="w-8 h-8 bg-emerald-600 rounded-xl flex items-center justify-center shrink-0">
                     <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -514,8 +516,8 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
               <div className={`rounded-2xl overflow-hidden transition-all duration-300 ${paymentType && paymentMethod ? 'shadow-lg shadow-blue-100' : ''}`}>
                 <button
                   onClick={handleOpenTermsModal}
-                  disabled={!paymentType || !paymentMethod || isProcessing}
-                  className={`relative w-full py-4 sm:py-5 font-black text-base sm:text-lg text-white rounded-2xl overflow-hidden transition-all duration-300 ${paymentType && paymentMethod && !isProcessing
+                  disabled={!paymentType || !paymentMethod || isProcessing || !!starpayQR}
+                  className={`relative w-full py-4 sm:py-5 font-black text-base sm:text-lg text-white rounded-2xl overflow-hidden transition-all duration-300 ${paymentType && paymentMethod && !isProcessing && !starpayQR
                     ? "bg-gradient-to-r from-[#2157da] to-[#1a3a8a] hover:from-[#1a3a8a] hover:to-[#0f1f4d] hover:shadow-xl active:scale-[0.99]"
                     : "bg-gray-300 cursor-not-allowed"}`}
                 >
@@ -900,7 +902,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                     />
                   </div>
                   <p className="text-sm font-bold text-gray-700 mb-1">Amount Due</p>
-                  <p className="text-3xl font-black text-[#2157da] mb-4">₱{finalAmount.toLocaleString()}</p>
+                  <p className="text-3xl font-black text-[#2157da] mb-4">₱{(starpayQR.amount || finalAmount).toLocaleString()}</p>
                   <div className="flex items-center gap-2 text-xs text-gray-400">
                     <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>
                     Waiting for payment...

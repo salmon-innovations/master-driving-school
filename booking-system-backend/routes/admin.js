@@ -14,6 +14,7 @@ const {
   toggleUserStatus,
   resetUserPassword,
   walkInEnrollment,
+  searchStudents,
   getAllTransactions,
   getUnpaidBookings,
   getFunnelData,
@@ -35,7 +36,7 @@ const { authenticateToken } = require('../middleware/auth');
 
 // Middleware to check if user is admin
 const isAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'staff') {
+  if (req.user.role !== 'admin' && req.user.role !== 'staff' && req.user.role !== 'super_admin') {
     return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
   }
   next();
@@ -80,6 +81,7 @@ router.post('/users/:id/reset-password', resetUserPassword);
 
 // Walk-in enrollment
 router.post('/walk-in-enrollment', walkInEnrollment);
+router.get('/search-students', searchStudents);
 
 // Financial transactions
 router.get('/transactions', getAllTransactions);

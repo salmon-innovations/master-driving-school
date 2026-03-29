@@ -1,0 +1,13 @@
+﻿[dotenv@17.2.3] injecting env (28) from .env -- tip: ≡ƒôí add observability to secrets: https://dotenvx.com/ops
+Starting cleanup for: gabasamarcjeff03@gmail.com
+? Connected to PostgreSQL database
+Found User ID: 2
+Deleted 0 transactions.
+Deleted 3 schedule enrollments.
+Deleted 2 bookings.
+Deleted User record.
+All available_slots reset to 15.
+Reset sequence for bookings to 1.
+Reset sequence for transactions to 1.
+Reset sequence for schedule_enrollments to 1.
+Reset sequence for users to 2.

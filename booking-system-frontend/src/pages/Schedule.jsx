@@ -887,40 +887,42 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
         {/* Calendar (Hidden for TDC and Promo which has its own flow) */}
         {!isTDCCourse && !isPromoCourse && (
 
-          <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-6" data-aos="fade-up" data-aos-delay="100">
-            <div className="flex items-center justify-between mb-6">
+        <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-3 sm:p-7 mb-6" data-aos="fade-up" data-aos-delay="100">
+            <div className="flex items-center justify-between mb-4 sm:mb-6">
               <button
                 onClick={handlePrevMonth}
-                className="w-10 h-10 flex items-center justify-center rounded-xl border border-gray-200 hover:border-[#2157da] hover:bg-blue-50 transition-all"
+                className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl border border-gray-200 hover:border-[#2157da] hover:bg-blue-50 transition-all"
               >
-                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
-              <h2 className="text-lg sm:text-xl font-black text-gray-900">
+              <h2 className="text-base sm:text-xl font-black text-gray-900">
                 {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
               </h2>
               <button
                 onClick={handleNextMonth}
-                className="w-10 h-10 flex items-center justify-center rounded-xl border border-gray-200 hover:border-[#2157da] hover:bg-blue-50 transition-all"
+                className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl border border-gray-200 hover:border-[#2157da] hover:bg-blue-50 transition-all"
               >
-                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
                 </svg>
               </button>
             </div>
 
-            <div className="grid grid-cols-7 gap-1.5 sm:gap-2 mb-2">
+            <div className="grid grid-cols-7 gap-0.5 sm:gap-2 mb-1 sm:mb-2">
               {dayNames.map((day) => (
-                <div key={day} className="text-center text-[10px] sm:text-xs font-black text-gray-400 uppercase tracking-wider py-2">
-                  {day}
+                <div key={day} className="text-center text-[9px] sm:text-xs font-black text-gray-400 uppercase tracking-wider py-1 sm:py-2">
+                  {/* On mobile show only first letter, on sm+ show 3-letter abbreviation */}
+                  <span className="sm:hidden">{day[0]}</span>
+                  <span className="hidden sm:inline">{day}</span>
                 </div>
               ))}
             </div>
 
-            <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+            <div className="grid grid-cols-7 gap-0.5 sm:gap-2">
               {[...Array(startingDayOfWeek)].map((_, index) => (
-                <div key={`empty-${index}`} className="min-h-[140px]"></div>
+                <div key={`empty-${index}`} className="min-h-[52px] sm:min-h-[140px]"></div>
               ))}
               {[...Array(daysInMonth)].map((_, index) => {
                 const day = index + 1
@@ -987,22 +989,53 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                 return (
                   <div
                     key={day}
-                    className={`min-h-[140px] rounded-xl border flex flex-col overflow-hidden transition-all relative
+                    className={`min-h-[52px] sm:min-h-[140px] rounded-lg sm:rounded-xl border flex flex-col overflow-hidden transition-all relative
                       ${!isAvailable || isDay1Marker ? 'cursor-not-allowed opacity-45' : 'cursor-default'}
                       ${slotCellBorder}`}
                   >
                     {/* Day number */}
-                    <div className="flex items-center justify-between px-2.5 pt-2.5 pb-1 flex-shrink-0">
-                      <span className={`text-[13px] font-bold leading-none ${
+                    <div className="flex items-center justify-between px-1 sm:px-2.5 pt-1.5 sm:pt-2.5 pb-0.5 sm:pb-1 flex-shrink-0">
+                      <span className={`text-[10px] sm:text-[13px] font-bold leading-none ${
                         isDay1Selected || isDay2Selected ? 'text-[#2563eb]' :
                         isDay1Marker ? 'text-orange-500' :
                         isToday ? 'text-[#2563eb]' : 'text-gray-500'
                       }`}>{day}</span>
-                      {isToday && <span className="w-1.5 h-1.5 rounded-full bg-[#2563eb] opacity-60 flex-shrink-0"></span>}
+                      {isToday && <span className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full bg-[#2563eb] opacity-60 flex-shrink-0"></span>}
                     </div>
 
-                    {/* Slot pills — display-only indicators, selection happens in panel below */}
-                    <div className="flex flex-col gap-[3px] px-1.5 pb-2 flex-1">
+                    {/* Mobile: dot indicators only */}
+                    <div className="flex sm:hidden flex-wrap gap-0.5 px-1 pb-1">
+                      {daySlots.slice(0, 3).map((slot) => {
+                        const isFullyBooked = slot.available_slots === 0;
+                        const isSlotSelected = selectedSlot?.id === slot.id || selectedSlot2?.id === slot.id;
+                        return (
+                          <div
+                            key={slot.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isFullyBooked) return;
+                              const isSessionMismatch = selectingDay2 && selectedSlot && slot.session !== selectedSlot.session;
+                              if (isSessionMismatch) {
+                                showNotification(`For Day 2, please select the same session type: ${selectedSlot.session}`, 'warning');
+                                return;
+                              }
+                              handleCalendarSlotClick(slot, day);
+                            }}
+                            className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                              isSlotSelected ? 'bg-[#2563eb]' :
+                              isFullyBooked ? 'bg-red-400' :
+                              slot.session === 'Morning' ? 'bg-orange-400' :
+                              slot.session === 'Afternoon' ? 'bg-yellow-400' :
+                              'bg-blue-400'
+                            } ${!isFullyBooked ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                            title={`${slot.session} — ${isFullyBooked ? 'Full' : slot.available_slots + ' slots'}`}
+                          />
+                        );
+                      })}
+                    </div>
+
+                    {/* Desktop: Slot pills — full labels */}
+                    <div className="hidden sm:flex flex-col gap-[3px] px-1.5 pb-2 flex-1">
                       {daySlots.map(slot => {
                         const isFullyBooked = slot.available_slots === 0;
                         const isSlotSelected = selectedSlot?.id === slot.id || selectedSlot2?.id === slot.id;
@@ -1058,8 +1091,17 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
               })}
             </div>
 
-            {/* Calendar Legend Guide */}
-            <div className="flex flex-wrap justify-center gap-4 sm:gap-6 mt-6 pt-5 border-t border-gray-200">
+            {/* Mobile Legend (compact) */}
+            <div className="flex sm:hidden flex-wrap justify-center gap-3 mt-4 pt-4 border-t border-gray-200">
+              <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-orange-400"></div><span className="text-[10px] font-semibold text-gray-500">Morning</span></div>
+              <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-yellow-400"></div><span className="text-[10px] font-semibold text-gray-500">Afternoon</span></div>
+              <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-blue-400"></div><span className="text-[10px] font-semibold text-gray-500">Whole Day</span></div>
+              <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-red-400"></div><span className="text-[10px] font-semibold text-gray-500">Full</span></div>
+              <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-[#2563eb]"></div><span className="text-[10px] font-semibold text-gray-500">Selected</span></div>
+            </div>
+
+            {/* Desktop Calendar Legend Guide */}
+            <div className="hidden sm:flex flex-wrap justify-center gap-4 sm:gap-6 mt-6 pt-5 border-t border-gray-200">
               <div className="flex items-center gap-2">
                 <div className="w-5 h-5 bg-orange-50 border border-orange-300/60 rounded-lg"></div>
                 <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500">Has Slots</span>

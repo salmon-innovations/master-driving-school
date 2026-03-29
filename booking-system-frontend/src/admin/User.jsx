@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import './css/user.css';
-import { adminAPI, branchesAPI } from '../services/api';
+import { adminAPI, branchesAPI, MEDIA_BASE_URL } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import Pagination from './components/Pagination';
 import { getZipFromAddress } from '../utils/philippineZipCodes';
+import { resolveAvatar } from '../utils/avatarUtils';
 
 const USER_PAGE_SIZE = 10;
 
@@ -182,6 +183,8 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                 if (user.role) {
                     if (user.role === 'walkin_student') {
                         roleDisplay = 'Walkin Student';
+                    } else if (user.role === 'super_admin') {
+                        roleDisplay = 'Super Admin';
                     } else {
                         roleDisplay = user.role.charAt(0).toUpperCase() + user.role.slice(1);
                     }
@@ -196,7 +199,7 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                     branchId: user.branch_id,
                     status: user.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'Active',
                     lastLogin: user.last_login ? formatLastLogin(user.last_login) : 'Never',
-                    avatar: user.avatar || `https://i.pravatar.cc/150?u=${user.email}`,
+                    avatar: user.avatar || null,
                     firstName: user.first_name,
                     middleInitial: user.middle_name || '',
                     lastName: user.last_name,
@@ -805,11 +808,12 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                                         <td>
                                             <div className="user-profile-cell">
                                                 <div className="user-avatar-mini" onClick={() => handleViewUser(user)}>
-                                                    {user.avatar ? (
-                                                        <img src={user.avatar} alt={user.name} />
-                                                    ) : (
-                                                        user.name.split(' ').map(n => n[0]).join('')
-                                                    )}
+                                                    <img
+                                                      src={resolveAvatar(user.avatar, user.gender, MEDIA_BASE_URL)}
+                                                      alt={user.name}
+                                                      onError={e => { e.target.src = user.gender?.toLowerCase() === 'female' ? '/images/female.jpg' : '/images/male.jpg'; }}
+                                                      style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
+                                                    />
                                                 </div>
                                                 <div className="user-info-mini">
                                                     <span className="user-name-bold">{user.name}</span>
@@ -842,7 +846,7 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
                                                     </button>
                                                 )}
-                                                {canToggleUserStatus && user.role !== 'Admin' && (
+                                                {canToggleUserStatus && user.role !== 'Super Admin' && (
                                                     <button
                                                         className={`action-btn toggle ${user.status === 'Active' ? 'deactivate' : 'activate'}`}
                                                         title={user.status === 'Active' ? 'Deactivate' : 'Activate'}
@@ -875,19 +879,19 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                 {/* Add/Edit User Modal */}
                 {showModal && (
                     <div className="modal-overlay">
-                        <div className="modal-container user-modal" style={{ maxWidth: '750px', width: '95%' }}>
-                            <div className="modal-header">
+                        <div className="modal-container user-modal" style={{ maxWidth: '750px', width: '95%', overflow: 'hidden' }}>
+                            <div className="modal-header" style={{ background: '#2563eb', color: 'white' }}>
                                 <div className="modal-header-left">
-                                    <div className="modal-header-icon">
+                                    <div className="modal-header-icon" style={{ background: 'rgba(255,255,255,0.2)', color: 'white' }}>
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle><line x1="19" y1="8" x2="19" y2="14"></line><line x1="22" y1="11" x2="16" y2="11"></line></svg>
                                     </div>
                                     <div>
-                                        <h2>{editingUser ? 'Edit Account' : 'Add New User Account'}</h2>
-                                        <p>{editingUser ? 'Update account information and permissions' : 'Fill in the details to add a new admin or staff member'}</p>
+                                        <h2 style={{ color: 'white' }}>{editingUser ? 'Edit Account' : 'Add New User Account'}</h2>
+                                        <p style={{ color: 'rgba(255,255,255,0.8)' }}>{editingUser ? 'Update account information and permissions' : 'Fill in the details to add a new admin or staff member'}</p>
                                     </div>
                                 </div>
                                 <div className="modal-header-right">
-                                    <button className="close-modal" onClick={handleCloseModal}>
+                                    <button className="close-modal" onClick={handleCloseModal} style={{ color: 'white', background: 'rgba(255,255,255,0.1)' }}>
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                                     </button>
                                 </div>
@@ -978,14 +982,12 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                                                     justifyContent: 'center',
                                                     position: 'relative'
                                                 }}>
-                                                    {userData.avatar ? (
-                                                        <img src={userData.avatar} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                    ) : (
-                                                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--secondary-text)" strokeWidth="1.5">
-                                                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                                                            <circle cx="12" cy="7" r="4"></circle>
-                                                        </svg>
-                                                    )}
+                                                    <img
+                                                        src={resolveAvatar(userData.avatar, userData.gender, MEDIA_BASE_URL)}
+                                                        alt="Profile"
+                                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                        onError={e => { e.target.src = userData.gender?.toLowerCase() === 'female' ? '/images/female.jpg' : '/images/male.jpg'; }}
+                                                    />
                                                 </div>
                                                 <div>
                                                     <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: 'var(--text-color)' }}>Profile Picture</h4>
@@ -1823,9 +1825,9 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                                 overflowY: 'auto',
                                 background: 'var(--bg-color)'
                             }}>
-                                {/* Profile Header Section */}
+                                {/* Profile Banner Section */}
                                 <div style={{
-                                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                    background: 'linear-gradient(135deg, #1a4fba 0%, #3b82f6 100%)',
                                     padding: '40px 30px 100px',
                                     position: 'relative',
                                     textAlign: 'center'
@@ -1848,13 +1850,14 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                                         zIndex: 20
                                     }}>
                                         <img
-                                            src={selectedUser.avatar}
+                                            src={resolveAvatar(selectedUser.avatar, selectedUser.gender, MEDIA_BASE_URL)}
                                             alt={selectedUser.name}
                                             style={{
                                                 width: '100%',
                                                 height: '100%',
                                                 objectFit: 'cover'
                                             }}
+                                            onError={e => { e.target.src = '/images/male.jpg'; }}
                                         />
                                         <span
                                             className={`status-badge-overlay ${selectedUser.status.toLowerCase()}`}
@@ -1894,7 +1897,7 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                                             borderRadius: '20px',
                                             fontSize: '0.8rem',
                                             fontWeight: '600',
-                                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                            background: 'linear-gradient(135deg, #1a4fba 0%, #3b82f6 100%)',
                                             color: 'white',
                                             display: 'inline-flex',
                                             alignItems: 'center',

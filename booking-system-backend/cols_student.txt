@@ -1,0 +1,32 @@
+﻿[dotenv@17.2.3] injecting env (28) from .env -- tip: ≡ƒöÉ prevent committing .env to code: https://dotenvx.com/precommit
+? Connected to PostgreSQL database
+[
+  {
+    "column_name": "id",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "slot_id",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "student_id",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "enrollment_status",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "notes",
+    "data_type": "text"
+  },
+  {
+    "column_name": "enrolled_at",
+    "data_type": "timestamp without time zone"
+  },
+  {
+    "column_name": "updated_at",
+    "data_type": "timestamp without time zone"
+  }
+]

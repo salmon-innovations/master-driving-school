@@ -390,12 +390,10 @@ const Schedule = ({ onNavigate }) => {
                     // Usually TDC covers 2 days per single slot entry. So if we insert one TDC on Mon, it covers Mon-Tue.
                     // Depending on preference, users might want to skip the next day for TDC, but to keep it simple, 
                     // we'll just insert exactly on the days selected. If you meant to skip, uncomment below:
-                    /*
                     if (autoData.type === 'tdc') {
                         currentDate.setDate(currentDate.getDate() + 1);
                         if (currentDate.getDay() === 0) currentDate.setDate(currentDate.getDate() + 1);
                     }
-                    */
                 }
                 currentDate.setDate(currentDate.getDate() + 1);
             }

@@ -1,0 +1,6 @@
+﻿[dotenv@17.2.3] injecting env (28) from .env -- tip: ≡ƒöæ add access controls to secrets: https://dotenvx.com/ops
+--- Checking schedule_enrollments for slot 5 ---
+? Connected to PostgreSQL database
+[]
+--- Checking student_enrollments for slot 5 ---
+[]

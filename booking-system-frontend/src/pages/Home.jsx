@@ -21,7 +21,7 @@ function Home({ onNavigate, isLoggedIn }) {
     const timer = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % slides.length)
     }, 5000)
-        const fetchTestimonials = async () => {
+    const fetchTestimonials = async () => {
       try {
         const response = await testimonialsAPI.getAll();
         if (response.success) {
@@ -72,7 +72,7 @@ function Home({ onNavigate, isLoggedIn }) {
     {
       icon: '📅',
       title: 'Flexible Schedule',
-      description: 'Book lessons 7 days a week, including weekends and holidays. Morning or afternoon slots available'
+      description: 'Book sessions Monday to Saturday with flexible Morning or Afternoon slots. Schedule ahead and choose what fits your availability'
     },
     {
       icon: '💰',
@@ -91,7 +91,7 @@ function Home({ onNavigate, isLoggedIn }) {
     },
     {
       icon: '🎓',
-      title: '96% Pass Rate',
+      title: '98% Pass Rate',
       description: 'Our comprehensive training ensures excellent success rates on the first attempt'
     }
   ]
@@ -103,10 +103,10 @@ function Home({ onNavigate, isLoggedIn }) {
   };
 
   const stats = [
-    { number: '15+', label: 'Years of Excellence' },
-    { number: '10,000+', label: 'Satisfied Students' },
-    { number: '8', label: 'Branches Nationwide' },
-    { number: '95%', label: 'Exam Pass Rate' }
+    { number: '5', label: 'Years of Excellence' },
+    { number: '15', label: 'Branches Nationwide' },
+    { number: '40,000+', label: 'Students Trained' },
+    { number: '98%', label: 'Exam Pass Rate' }
   ]
 
   const specialOffers = [
@@ -301,80 +301,80 @@ function Home({ onNavigate, isLoggedIn }) {
         </div>
       </section>
 
-      {/* Testimonials Section */}
+      {/* Testimonials / Customer Feedback Section */}
       {testimonials.length > 0 && (
-      <section className="py-12 sm:py-16 lg:py-20 bg-white w-full">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          <h2
-            className="text-2xl sm:text-3xl lg:text-4xl font-bold text-center text-[#2157da] mb-4"
-            data-aos="fade-down"
-          >
-            What Our Students Say
-          </h2>
-          <p
-            className="text-center text-gray-600 mb-8 sm:mb-12 text-sm sm:text-base"
-            data-aos="fade-down"
-            data-aos-delay="100"
-          >
-            Real experiences from real students who learned to drive with confidence
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 max-w-6xl mx-auto">
-            {testimonials.map((testimonial, index) => (
-              <div key={index} className="bg-white rounded-xl shadow-[0_4px_20px_rgb(0,0,0,0.06)] border border-gray-100 overflow-hidden flex flex-col h-full hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all duration-300 transform hover:-translate-y-1">
-                {/* TOP MEDIA AREA - FLUSH TO EDGES */}
-                <div className="w-full aspect-video bg-gray-100 relative group overflow-hidden shrink-0">
-                  {testimonial.videoUrl ? (
-                    <>
-                      <video className="w-full h-full object-cover block cursor-pointer" preload="metadata" onClick={() => setSelectedReviewMedia({ type: 'video', url: getMediaUrl(testimonial.videoUrl) })}>
-                        <source src={getMediaUrl(testimonial.videoUrl)} type="video/mp4" />
-                      </video>
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="w-14 h-14 rounded-full bg-white/90 shadow-lg flex items-center justify-center group-hover:scale-110 transition-transform">
-                          <span className="text-[#2157da] text-2xl ml-1">▶</span>
+        <section className="py-12 sm:py-16 lg:py-20 bg-white w-full">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+            <h2
+              className="text-2xl sm:text-3xl lg:text-4xl font-bold text-center text-[#2157da] mb-4"
+              data-aos="fade-down"
+            >
+              What Our Students Say
+            </h2>
+            <p
+              className="text-center text-gray-600 mb-8 sm:mb-12 text-sm sm:text-base"
+              data-aos="fade-down"
+              data-aos-delay="100"
+            >
+              Real experiences from real students who learned to drive with confidence
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 max-w-6xl mx-auto">
+              {testimonials.map((testimonial, index) => (
+                <div key={index} className="bg-white rounded-xl shadow-[0_4px_20px_rgb(0,0,0,0.06)] border border-gray-100 overflow-hidden flex flex-col h-full hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all duration-300 transform hover:-translate-y-1">
+                  {/* TOP MEDIA AREA - FLUSH TO EDGES */}
+                  <div className="w-full aspect-video bg-gray-100 relative group overflow-hidden shrink-0">
+                    {testimonial.videoUrl ? (
+                      <>
+                        <video className="w-full h-full object-cover block cursor-pointer" preload="metadata" onClick={() => setSelectedReviewMedia({ type: 'video', url: getMediaUrl(testimonial.videoUrl) })}>
+                          <source src={getMediaUrl(testimonial.videoUrl)} type="video/mp4" />
+                        </video>
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <div className="w-14 h-14 rounded-full bg-white/90 shadow-lg flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <span className="text-[#2157da] text-2xl ml-1">▶</span>
+                          </div>
                         </div>
+                      </>
+                    ) : testimonial.imageUrl ? (
+                      <div className="relative w-full h-full cursor-pointer" onClick={() => setSelectedReviewMedia({ type: 'image', url: getMediaUrl(testimonial.imageUrl) })}>
+                        <img src={getMediaUrl(testimonial.imageUrl)} alt="Student Review" className="w-full h-full object-cover block transition-transform duration-500 group-hover:scale-110" />
+                        <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                       </div>
-                    </>
-                  ) : testimonial.imageUrl ? (
-                    <div className="relative w-full h-full cursor-pointer" onClick={() => setSelectedReviewMedia({ type: 'image', url: getMediaUrl(testimonial.imageUrl) })}>
-                      <img src={getMediaUrl(testimonial.imageUrl)} alt="Student Review" className="w-full h-full object-cover block transition-transform duration-500 group-hover:scale-110" />
-                      <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                    </div>
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-gray-100">
-                      <svg className="w-12 h-12 text-blue-200 mb-2" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
-                      <span className="text-gray-400 text-sm font-medium">Student Review</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* BOTTOM CONTENT AREA */}
-                <div className="p-5 sm:p-6 flex flex-col grow">
-                  <div className="flex items-center gap-1 mb-3">
-                    {[...Array(testimonial.rating || 5)].map((_, i) => (
-                      <span key={i} className="text-[#F3B74C] text-lg">★</span>
-                    ))}
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-gray-100">
+                        <svg className="w-12 h-12 text-blue-200 mb-2" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z" /></svg>
+                        <span className="text-gray-400 text-sm font-medium">Student Review</span>
+                      </div>
+                    )}
                   </div>
-                  
-                  <p className="text-gray-600 text-sm leading-relaxed mb-6 grow line-clamp-4 relative">
-                    <span className="text-3xl text-gray-200 absolute -top-4 -left-2">"</span>
-                    <span className="relative z-10 italic">{(testimonial.comment && testimonial.comment !== 'No comment') ? testimonial.comment : 'Excellent driving school! The instructors were very patient and I learned a lot.'}</span>
-                  </p>
 
-                  <div className="pt-4 border-t border-gray-100 flex items-center gap-3 mt-auto">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#2157da] to-blue-400 text-white flex items-center justify-center font-bold text-lg shadow-sm shrink-0">
-                      {testimonial.name ? testimonial.name.charAt(0).toUpperCase() : 'S'}
+                  {/* BOTTOM CONTENT AREA */}
+                  <div className="p-5 sm:p-6 flex flex-col grow">
+                    <div className="flex items-center gap-1 mb-3">
+                      {[...Array(testimonial.rating || 5)].map((_, i) => (
+                        <span key={i} className="text-[#F3B74C] text-lg">★</span>
+                      ))}
                     </div>
-                    <div className="overflow-hidden">
-                      <h4 className="font-bold text-gray-900 text-sm truncate">{testimonial.name || 'Student'}</h4>
-                      <p className="text-xs text-[#2157da] font-medium truncate mt-0.5">{testimonial.course && testimonial.course.replace(/Course/g, '') || 'Driving Student'}</p>
+
+                    <p className="text-gray-600 text-sm leading-relaxed mb-6 grow line-clamp-4 relative">
+                      <span className="text-3xl text-gray-200 absolute -top-4 -left-2">"</span>
+                      <span className="relative z-10 italic">{(testimonial.comment && testimonial.comment !== 'No comment') ? testimonial.comment : 'Excellent driving school! The instructors were very patient and I learned a lot.'}</span>
+                    </p>
+
+                    <div className="pt-4 border-t border-gray-100 flex items-center gap-3 mt-auto">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#2157da] to-blue-400 text-white flex items-center justify-center font-bold text-lg shadow-sm shrink-0">
+                        {testimonial.name ? testimonial.name.charAt(0).toUpperCase() : 'S'}
+                      </div>
+                      <div className="overflow-hidden">
+                        <h4 className="font-bold text-gray-900 text-sm truncate">{testimonial.name || 'Student'}</h4>
+                        <p className="text-xs text-[#2157da] font-medium truncate mt-0.5">{testimonial.course && testimonial.course.replace(/Course/g, '') || 'Driving Student'}</p>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
       )}
 
       {/* How It Works Section */}
@@ -531,105 +531,158 @@ function Home({ onNavigate, isLoggedIn }) {
       </section>
 
 
-      {/* Our Partners Section */}
+      {/* Mission & Vision Section */}
       <section className="py-12 sm:py-16 lg:py-20 bg-gray-50 w-full">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <h2
             className="text-2xl sm:text-3xl lg:text-4xl font-bold text-center text-[#2157da] mb-4"
             data-aos="fade-down"
           >
-            Our Partners
+            Our Mission &amp; Vision
           </h2>
           <p
             className="text-center text-gray-600 mb-8 sm:mb-12 text-sm sm:text-base max-w-2xl mx-auto"
             data-aos="fade-down"
             data-aos-delay="100"
           >
-            Proud to partner with leading organizations in automotive safety and driver education
+            Driven by purpose, guided by vision — building safer roads one driver at a time
           </p>
-          <div className="max-w-5xl mx-auto">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-8 items-center">
-              <div
-                className="bg-white p-6 rounded-xl shadow-md hover:shadow-xl transition-all flex items-center justify-center h-32"
-                data-aos="flip-up"
-                data-aos-delay="0"
-              >
-                <div className="text-center">
-                  <div className="text-4xl mb-2">🚗</div>
-                  <p className="text-sm font-semibold text-gray-700">LTO Philippines</p>
+          <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto">
+            <div
+              className="bg-white p-8 sm:p-10 rounded-3xl shadow-xl border-t-8 border-[#2157da]"
+              data-aos="fade-up"
+            >
+              <div className="flex items-center gap-4 mb-6">
+                <div className="p-3 bg-blue-100 rounded-2xl text-[#2157da]">
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
                 </div>
+                <h3 className="text-2xl sm:text-3xl font-bold text-gray-900 uppercase">Our Mission</h3>
               </div>
-              <div
-                className="bg-white p-6 rounded-xl shadow-md hover:shadow-xl transition-all flex items-center justify-center h-32"
-                data-aos="flip-up"
-                data-aos-delay="100"
-              >
-                <div className="text-center">
-                  <div className="text-4xl mb-2">🛡️</div>
-                  <p className="text-sm font-semibold text-gray-700">DOTr</p>
-                </div>
-              </div>
-              <div
-                className="bg-white p-6 rounded-xl shadow-md hover:shadow-xl transition-all flex items-center justify-center h-32"
-                data-aos="flip-up"
-                data-aos-delay="200"
-              >
-                <div className="text-center">
-                  <div className="text-4xl mb-2">🏢</div>
-                  <p className="text-sm font-semibold text-gray-700">TESDA</p>
-                </div>
-              </div>
-              <div
-                className="bg-white p-6 rounded-xl shadow-md hover:shadow-xl transition-all flex items-center justify-center h-32"
-                data-aos="flip-up"
-                data-aos-delay="300"
-              >
-                <div className="text-center">
-                  <div className="text-4xl mb-2">⚙️</div>
-                  <p className="text-sm font-semibold text-gray-700">AAP</p>
-                </div>
-              </div>
-              <div
-                className="bg-white p-6 rounded-xl shadow-md hover:shadow-xl transition-all flex items-center justify-center h-32"
-                data-aos="flip-up"
-                data-aos-delay="400"
-              >
-                <div className="text-center">
-                  <div className="text-4xl mb-2">🚙</div>
-                  <p className="text-sm font-semibold text-gray-700">Toyota PH</p>
-                </div>
-              </div>
-              <div
-                className="bg-white p-6 rounded-xl shadow-md hover:shadow-xl transition-all flex items-center justify-center h-32"
-                data-aos="flip-up"
-                data-aos-delay="500"
-              >
-                <div className="text-center">
-                  <div className="text-4xl mb-2">🔧</div>
-                  <p className="text-sm font-semibold text-gray-700">Honda PH</p>
-                </div>
-              </div>
-              <div
-                className="bg-white p-6 rounded-xl shadow-md hover:shadow-xl transition-all flex items-center justify-center h-32"
-                data-aos="flip-up"
-                data-aos-delay="600"
-              >
-                <div className="text-center">
-                  <div className="text-4xl mb-2">💼</div>
-                  <p className="text-sm font-semibold text-gray-700">Petron</p>
-                </div>
-              </div>
-              <div
-                className="bg-white p-6 rounded-xl shadow-md hover:shadow-xl transition-all flex items-center justify-center h-32"
-                data-aos="flip-up"
-                data-aos-delay="700"
-              >
-                <div className="text-center">
-                  <div className="text-4xl mb-2">🏆</div>
-                  <p className="text-sm font-semibold text-gray-700">Shell</p>
-                </div>
-              </div>
+              <p className="text-base sm:text-lg text-gray-700 leading-relaxed">
+                Our mission is to help lessen vehicle accidents by providing our students with the best training possible to become responsible and safe drivers.
+              </p>
             </div>
+            <div
+              className="bg-white p-8 sm:p-10 rounded-3xl shadow-xl border-t-8 border-[#F3B74C]"
+              data-aos="fade-up"
+              data-aos-delay="200"
+            >
+              <div className="flex items-center gap-4 mb-6">
+                <div className="p-3 bg-yellow-50 rounded-2xl text-yellow-600">
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                </div>
+                <h3 className="text-2xl sm:text-3xl font-bold text-gray-900 uppercase">Our Vision</h3>
+              </div>
+              <p className="text-base sm:text-lg text-gray-700 leading-relaxed">
+                It is our vision to be the number one Driving School in the Philippines in terms of number of branches and enrollees.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Our Values Section */}
+      <section className="py-12 sm:py-16 lg:py-20 bg-gray-50 w-full">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <h2
+            className="text-2xl sm:text-3xl lg:text-4xl font-bold text-center text-[#1a2d6b] mb-4"
+            data-aos="fade-down"
+          >
+            Our Values
+          </h2>
+          <p
+            className="text-center text-gray-500 mb-10 sm:mb-14 text-sm sm:text-base max-w-2xl mx-auto"
+            data-aos="fade-down"
+            data-aos-delay="100"
+          >
+            The core principles that guide everything we do at Master Driving School
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8 max-w-5xl mx-auto">
+            {[
+              {
+                title: 'Mastery',
+                description: 'The key to mastery is time and repetition. We must possess the knowledge needed to set plans in motion and have an understanding about the ins and outs of the business.',
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-white">
+                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                    <path d="M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0" /><path d="M12 2v2M12 20v2M2 12h2M20 12h2" />
+                  </svg>
+                ),
+              },
+              {
+                title: 'Accountability',
+                description: 'Have an assistance that an individual will be evaluated on their performance or behavior related to something for which they are responsible.',
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-white">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  </svg>
+                ),
+              },
+              {
+                title: 'Service',
+                description: 'To deliver work in completing tasks for the benefit of our customers. It involves all things that our business does to ensure your satisfaction.',
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-white">
+                    <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z" /><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                  </svg>
+                ),
+              },
+              {
+                title: 'Teamwork',
+                description: 'Teamwork builds morale. Our team maintains a sense of camaraderie as we work toward our goal.',
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-white">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                  </svg>
+                ),
+              },
+              {
+                title: 'Excellence',
+                description: 'Our business operates to become the best it can possibly be. Our goal is to be the number one Driving School in the Philippines.',
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-white">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                ),
+              },
+              {
+                title: 'Responsibility',
+                description: 'The authority and responsibility go side by side. It is our duty to perform tasks, functions and activities assigned to us positively.',
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-white">
+                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                ),
+              },
+            ].map((value, index) => (
+              <div
+                key={index}
+                className="bg-white rounded-2xl p-7 sm:p-9 flex flex-col items-start text-left shadow-[0_4px_20px_rgba(0,0,0,0.07)] hover:shadow-[0_8px_32px_rgba(33,87,218,0.13)] transition-all duration-300 hover:-translate-y-1 border border-gray-100"
+                data-aos="fade-up"
+                data-aos-delay={index * 100}
+              >
+                {/* Icon Box */}
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#2157da] to-[#3b7cf5] flex items-center justify-center mb-6 shadow-md">
+                  {value.icon}
+                </div>
+
+                {/* Title — first letter in blue */}
+                <h3 className="text-xl font-bold text-[#1a2d6b] mb-3">
+                  <span className="text-[#2157da]">{value.title[0]}</span>
+                  {value.title.slice(1)}
+                </h3>
+
+                {/* Description — italic */}
+                <p className="text-sm text-gray-500 leading-relaxed italic">
+                  {value.description}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -744,7 +797,7 @@ function Home({ onNavigate, isLoggedIn }) {
           </div>
         </div>
       )}
-          {/* Review Media Modal */}
+      {/* Review Media Modal */}
       {selectedReviewMedia && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm" onClick={() => setSelectedReviewMedia(null)}>
           <button className="absolute top-4 right-4 sm:top-6 sm:right-6 bg-white text-black rounded-full p-2 hover:bg-gray-200 z-[110] transition-colors" onClick={() => setSelectedReviewMedia(null)}>
@@ -759,7 +812,7 @@ function Home({ onNavigate, isLoggedIn }) {
           </div>
         </div>
       )}
-</div>
+    </div>
   )
 }
 

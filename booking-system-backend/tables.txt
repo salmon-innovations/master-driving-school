@@ -1,0 +1,17 @@
+﻿[dotenv@17.2.3] injecting env (28) from .env -- tip: ≡ƒ¢á∩╕Å  run anywhere with `dotenvx run -- yourcommand`
+? Connected to PostgreSQL database
+Tables: [
+  'cart_items',
+  'branches',
+  'news_events',
+  'roles',
+  'courses',
+  'student_enrollments',
+  'schedule_slots',
+  'schedules',
+  'schedule_enrollments',
+  'users',
+  'bookings',
+  'transactions',
+  'testimonials'
+]

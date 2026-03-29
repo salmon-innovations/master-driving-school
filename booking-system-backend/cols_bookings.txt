@@ -1,0 +1,72 @@
+﻿[dotenv@17.2.3] injecting env (28) from .env -- tip: ΓÜÖ∩╕Å  write to custom object with { processEnv: myObject }
+? Connected to PostgreSQL database
+[
+  {
+    "column_name": "id",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "user_id",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "course_id",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "branch_id",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "booking_date",
+    "data_type": "date"
+  },
+  {
+    "column_name": "booking_time",
+    "data_type": "time without time zone"
+  },
+  {
+    "column_name": "status",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "notes",
+    "data_type": "text"
+  },
+  {
+    "column_name": "total_amount",
+    "data_type": "numeric"
+  },
+  {
+    "column_name": "created_at",
+    "data_type": "timestamp without time zone"
+  },
+  {
+    "column_name": "updated_at",
+    "data_type": "timestamp without time zone"
+  },
+  {
+    "column_name": "payment_type",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "payment_method",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "enrollment_type",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "course_type",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "enrolled_by",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "transaction_id",
+    "data_type": "character varying"
+  }
+]

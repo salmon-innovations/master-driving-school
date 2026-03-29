@@ -1,0 +1,36 @@
+﻿[dotenv@17.2.3] injecting env (28) from .env -- tip: ΓÜÖ∩╕Å  enable debug logging with { debug: true }
+? Connected to PostgreSQL database
+[
+  {
+    "conname": "schedule_enrollments_enrollment_status_check",
+    "pg_get_constraintdef": "CHECK (((enrollment_status)::text = ANY (ARRAY[('enrolled'::character varying)::text, ('completed'::character varying)::text, ('cancelled'::character varying)::text, ('no-show'::character varying)::text])))"
+  },
+  {
+    "conname": "schedule_enrollments_id_not_null",
+    "pg_get_constraintdef": "NOT NULL id"
+  },
+  {
+    "conname": "schedule_enrollments_pkey",
+    "pg_get_constraintdef": "PRIMARY KEY (id)"
+  },
+  {
+    "conname": "schedule_enrollments_slot_id_student_id_key",
+    "pg_get_constraintdef": "UNIQUE (slot_id, student_id)"
+  },
+  {
+    "conname": "schedule_enrollments_slot_id_fkey",
+    "pg_get_constraintdef": "FOREIGN KEY (slot_id) REFERENCES schedule_slots(id) ON DELETE CASCADE"
+  },
+  {
+    "conname": "schedule_enrollments_student_id_fkey",
+    "pg_get_constraintdef": "FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE"
+  },
+  {
+    "conname": "schedule_enrollments_reschedule_fee_paid_not_null",
+    "pg_get_constraintdef": "NOT NULL reschedule_fee_paid"
+  },
+  {
+    "conname": "schedule_enrollments_booking_id_fkey",
+    "pg_get_constraintdef": "FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE"
+  }
+]

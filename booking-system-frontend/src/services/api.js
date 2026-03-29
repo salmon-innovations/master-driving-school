@@ -247,6 +247,16 @@ export const authAPI = {
       body: JSON.stringify(data),
     });
   },
+
+  // Upload / change profile picture
+  uploadAvatar: async (file) => {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    return await apiRequest('/auth/upload-avatar', {
+      method: 'POST',
+      body: formData,
+    });
+  },
 };
 
 // Courses API

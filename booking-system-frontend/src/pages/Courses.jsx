@@ -18,6 +18,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   const [availabilityLoading, setAvailabilityLoading] = useState(false)
   const [hasAvailableSlots, setHasAvailableSlots] = useState(true)
   const [slotAvailabilityDetail, setSlotAvailabilityDetail] = useState(null) // null | { hasTdc, hasPdc, tdcLabel, pdcLabel }
+  const [isMobileScreen, setIsMobileScreen] = useState(window.innerWidth < 1024)
 
   // Format branch name - remove company prefixes
   const formatBranchName = (name) => {
@@ -84,6 +85,12 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
 
     fetchInitialData();
   }, [showNotification]);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobileScreen(window.innerWidth < 1024);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Transform database courses to match UI structure
   const packages = courses.map(course => {
@@ -365,8 +372,11 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
         const available = Array.isArray(slots) ? slots.filter(s => {
           const slotDate = new Date((s.date || s.start_date) + 'T00:00:00')
           if (slotDate < minDate) return false
-          if (isTDC && tdcCourseType && s.course_type && s.course_type.toLowerCase() !== tdcCourseType.toLowerCase()) return false
+          
+          // For initial availability check, we ignore strict type mapping (Online vs F2F)
+          // and just check if the category/vehicle class matches
           if (!isTDC && !courseTypeMatches(s.course_type)) return false
+          
           return s.available_slots == null || s.available_slots > 0
         }) : []
         setHasAvailableSlots(available.length > 0)
@@ -901,83 +911,140 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
             <p className="text-gray-500 mt-2">Please check back later.</p>
           </div>
         ) : (
-          <div className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[600px]">
-                <thead>
-                  <tr className="bg-[#2157da] text-white">
-                    <th className="py-4 px-6 font-semibold text-sm">Course Details</th>
-                    <th className="py-4 px-6 font-semibold text-sm text-center whitespace-nowrap">Duration</th>
-                    <th className="py-4 px-6 font-semibold text-sm text-right whitespace-nowrap">Price</th>
-                    <th className="py-4 px-6 font-semibold text-sm text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {filteredPackages.map((pkg, index) => (
-                    <tr 
-                      key={pkg.id} 
-                      className={`hover:bg-blue-50 transition-colors ${pkg.popular ? 'bg-orange-50/30' : ''}`}
+        <div>
+          {isMobileScreen ? (
+            /* Mobile: Card layout */
+            <div className="flex flex-col gap-4">
+              {filteredPackages.map((pkg) => {
+                const priceDisplay = (() => {
+                  if (pkg.priceNote) return pkg.priceNote;
+                  if (pkg.typeOptions && pkg.typeOptions.length > 0) {
+                    if (pkg.typeOptions.length === 1) return `₱${Number(pkg.typeOptions[0].price || 0).toLocaleString()}`;
+                    const minPrice = Math.min(...pkg.typeOptions.map(o => Number(o.price || 0)));
+                    const maxPrice = Math.max(...pkg.typeOptions.map(o => Number(o.price || 0)));
+                    return minPrice === maxPrice
+                      ? `₱${minPrice.toLocaleString()}`
+                      : `₱${minPrice.toLocaleString()} – ₱${maxPrice.toLocaleString()}`;
+                  }
+                  return `₱${Number(pkg.price || 0).toLocaleString()}`;
+                })();
+
+                return (
+                  <div
+                    key={pkg.id}
+                    className={`bg-white rounded-2xl shadow-md border border-gray-100 p-4 flex flex-col gap-3 active:scale-[0.99] transition-all ${pkg.popular ? 'border-l-4 border-l-[#F3B74C]' : ''}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <button
+                        className="text-left text-base font-bold text-[#2157da] hover:underline flex-1"
+                        onClick={() => handleViewCourse(pkg)}
+                      >
+                        {pkg.name}
+                      </button>
+                      {pkg.popular && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3B74C] text-[#2157da] shadow-sm whitespace-nowrap flex-shrink-0 mt-0.5">
+                          BEST SELLER
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between border-t border-gray-100 pt-3">
+                      <div className="flex items-center gap-1.5 text-gray-500 text-sm">
+                        <span>⏱</span>
+                        <span className="font-medium">{pkg.duration}</span>
+                      </div>
+                      <span className="text-[#2157da] font-black text-lg">{priceDisplay}</span>
+                    </div>
+                    <button
+                      onClick={() => handleViewCourse(pkg)}
+                      className={`w-full py-2.5 text-sm font-bold rounded-xl transition-all active:scale-95 ${pkg.popular ? 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b]' : 'bg-[#2157da] text-white hover:bg-[#1a3a8a]'}`}
                     >
-                      <td className="py-4 px-4 sm:px-6 align-middle">
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-2 flex-wrap mb-1">
-                            <h3 
-                              className="text-sm sm:text-base font-bold text-[#2157da] cursor-pointer hover:underline min-h-0"
-                              onClick={() => handleViewCourse(pkg)}
-                            >
-                              {pkg.name}
-                            </h3>
-                            {pkg.popular && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3B74C] text-[#2157da] shadow-sm whitespace-nowrap">
-                                BEST SELLER
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xs text-gray-600 hidden sm:block">
-                            <ul className="flex gap-4 list-disc list-inside">
-                              {pkg.features.slice(0, 2).map((feature, idx) => (
-                                <li key={idx} className="truncate max-w-[200px] lg:max-w-xs" title={feature}>{feature}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-4 px-4 sm:px-6 text-center text-sm font-medium text-gray-700 align-middle whitespace-nowrap">
-                        {pkg.duration}
-                      </td>
-                      <td className="py-4 px-4 sm:px-6 text-right font-black text-gray-800 text-base sm:text-lg align-middle whitespace-nowrap">
-                        {pkg.priceNote ? (
-                          <div className="text-[15px]">{pkg.priceNote}</div>
-                        ) : (
-                          <div>
-                            {(() => {
-                              if (pkg.typeOptions && pkg.typeOptions.length > 0) {
-                                if (pkg.typeOptions.length === 1) return `₱${Number(pkg.typeOptions[0].price || 0).toLocaleString()}`;
-                                const minPrice = Math.min(...pkg.typeOptions.map(o => Number(o.price || 0)));
-                                const maxPrice = Math.max(...pkg.typeOptions.map(o => Number(o.price || 0)));
-                                return minPrice === maxPrice 
-                                  ? `₱${minPrice.toLocaleString()}` 
-                                  : `₱${minPrice.toLocaleString()} - ₱${maxPrice.toLocaleString()}`;
-                              }
-                              return `₱${Number(pkg.price || 0).toLocaleString()}`;
-                            })()}
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-4 px-4 sm:px-6 text-center align-middle">
-                        <button
-                          onClick={() => handleViewCourse(pkg)}
-                          className={`inline-flex items-center justify-center px-4 sm:px-6 py-2 border border-transparent text-sm font-bold rounded-md shadow-sm transition-all active:scale-95 whitespace-nowrap ${pkg.popular ? 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b]' : 'bg-[#2157da] text-white hover:bg-[#1a3a8a]'}`}
-                        >
-                          Select
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      Select Course
+                    </button>
+                  </div>
+                );
+              })}
             </div>
-          </div>
+          ) : (
+            /* Desktop: Table layout */
+            <div className="bg-white rounded-lg shadow-md overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[600px]">
+                  <thead>
+                    <tr className="bg-[#2157da] text-white">
+                      <th className="py-4 px-6 font-semibold text-sm">Course Details</th>
+                      <th className="py-4 px-6 font-semibold text-sm text-center whitespace-nowrap">Duration</th>
+                      <th className="py-4 px-6 font-semibold text-sm text-right whitespace-nowrap">Price</th>
+                      <th className="py-4 px-6 font-semibold text-sm text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {filteredPackages.map((pkg) => (
+                      <tr
+                        key={pkg.id}
+                        className={`hover:bg-blue-50 transition-colors ${pkg.popular ? 'bg-orange-50/30' : ''}`}
+                      >
+                        <td className="py-4 px-6 align-middle">
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <h3
+                                className="text-sm sm:text-base font-bold text-[#2157da] cursor-pointer hover:underline"
+                                onClick={() => handleViewCourse(pkg)}
+                              >
+                                {pkg.name}
+                              </h3>
+                              {pkg.popular && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3B74C] text-[#2157da] shadow-sm whitespace-nowrap">
+                                  BEST SELLER
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-600">
+                              <ul className="flex gap-4 list-disc list-inside">
+                                {pkg.features.slice(0, 2).map((feature, idx) => (
+                                  <li key={idx} className="truncate max-w-[200px] lg:max-w-xs" title={feature}>{feature}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-4 px-6 text-center text-sm font-medium text-gray-700 align-middle whitespace-nowrap">
+                          {pkg.duration}
+                        </td>
+                        <td className="py-4 px-6 text-right font-black text-gray-800 text-base sm:text-lg align-middle whitespace-nowrap">
+                          {pkg.priceNote ? (
+                            <div className="text-[15px]">{pkg.priceNote}</div>
+                          ) : (
+                            <div>
+                              {(() => {
+                                if (pkg.typeOptions && pkg.typeOptions.length > 0) {
+                                  if (pkg.typeOptions.length === 1) return `₱${Number(pkg.typeOptions[0].price || 0).toLocaleString()}`;
+                                  const minPrice = Math.min(...pkg.typeOptions.map(o => Number(o.price || 0)));
+                                  const maxPrice = Math.max(...pkg.typeOptions.map(o => Number(o.price || 0)));
+                                  return minPrice === maxPrice
+                                    ? `₱${minPrice.toLocaleString()}`
+                                    : `₱${minPrice.toLocaleString()} - ₱${maxPrice.toLocaleString()}`;
+                                }
+                                return `₱${Number(pkg.price || 0).toLocaleString()}`;
+                              })()}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-4 px-6 text-center align-middle">
+                          <button
+                            onClick={() => handleViewCourse(pkg)}
+                            className={`inline-flex items-center justify-center px-6 py-2 border border-transparent text-sm font-bold rounded-md shadow-sm transition-all active:scale-95 whitespace-nowrap ${pkg.popular ? 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b]' : 'bg-[#2157da] text-white hover:bg-[#1a3a8a]'}`}
+                          >
+                            Select
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
         )}
       </div>
     </div>

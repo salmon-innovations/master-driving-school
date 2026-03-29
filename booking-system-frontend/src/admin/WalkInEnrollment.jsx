@@ -498,48 +498,28 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         ]).then(([rawTdc, rawPdc]) => {
             const tdcSlots = transformSlots(rawTdc);
             const pdcSlots = transformSlots(rawPdc);
-            const hasTdcSlot = (type) => {
-                const t = (type || '').toLowerCase();
-                if (t.includes('online')) return tdcSlots.some(s => (s.course_type || '').toLowerCase().includes('online'));
-                return tdcSlots.some(s => !(s.course_type || '').toLowerCase().includes('online'));
+            const hasTdcSlot = () => {
+                return tdcSlots.length > 0;
             };
-            // courseName is passed for disambiguation when course_type alone is ambiguous
-            // (e.g. a Motorcycle PDC course that was saved with course_type='Manual')
-            const hasPdcSlot = (type, courseName = '') => {
-                const t = (type || '').toLowerCase();
+            const hasPdcSlot = (courseType, courseName = '') => {
+                const t = (courseType || '').toLowerCase();
                 const n = (courseName || '').toLowerCase();
+                
+                // Categorize the course based on name and type
                 const isMoto = t.includes('motorcycle') || t.includes('moto') || n.includes('motorcycle');
                 const isTricycle = t.includes('tricycle') || t.includes('v1') || n.includes('tricycle');
                 const isB1B2 = t.includes('b1') || t.includes('b2') || t.includes('van') || t.includes('l300')
                     || n.includes('b1') || n.includes('b2') || n.includes('van') || n.includes('l300');
-                // Tricycle (course_type: V1-Tricycle)
-                if (isTricycle)
-                    return pdcSlots.some(s => (s.course_type || '').toLowerCase().includes('tricycle'));
-                // B1/B2 Van-L300
-                if (isB1B2)
-                    return pdcSlots.some(s => { const ct = (s.course_type || '').toLowerCase(); return ct.includes('b1') || ct.includes('b2'); });
-                // Motorcycle — checked BEFORE manual/automatic so a motorcycle course
-                // saved with course_type='Manual' is matched correctly via its name
-                if (isMoto)
-                    return pdcSlots.some(s => (s.course_type || '').toLowerCase().includes('motorcycle'));
-                // Car AT (promo: 'carat', or direct course_type: 'automatic')
-                if (t === 'carat' || t.includes('automatic'))
-                    return pdcSlots.some(s => {
-                        const ct = (s.course_type || '').toLowerCase();
-                        if (ct.includes('motorcycle') || ct.includes('tricycle') || ct.includes('b1') || ct.includes('b2')) return false;
-                        const tx = (s.transmission || '').toLowerCase();
-                        return tx.includes('automatic') || tx === 'at';
-                    });
-                // Car MT (promo: 'carmt'/'car', or direct course_type: 'manual')
-                if (t === 'carmt' || t === 'car' || t.includes('manual'))
-                    return pdcSlots.some(s => {
-                        const ct = (s.course_type || '').toLowerCase();
-                        if (ct.includes('motorcycle') || ct.includes('tricycle') || ct.includes('b1') || ct.includes('b2')) return false;
-                        const tx = (s.transmission || '').toLowerCase();
-                        return tx.includes('manual') || tx === 'mt';
-                    });
-                // Unknown type — be strict: don't assume any slot qualifies
-                return false;
+
+                // Filter PDC slots by category first
+                return pdcSlots.some(s => {
+                    const ct = (s.course_type || '').toLowerCase();
+                    if (isTricycle) return ct.includes('tricycle');
+                    if (isB1B2) return ct.includes('b1') || ct.includes('b2') || ct.includes('van') || ct.includes('l300');
+                    if (isMoto) return ct.includes('motorcycle') || ct.includes('moto');
+                    // Generic Car
+                    return !ct.includes('motorcycle') && !ct.includes('moto') && !ct.includes('tricycle') && !ct.includes('b1') && !ct.includes('b2');
+                });
             };
             const avail = {};
             packages.forEach(pkg => {
@@ -547,12 +527,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 const ct = (pkg.course_type || '').trim();
                 const cn = pkg.name || '';
                 if (cat === 'TDC') {
-                    avail[pkg.id] = hasTdcSlot(ct);
+                    avail[pkg.id] = hasTdcSlot();
                 } else if (cat === 'PDC') {
                     avail[pkg.id] = hasPdcSlot(ct, cn);
                 } else if (cat === 'Promo') {
                     const [tdcPart, pdcPart] = ct.split('+');
-                    avail[pkg.id] = hasTdcSlot(tdcPart) && hasPdcSlot(pdcPart);
+                    avail[pkg.id] = hasTdcSlot() && hasPdcSlot(pdcPart);
                 } else {
                     avail[pkg.id] = true;
                 }
@@ -3152,8 +3132,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                         <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
                                         <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 2:</p>
                                         <p><strong>Date:</strong> {fmtDate(formData.scheduleDate2)}</p>
-                                        <p><strong>Session:</strong> {formData.scheduleSession2 || 'Not selected'}</p>
-                                        <p><strong>Time:</strong> {formData.scheduleTime2 || 'Not selected'}</p>
+                                        <p><strong>Session:</strong> {formData.scheduleSession2 || formData.scheduleSession || 'Not selected'}</p>
+                                        <p><strong>Time:</strong> {formData.scheduleTime2 || formData.scheduleTime || 'Not selected'}</p>
                                     </>
                                 )}
 
@@ -3182,8 +3162,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
                                 <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>{sessionPrefix ? `${sessionPrefix} — ` : ''}Day 2:</p>
                                 <p><strong>Date:</strong> {fmtDate(formData.scheduleDate2)}</p>
-                                <p><strong>Session:</strong> {formData.scheduleSession2 || 'Not selected'}</p>
-                                <p><strong>Time:</strong> {formData.scheduleTime2 || 'Not selected'}</p>
+                                <p><strong>Session:</strong> {formData.scheduleSession2 || formData.scheduleSession || 'Not selected'}</p>
+                                <p><strong>Time:</strong> {formData.scheduleTime2 || formData.scheduleTime || 'Not selected'}</p>
                             </>
                         ) : (
                             <>

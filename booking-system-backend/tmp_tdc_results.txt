@@ -1,0 +1,13 @@
+﻿[dotenv@17.2.3] injecting env (28) from .env -- tip: ≡ƒöÉ encrypt with Dotenvx: https://dotenvx.com
+? Connected to PostgreSQL database
+TDC Slots for 2026-03-26:
+[
+  {
+    "id": 5,
+    "date": "2026-03-26",
+    "end_date": "2026-03-27",
+    "type": "tdc",
+    "session": "Whole Day",
+    "time_range": "08:00 AM - 05:00 PM"
+  }
+]

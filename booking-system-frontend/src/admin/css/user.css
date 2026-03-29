@@ -231,6 +231,11 @@
     color: #d97706;
 }
 
+.role-pill.super-admin {
+    background: rgba(124, 58, 237, 0.12);
+    color: #7c3aed;
+}
+
 .status-pill {
     display: inline-flex;
     align-items: center;
@@ -625,14 +630,7 @@
     }
 }
 
-/* ========================================
-   Modern UI Details Modal
-   ======================================== */
-.profile-modal .modal-header {
-    background: linear-gradient(135deg, var(--card-bg) 0%, var(--bg-color) 100%) !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
-}
-
+/* Modern UI Details Modal */
 .profile-modal .profile-body {
     background: var(--bg-color) !important;
 }

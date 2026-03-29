@@ -1,6 +1,8 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
+const path = require('path');
+const fs = require('fs');
 const { generateVerificationCode, sendVerificationEmail, sendGuestEnrollmentEmail } = require('../utils/emailService');
 
 // Generate JWT token
@@ -314,11 +316,20 @@ const guestCheckout = async (req, res) => {
 // Login user
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password: encodedPassword, isEncoded } = req.body;
 
     // Validate input
-    if (!email || !password) {
+    if (!email || !encodedPassword) {
       return res.status(400).json({ error: 'Please provide email and password' });
+    }
+
+    let password = encodedPassword;
+    if (isEncoded) {
+      try {
+        password = decodeURIComponent(escape(Buffer.from(encodedPassword, 'base64').toString('ascii')));
+      } catch (e) {
+        console.warn('Failed to decode password string', e);
+      }
     }
 
     // Check if user exists
@@ -419,6 +430,7 @@ const getProfile = async (req, res) => {
       `SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.address, u.age, u.gender,
        u.birthday, u.birth_place, u.nationality, u.marital_status, u.contact_numbers, u.zip_code,
        u.emergency_contact_person, u.emergency_contact_number, u.created_at, u.role, u.branch_id, u.permissions,
+       u.avatar,
        b.name as branch_name
        FROM users u
        LEFT JOIN branches b ON u.branch_id = b.id
@@ -458,12 +470,51 @@ const getProfile = async (req, res) => {
         role: user.role,
         branchId: user.branch_id,
         branchName: user.branch_name,
+        avatar: user.avatar || null,
         permissions,
       },
     });
   } catch (error) {
     console.error('Get profile error:', error);
     res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// Upload / change profile picture
+const uploadProfilePicture = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const userId = req.user.id;
+
+    // Build the public URL path for the uploaded file
+    const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+
+    // Fetch old avatar so we can delete the old file
+    const oldResult = await pool.query('SELECT avatar FROM users WHERE id = $1', [userId]);
+    const oldAvatar = oldResult.rows[0]?.avatar || null;
+
+    // Save new avatar URL to DB
+    await pool.query('UPDATE users SET avatar = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [avatarUrl, userId]);
+
+    // Delete old uploaded file (but only if it is a server-uploaded file, not a data-url or external url)
+    if (oldAvatar && oldAvatar.startsWith('/uploads/')) {
+      const oldFilePath = path.join(__dirname, '..', oldAvatar);
+      fs.unlink(oldFilePath, (err) => {
+        if (err) console.warn('Could not delete old avatar file:', err.message);
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile picture updated successfully',
+      avatarUrl,
+    });
+  } catch (error) {
+    console.error('Upload profile picture error:', error);
+    res.status(500).json({ error: 'Server error while uploading profile picture' });
   }
 };
 
@@ -748,6 +799,7 @@ const updateProfile = async (req, res) => {
       firstName,
       middleName,
       lastName,
+      email,
       address,
       age,
       gender,
@@ -761,26 +813,35 @@ const updateProfile = async (req, res) => {
       emergencyContactNumber
     } = req.body;
 
+    // Optional: Email check if changed
+    if (email) {
+      const emailCheck = await pool.query('SELECT id FROM users WHERE email = $1 AND id != $2', [email, userId]);
+      if (emailCheck.rows.length > 0) {
+        return res.status(400).json({ error: 'This email is already in use by another account.' });
+      }
+    }
+
     const result = await pool.query(
       `UPDATE users SET
         first_name = $1,
         middle_name = $2,
         last_name = $3,
-        address = $4,
-        age = $5,
-        gender = $6,
-        birthday = $7,
-        birth_place = $8,
-        nationality = $9,
-        marital_status = $10,
-        contact_numbers = $11,
-        zip_code = $12,
-        emergency_contact_person = $13,
-        emergency_contact_number = $14
-       WHERE id = $15
+        email = COALESCE($4, email),
+        address = $5,
+        age = $6,
+        gender = $7,
+        birthday = $8,
+        birth_place = $9,
+        nationality = $10,
+        marital_status = $11,
+        contact_numbers = $12,
+        zip_code = $13,
+        emergency_contact_person = $14,
+        emergency_contact_number = $15
+       WHERE id = $16
        RETURNING *`,
       [
-        firstName, middleName, lastName, address, age, gender, birthday,
+        firstName, middleName, lastName, email, address, age, gender, birthday,
         birthPlace, nationality, maritalStatus, contactNumbers, zipCode,
         emergencyContactPerson, emergencyContactNumber, userId
       ]
@@ -844,4 +905,5 @@ module.exports = {
   resetPassword,
   updateProfile,
   changePassword,
+  uploadProfilePicture,
 };

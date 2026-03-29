@@ -21,8 +21,30 @@ pool.query('SELECT NOW()', (err, res) => {
     pool.query('ALTER TABLE courses ADD COLUMN IF NOT EXISTS branch_prices JSONB')
       .then(() => console.log('✅ branch_prices column ready'))
       .catch(e => console.warn('⚠️  branch_prices migration skipped:', e.message));
+
+    // Ensure avatar column exists on users table
+    pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT')
+      .then(() => console.log('✅ avatar column ready'))
+      .catch(e => console.warn('⚠️  avatar migration skipped:', e.message));
+
+    // Expand the role CHECK constraint to include 'super_admin', then promote admin@gmail.com
+    pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`)
+      .then(() => pool.query(`
+        ALTER TABLE users ADD CONSTRAINT users_role_check
+        CHECK (role IN ('admin', 'staff', 'student', 'walkin_student', 'super_admin'))
+      `))
+      .then(() => pool.query(`
+        UPDATE users SET role = 'super_admin'
+        WHERE (email = 'admin@gmail.com' OR email = 'superadmin@gmail.com') AND role != 'super_admin'
+      `))
+      .then(r => {
+        if (r.rowCount > 0) console.log('✅ Found global admin account: Promoted to super_admin');
+        else console.log('ℹ️  Global admin accounts are already super_admin or not found');
+      })
+      .catch(e => console.warn('⚠️  super_admin setup skipped:', e.message));
   }
 });
+
 
 // Middleware
 const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')

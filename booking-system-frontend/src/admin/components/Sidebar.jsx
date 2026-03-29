@@ -281,7 +281,7 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, activeTab, setActiveTab, onN
                     <div className="sidebar-bottom">
                         <button
                             className="menu-item logout-item"
-                            onClick={handleLogout}
+                            onClick={() => handleLogout(false)}
                             title={!isSidebarOpen ? "Logout" : ""}
                         >
                             <svg className="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

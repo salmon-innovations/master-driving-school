@@ -1,0 +1,8 @@
+﻿[dotenv@17.2.3] injecting env (28) from .env -- tip: ≡ƒæÑ sync secrets across teammates & machines: https://dotenvx.com/ops
+? Connected to PostgreSQL database
+Total schedule_enrollments: 0
+Enrollments per slot: []
+Slots with bookings: [
+  { id: 5, available_slots: 14, total_capacity: 15 },
+  { id: 14, available_slots: 14, total_capacity: 15 }
+]

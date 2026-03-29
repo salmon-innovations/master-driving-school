@@ -90,6 +90,20 @@ const getPageFromLocation = () => {
 
 const getPathForPage = (page) => PAGE_TO_PATH[page] || '/'
 
+// Read the stored user role from localStorage (set on login)
+const getStoredUserRole = () => {
+  try {
+    const token = localStorage.getItem('userToken')
+    if (!token) return null
+    const userStr = localStorage.getItem('user')
+    if (!userStr) return null
+    const user = JSON.parse(userStr)
+    return (user?.role || 'student').toLowerCase()
+  } catch {
+    return null
+  }
+}
+
 function App() {
   const [currentPage, setCurrentPage] = useState(() => {
     const pageFromUrl = getPageFromLocation()
@@ -230,8 +244,18 @@ function App() {
       case 'profile': return <Profile onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} />
       case 'reviews': return <Reviews onNavigate={handleNavigation} />
       case 'payment': return <Payment cart={cart} setCart={setCart} onNavigate={handleNavigation} isLoggedIn={isLoggedIn} preSelectedBranch={preSelectedBranch} scheduleSelection={scheduleSelection} />
-      case 'admin': return <Admin onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} />
-      case 'staff-dashboard': return <StaffDashboard onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} />
+      case 'admin': {
+        const role = getStoredUserRole()
+        if (!role) { handleNavigation('signin'); return null }
+        if (role !== 'admin' && role !== 'super_admin') { handleNavigation('signin'); return null }
+        return <Admin onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} />
+      }
+      case 'staff-dashboard': {
+        const role = getStoredUserRole()
+        if (!role) { handleNavigation('signin'); return null }
+        if (role !== 'staff') { handleNavigation('signin'); return null }
+        return <StaffDashboard onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} />
+      }
       default: return <Home onNavigate={handleNavigation} />
     }
   }

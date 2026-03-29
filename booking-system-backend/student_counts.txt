@@ -1,0 +1,5 @@
+﻿[dotenv@17.2.3] injecting env (28) from .env -- tip: ΓÜÖ∩╕Å  specify custom .env file path with { path: '/custom/path/.env' }
+? Connected to PostgreSQL database
+Total student_enrollments: 0
+Student enrollments per slot: []
+Enrollments in slot 5: []
