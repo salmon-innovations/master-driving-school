@@ -97,6 +97,15 @@ const resolveStarpayConfig = ({ branchId, branchName } = {}) => {
 
 /* ── RSA keys ──────────────────────────────────────────────────────── */
 const loadKey = (filename) => {
+    // 1. Try environment variable first (e.g. STARPAY_PROD_PRIVATE_KEY)
+    const envKey = filename.replace(/\.pem$/, '').toUpperCase().replace(/-/g, '_').replace(/\s+/g, '_');
+    const envVal = process.env[envKey];
+    if (envVal) {
+        // Handle escaped newlines if passed in .env
+        return envVal.includes('\\n') ? envVal.replace(/\\n/g, '\n') : envVal;
+    }
+
+    // 2. Try physical file
     const p = path.join(__dirname, '..', 'keys', filename);
     return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
 };
