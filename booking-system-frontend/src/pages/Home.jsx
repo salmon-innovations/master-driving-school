@@ -25,7 +25,14 @@ function Home({ onNavigate, isLoggedIn }) {
       try {
         const response = await testimonialsAPI.getAll();
         if (response.success) {
-          setTestimonials(response.testimonials || []);
+          const fetched = response.testimonials || [];
+          const featured = fetched.filter(t => t.isFeatured);
+          
+          if (featured.length > 0) {
+            setTestimonials(featured.slice(0, 5));
+          } else {
+            setTestimonials(fetched.slice(0, 5));
+          }
         }
       } catch (error) {
         console.error('Failed to fetch testimonials:', error);

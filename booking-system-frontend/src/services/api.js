@@ -573,8 +573,20 @@ export const adminAPI = {
     if (!response.ok) throw new Error('Failed to fetch database backup');
     return await response.blob();
   },
-  exportStudents: async () => await apiRequest('/admin/export-students'),
-  exportTransactions: async () => await apiRequest('/admin/export-transactions'),
+  exportStudents: async (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.startDate) params.append('startDate', filters.startDate);
+    if (filters.endDate) params.append('endDate', filters.endDate);
+    if (filters.branchId) params.append('branchId', filters.branchId);
+    return await apiRequest(`/admin/export-students?${params.toString()}`);
+  },
+  exportTransactions: async (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.startDate) params.append('startDate', filters.startDate);
+    if (filters.endDate) params.append('endDate', filters.endDate);
+    if (filters.branchId) params.append('branchId', filters.branchId);
+    return await apiRequest(`/admin/export-transactions?${params.toString()}`);
+  },
 
   clearDatabase: async () => await apiRequest('/admin/clear-database', { method: 'POST' }),
   
@@ -858,6 +870,9 @@ export const testimonialsAPI = {
   create: async (data) => await apiRequest('/testimonials', {
     method: 'POST',
     body: data instanceof FormData ? data : JSON.stringify(data)
+  }),
+  feature: async (id) => await apiRequest(`/testimonials/${id}/feature`, {
+    method: 'PUT'
   })
 };
 

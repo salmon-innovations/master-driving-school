@@ -244,12 +244,12 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
             className="fixed right-0 top-0 h-full w-full sm:w-96 bg-white shadow-2xl overflow-y-auto animate-slideInRight"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
               <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold text-[#2157da]">Your Cart</h2>
+                <h2 className="text-xl sm:text-2xl font-bold text-[#2157da]">Your Cart</h2>
                 <button
                   onClick={() => setShowCart(false)}
-                  className="text-gray-500 hover:text-gray-700 text-2xl"
+                  className="text-gray-500 hover:text-gray-700 text-2xl p-2"
                 >
                   ×
                 </button>
@@ -327,53 +327,55 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                   )}
 
                   <div className="border-t pt-4 mb-4">
-                    <div className="space-y-1.5 text-sm text-gray-600 font-medium mb-4">
-                      <div className="flex justify-between items-center">
-                        <span>Course Price</span>
-                        <span className="font-bold text-gray-900">₱{orderTotals.baseCoursePriceTotal.toLocaleString()}</span>
+                    <div className="space-y-2 text-sm text-gray-600 font-medium mb-4">
+                      <div className="flex justify-between items-center gap-2">
+                        <span className="text-xs sm:text-sm">Course Price</span>
+                        <span className="font-bold text-gray-900 shrink-0">₱{orderTotals.baseCoursePriceTotal.toLocaleString()}</span>
                       </div>
                       
                       {(orderTotals.reviewerTotal > 0 || orderTotals.vehicleTipsTotal > 0) && (
-                        <div className="flex justify-between items-start">
+                        <div className="flex justify-between items-start gap-2">
                           <div className="flex flex-col">
-                            <span>Add-ons</span>
-                            {orderTotals.reviewerTotal > 0 && <span className="text-xs text-gray-400 ml-2">• Reviewer</span>}
-                            {orderTotals.vehicleTipsTotal > 0 && <span className="text-xs text-gray-400 ml-2">• Vehicle Tips</span>}
+                            <span className="text-xs sm:text-sm">Add-ons</span>
+                            {orderTotals.reviewerTotal > 0 && <span className="text-[10px] sm:text-xs text-gray-400 ml-2">• Reviewer</span>}
+                            {orderTotals.vehicleTipsTotal > 0 && <span className="text-[10px] sm:text-xs text-gray-400 ml-2">• Vehicle Tips</span>}
                           </div>
-                          <div className="flex flex-col items-end">
+                          <div className="flex flex-col items-end shrink-0">
                             <span className="font-bold text-gray-900">₱{(orderTotals.reviewerTotal + orderTotals.vehicleTipsTotal).toLocaleString()}</span>
-                            {orderTotals.reviewerTotal > 0 && <span className="text-xs text-gray-400">₱{orderTotals.reviewerTotal.toLocaleString()}</span>}
-                            {orderTotals.vehicleTipsTotal > 0 && <span className="text-xs text-gray-400">₱{orderTotals.vehicleTipsTotal.toLocaleString()}</span>}
+                            {orderTotals.reviewerTotal > 0 && <span className="text-[10px] sm:text-xs text-gray-400">₱{orderTotals.reviewerTotal.toLocaleString()}</span>}
+                            {orderTotals.vehicleTipsTotal > 0 && <span className="text-[10px] sm:text-xs text-gray-400">₱{orderTotals.vehicleTipsTotal.toLocaleString()}</span>}
                           </div>
                         </div>
                       )}
-
-                      <div className="flex justify-between items-center">
-                        <span>Convenience Fee</span>
-                        <span className="font-bold text-gray-900">₱{orderTotals.convenienceTotal.toLocaleString()}</span>
+                      
+                      <div className="flex justify-between items-center gap-2">
+                        <span className="text-xs sm:text-sm">Convenience Fee</span>
+                        <span className="font-bold text-gray-900 shrink-0">₱{orderTotals.convenienceTotal.toLocaleString()}</span>
                       </div>
 
                       {orderTotals.discountTotal > 0 && (
-                        <div className="flex justify-between items-center bg-green-50 px-2 py-1 -mx-2 rounded text-green-700 font-bold mt-1">
-                          <span>Discount</span>
-                          <span>- ₱{orderTotals.discountTotal.toLocaleString()}</span>
+                        <div className="flex justify-between items-center bg-green-50 px-2 py-1 -mx-1 rounded text-green-700 font-bold mt-1 gap-2">
+                          <span className="text-xs sm:text-sm">Discount</span>
+                          <span className="shrink-0">- ₱{orderTotals.discountTotal.toLocaleString()}</span>
                         </div>
                       )}
                     </div>
 
-                    <div className="border-t border-gray-100 pt-3 flex justify-between items-center mb-2">
-                      <span className="text-gray-600 font-semibold">Subtotal:</span>
-                      <span className="font-semibold text-gray-900">₱{orderTotals.subtotal.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                    <div className="border-t border-gray-100 pt-3 flex justify-between items-center mb-2 gap-2">
+                      <span className="text-gray-600 font-semibold text-xs sm:text-sm">Subtotal:</span>
+                      <span className="font-semibold text-gray-900 shrink-0">₱{orderTotals.subtotal.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
                     </div>
+
                     {orderTotals.hasBundleDiscount && (
-                      <div className="flex justify-between items-center bg-green-50 px-2 py-1.5 -mx-2 rounded text-green-700 font-bold mb-2">
-                        <span>Bundle Discount ({orderTotals.promoBundleDiscountPercent}% OFF)</span>
-                        <span>- ₱{orderTotals.bundleDiscountValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                      <div className="flex justify-between items-center bg-green-50 px-2 py-1.5 -mx-1 rounded text-green-700 font-bold mb-2 gap-2">
+                        <span className="text-[10px] sm:text-[11px]">Bundle Discount ({orderTotals.promoBundleDiscountPercent}% OFF)</span>
+                        <span className="shrink-0">- ₱{orderTotals.bundleDiscountValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
                       </div>
                     )}
-                    <div className="flex justify-between items-center text-xl font-bold text-[#2157da] mt-2">
+
+                    <div className="flex justify-between items-center text-lg sm:text-xl font-black text-[#2157da] mt-2 gap-2">
                       <span>Total:</span>
-                      <span>₱{orderTotals.finalTotal.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                      <span className="shrink-0">₱{orderTotals.finalTotal.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
                     </div>
                   </div>
 

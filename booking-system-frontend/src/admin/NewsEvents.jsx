@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import './css/news.css';
-import { newsAPI } from '../services/api';
+import { newsAPI, testimonialsAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import Pagination from './components/Pagination';
 
@@ -8,6 +8,9 @@ const NEWS_PAGE_SIZE = 10;
 
 const NewsEvents = () => {
     const { showNotification } = useNotification();
+    const [activeMainTab, setActiveMainTab] = useState('news');
+    
+    // News State
     const [newsSearchTerm, setNewsSearchTerm] = useState('');
     const [activeNewsCategory, setActiveNewsCategory] = useState('All');
     const [showNewsModal, setShowNewsModal] = useState(false);
@@ -24,14 +27,20 @@ const NewsEvents = () => {
     });
 
     const [filePreview, setFilePreview] = useState(null);
-    const [fileType, setFileType] = useState(null);
-
     const [newsData, setNewsData] = useState([]);
     const [loading, setLoading] = useState(true);
 
+    // Testimonials State
+    const [testimonials, setTestimonials] = useState([]);
+    const [loadingTestimonials, setLoadingTestimonials] = useState(false);
+
     useEffect(() => {
-        fetchInitialData();
-    }, []);
+        if (activeMainTab === 'news') {
+            fetchInitialData();
+        } else if (activeMainTab === 'testimonials') {
+            fetchTestimonials();
+        }
+    }, [activeMainTab]);
 
     const fetchInitialData = async () => {
         setLoading(true);
@@ -53,6 +62,34 @@ const NewsEvents = () => {
             showNotification('Failed to load news data', 'error');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchTestimonials = async () => {
+        setLoadingTestimonials(true);
+        try {
+            const res = await testimonialsAPI.getAll();
+            if (res.success) {
+                setTestimonials(res.testimonials);
+            }
+        } catch (error) {
+            console.error('Failed to load testimonials', error);
+            showNotification('Failed to load testimonials', 'error');
+        } finally {
+            setLoadingTestimonials(false);
+        }
+    };
+
+    const handleFeatureTestimonial = async (id) => {
+        try {
+            const res = await testimonialsAPI.feature(id);
+            if (res.success) {
+                showNotification(res.message || 'Testimonial updated!', 'success');
+                fetchTestimonials(); // Refresh state
+            }
+        } catch (error) {
+            console.error('Failed to feature testimonial:', error);
+            showNotification(error.message || 'Failed to update testimonial', 'error');
         }
     };
 
@@ -159,7 +196,36 @@ const NewsEvents = () => {
 
     return (
         <div className="news-view animate-fade-in">
-            {/* Stats Overview */}
+            {/* Top Navigation Tabs */}
+            <div className="flex bg-white dark:bg-slate-800 p-1.5 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 w-fit mb-8 items-center gap-1">
+                <button
+                    onClick={() => setActiveMainTab('news')}
+                    className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold text-sm transition-all duration-200 ${
+                        activeMainTab === 'news' 
+                            ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 border border-blue-100 dark:border-blue-800 shadow-sm' 
+                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700/50 border border-transparent'
+                    }`}
+                >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+                    News & Events
+                </button>
+                <div className="w-[1px] h-6 bg-gray-200 dark:bg-slate-700 mx-1"></div>
+                <button
+                    onClick={() => setActiveMainTab('testimonials')}
+                    className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold text-sm transition-all duration-200 ${
+                        activeMainTab === 'testimonials' 
+                            ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 border border-blue-100 dark:border-blue-800 shadow-sm' 
+                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700/50 border border-transparent'
+                    }`}
+                >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                    Testimonials
+                </button>
+            </div>
+
+            {activeMainTab === 'news' ? (
+                <>
+                    {/* Stats Overview */}
             <div className="news-header-stats">
                 {stats.map((stat, i) => (
                     <div key={i} className="news-stat-card">
@@ -341,6 +407,74 @@ const NewsEvents = () => {
                 </>
                 );
             })()}
+                </>
+            ) : (
+                <div className="testimonials-section animate-fade-in">
+                    <div className="section-header-prime mb-6 flex justify-between items-center">
+                        <div>
+                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Student Testimonials</h2>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">Select the best testimonial to feature on the Home Page.</p>
+                        </div>
+                    </div>
+
+                    {loadingTestimonials ? (
+                        <div className="flex justify-center flex-col items-center py-16">
+                            <div className="loading-spinner-prime"></div>
+                            <p className="mt-4 text-gray-500">Loading testimonials...</p>
+                        </div>
+                    ) : testimonials.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {testimonials.map(item => (
+                                <div key={item.id} className={`bg-white dark:bg-slate-800 border ${item.isFeatured ? 'border-2 border-green-500 dark:border-green-500 shadow-xl' : 'border-gray-200 dark:border-slate-700'} rounded-2xl p-6 relative flex flex-col`}>
+                                    {item.isFeatured && (
+                                        <div className="absolute top-0 right-0 bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-bl-lg rounded-tr-xl">
+                                            Currently Featured
+                                        </div>
+                                    )}
+                                    <div className="flex mb-4 items-center gap-3 mt-2">
+                                        <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-300 font-bold text-lg">
+                                            {item.name.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div>
+                                            <h3 className="font-bold text-gray-900 dark:text-white leading-tight">{item.name}</h3>
+                                            <span className="text-xs text-gray-500 dark:text-gray-400">{item.course}</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex mb-3 text-yellow-500">
+                                        {[...Array(5)].map((_, i) => (
+                                            <svg key={i} className={`w-4 h-4 ${i < item.rating ? 'fill-current' : 'text-gray-300 dark:text-slate-600'}`} viewBox="0 0 20 20">
+                                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
+                                            </svg>
+                                        ))}
+                                    </div>
+                                    <p className="text-gray-600 dark:text-gray-300 text-sm mb-6 flex-1 italic">"{item.comment}"</p>
+                                    
+                                    <div className="mt-auto pt-4 border-t border-gray-100 dark:border-slate-700">
+                                        <button 
+                                            onClick={() => handleFeatureTestimonial(item.id)}
+                                            className={`w-full py-2.5 rounded-lg text-sm font-bold transition-all ${
+                                                item.isFeatured 
+                                                ? 'bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 hover:bg-rose-100'
+                                                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg'
+                                            }`}
+                                        >
+                                            {item.isFeatured ? 'Unfeature from Home' : 'Feature This'}
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-2xl p-12 text-center shadow-sm">
+                            <div className="w-16 h-16 bg-blue-50 dark:bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="text-blue-500 dark:text-slate-400"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                            </div>
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">No Testimonials Yet</h3>
+                            <p className="text-gray-500 dark:text-gray-400">Feedback from your students will appear here once they submit reviews.</p>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {showNewsModal && (
                 <NewsModal

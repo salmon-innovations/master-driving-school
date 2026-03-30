@@ -6,12 +6,12 @@ const IconLink = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="non
 
 const TextField = ({ label, value, onChange, hint, icon }) => (
     <div className="mb-5">
-        <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1">
+        <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
             {icon} {label}
         </label>
         <input 
             type="text" 
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
             value={value || ''} 
             onChange={e => onChange(e.target.value)} 
         />
@@ -21,9 +21,9 @@ const TextField = ({ label, value, onChange, hint, icon }) => (
 
 const TextAreaField = ({ label, value, onChange, hint }) => (
     <div className="mb-5">
-        <label className="block text-sm font-semibold text-gray-700 mb-1">{label}</label>
+        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">{label}</label>
         <textarea 
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm leading-relaxed"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm leading-relaxed bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
             rows={4}
             value={value || ''} 
             onChange={e => onChange(e.target.value)} 
@@ -163,8 +163,8 @@ const EmailContentSection = () => {
                 {c.messageVerify !== undefined && <TextAreaField label="Verification Message" value={c.messageVerify} onChange={v => handleChange(selectedEmail, 'messageVerify', v)} />}
 
                 {(c.visitButton !== undefined || c.verifyButtonText !== undefined || c.loginButtonText !== undefined || c.viewAccountButton !== undefined) && (
-                    <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg mt-6 shadow-sm">
-                        <h4 className="font-bold text-blue-900 text-sm mb-3">Call to Action Button</h4>
+                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900 p-4 rounded-lg mt-6 shadow-sm">
+                        <h4 className="font-bold text-blue-900 dark:text-blue-300 text-sm mb-3">Call to Action Button</h4>
                         <TextField label="Button Text" value={c.visitButton || c.verifyButtonText || c.loginButtonText || c.viewAccountButton} onChange={v => {
                             if(c.visitButton !== undefined) handleChange(selectedEmail, 'visitButton', v);
                             if(c.verifyButtonText !== undefined) handleChange(selectedEmail, 'verifyButtonText', v);
@@ -312,8 +312,8 @@ const EmailContentSection = () => {
         <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 font-sans">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
                 <div>
-                    <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">Email Content Configuration</h1>
-                    <p className="text-gray-500 text-sm mt-2">Design your emails with rich text and dynamic placeholders. Click a card below to edit.</p>
+                    <h1 className="text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight">Email Content Configuration</h1>
+                    <p className="text-gray-500 dark:text-gray-400 text-sm mt-2">Design your emails with rich text and dynamic placeholders. Click a card below to edit.</p>
                 </div>
                 {isDirty && (
                     <button onClick={handleSave} disabled={saving} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-semibold transition shadow-md flex items-center gap-2">
@@ -323,8 +323,8 @@ const EmailContentSection = () => {
             </div>
 
             {/* Global Settings */}
-            <div className="mb-10 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-                <h2 className="text-lg font-bold text-gray-800 mb-5 border-b border-gray-100 pb-3 flex items-center gap-2">
+            <div className="mb-10 bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm">
+                <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-5 border-b border-gray-100 dark:border-slate-700 pb-3 flex items-center gap-2">
                     Branding & Global Settings
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -337,35 +337,28 @@ const EmailContentSection = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {emailTypes.map(type => {
                 const Icon = type.icon || (() => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>);
-                const colors = {
-                    emerald: 'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white hover:border-emerald-300',
-                    blue: 'bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white hover:border-blue-300',
-                    rose: 'bg-rose-50 text-rose-600 group-hover:bg-rose-600 group-hover:text-white hover:border-rose-300',
-                    purple: 'bg-purple-50 text-purple-600 group-hover:bg-purple-600 group-hover:text-white hover:border-purple-300',
-                    amber: 'bg-amber-50 text-amber-600 group-hover:bg-amber-600 group-hover:text-white hover:border-amber-300',
-                    indigo: 'bg-indigo-50 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white hover:border-indigo-300',
-                    slate: 'bg-slate-50 text-slate-600 group-hover:bg-slate-600 group-hover:text-white hover:border-slate-300',
-                    cyan: 'bg-cyan-50 text-cyan-600 group-hover:bg-cyan-600 group-hover:text-white hover:border-cyan-300',
-                }[type.color] || 'bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white';
-                
-                const textH = {
-                    emerald: 'group-hover:text-emerald-700', blue: 'group-hover:text-blue-700',
-                    rose: 'group-hover:text-rose-700', purple: 'group-hover:text-purple-700',
-                    amber: 'group-hover:text-amber-700', indigo: 'group-hover:text-indigo-700',
-                    slate: 'group-hover:text-slate-700', cyan: 'group-hover:text-cyan-700',
-                }[type.color] || 'group-hover:text-blue-700';
+                const themeDef = {
+                    emerald: { base: 'hover:border-emerald-300 dark:hover:border-emerald-600', icon: 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 group-hover:bg-emerald-600 group-hover:text-white', textH: 'group-hover:text-emerald-700 dark:group-hover:text-emerald-400' },
+                    blue: { base: 'hover:border-blue-300 dark:hover:border-blue-600', icon: 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 group-hover:bg-blue-600 group-hover:text-white', textH: 'group-hover:text-blue-700 dark:group-hover:text-blue-400' },
+                    rose: { base: 'hover:border-rose-300 dark:hover:border-rose-600', icon: 'bg-rose-50 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400 group-hover:bg-rose-600 group-hover:text-white', textH: 'group-hover:text-rose-700 dark:group-hover:text-rose-400' },
+                    purple: { base: 'hover:border-purple-300 dark:hover:border-purple-600', icon: 'bg-purple-50 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 group-hover:bg-purple-600 group-hover:text-white', textH: 'group-hover:text-purple-700 dark:group-hover:text-purple-400' },
+                    amber: { base: 'hover:border-amber-300 dark:hover:border-amber-600', icon: 'bg-amber-50 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 group-hover:bg-amber-600 group-hover:text-white', textH: 'group-hover:text-amber-700 dark:group-hover:text-amber-400' },
+                    indigo: { base: 'hover:border-indigo-300 dark:hover:border-indigo-600', icon: 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white', textH: 'group-hover:text-indigo-700 dark:group-hover:text-indigo-400' },
+                    slate: { base: 'hover:border-slate-300 dark:hover:border-slate-600', icon: 'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-400 group-hover:bg-slate-600 group-hover:text-white', textH: 'group-hover:text-slate-700 dark:group-hover:text-slate-400' },
+                    cyan: { base: 'hover:border-cyan-300 dark:hover:border-cyan-600', icon: 'bg-cyan-50 dark:bg-cyan-900/40 text-cyan-600 dark:text-cyan-400 group-hover:bg-cyan-600 group-hover:text-white', textH: 'group-hover:text-cyan-700 dark:group-hover:text-cyan-400' },
+                }[type.color] || { base: '', icon: '', textH: '' };
 
                 return (
-                    <div key={type.id} onClick={() => setSelectedEmail(type.id)} className={`bg-white border border-gray-200 rounded-2xl p-6 flex flex-col cursor-pointer hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 block ${colors.split(' ').pop()}`}>
-                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-5 transition-all duration-300 shadow-sm ${colors.split(' ').slice(0, 4).join(' ')}`}>
+                    <div key={type.id} onClick={() => setSelectedEmail(type.id)} className={`bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-2xl p-6 flex flex-col cursor-pointer hover:shadow-xl dark:hover:shadow-indigo-900/20 transition-all duration-300 group hover:-translate-y-1 block ${themeDef.base}`}>
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-5 transition-all duration-300 shadow-sm ${themeDef.icon}`}>
                             <Icon />
                         </div>
-                        <h3 className={`font-bold text-gray-800 text-lg mb-2 transition-colors ${textH}`}>{type.title}</h3>
-                        <p className="text-sm text-gray-500 leading-relaxed flex-1 mb-4">{type.desc}</p>
+                        <h3 className={`font-bold text-gray-800 dark:text-white text-lg mb-2 transition-colors ${themeDef.textH}`}>{type.title}</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed flex-1 mb-4">{type.desc}</p>
                         
-                        <div className="flex items-center justify-between font-semibold text-sm opacity-0 group-hover:opacity-100 transition-all translate-y-2 group-hover:translate-y-0 duration-300 pt-3 border-t border-gray-100/0 group-hover:border-gray-100/50">
-                            <span className={textH}>Configure Template</span>
-                            <span className={textH}>&rarr;</span>
+                        <div className={`flex items-center justify-between font-semibold text-sm opacity-0 group-hover:opacity-100 transition-all translate-y-2 group-hover:translate-y-0 duration-300 pt-3 border-t border-gray-100/0 dark:border-slate-700/0 group-hover:border-gray-100/50 dark:group-hover:border-slate-700/50 ${themeDef.textH}`}>
+                            <span>Configure Template</span>
+                            <span>&rarr;</span>
                         </div>
                     </div>
                 );
@@ -375,14 +368,14 @@ const EmailContentSection = () => {
             {/* Email Edit Modal */}
             {selectedEmail && (
                 <div className="fixed inset-0 z-[1050] flex items-center justify-center p-3 sm:p-6 bg-gray-900/70 backdrop-blur-md transition-opacity">
-                    <div className="bg-gray-50 w-full max-w-[1300px] h-[95vh] sm:h-[88vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200 border border-gray-200">
+                    <div className="bg-gray-50 dark:bg-slate-900 w-full max-w-[1300px] h-[95vh] sm:h-[88vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200 border border-gray-200 dark:border-slate-700">
                         {/* Header */}
-                        <div className="bg-white px-6 py-4 border-b border-gray-200 flex justify-between items-center shrink-0">
-                            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-3">
-                                <span className="bg-blue-100 text-blue-700 p-2 rounded-lg"><IconMail /></span>
+                        <div className="bg-white dark:bg-slate-800 px-6 py-4 border-b border-gray-200 dark:border-slate-700 flex justify-between items-center shrink-0">
+                            <h2 className="text-xl font-bold text-gray-800 dark:text-white flex items-center gap-3">
+                                <span className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 p-2 rounded-lg"><IconMail /></span>
                                 Editing: {emailTypes.find(t=>t.id === selectedEmail)?.title}
                             </h2>
-                            <button onClick={() => setSelectedEmail(null)} className="p-2 hover:bg-red-50 hover:text-red-600 rounded-full text-gray-400 transition-colors">
+                            <button onClick={() => setSelectedEmail(null)} className="p-2 hover:bg-red-50 dark:hover:bg-red-900/40 hover:text-red-600 dark:hover:text-red-400 rounded-full text-gray-400 dark:text-gray-500 transition-colors">
                                 <IconClose />
                             </button>
                         </div>
@@ -390,31 +383,31 @@ const EmailContentSection = () => {
                         {/* Split Body */}
                         <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
                             {/* Editor Column */}
-                            <div className="w-full md:w-[400px] lg:w-[480px] bg-white border-b md:border-b-0 md:border-r border-gray-200 overflow-y-auto p-6 lg:p-8 flex flex-col shrink-0 relative">
+                            <div className="w-full md:w-[400px] lg:w-[480px] bg-white dark:bg-slate-800 border-b md:border-b-0 md:border-r border-gray-200 dark:border-slate-700 overflow-y-auto p-6 lg:p-8 flex flex-col shrink-0 relative">
                                 <div className="flex-1">
-                                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6">Template Fields</h3>
+                                    <h3 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-6">Template Fields</h3>
                                     {renderEditorInputs()}
                                 </div>
-                                <div className="mt-8 pt-6 border-t border-gray-200 shrink-0 sticky bottom-0 bg-white pb-2">
+                                <div className="mt-8 pt-6 border-t border-gray-200 dark:border-slate-700 shrink-0 sticky bottom-0 bg-white dark:bg-slate-800 pb-2">
                                     <button onClick={handleSave} disabled={saving} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold transition shadow-md mb-3 flex justify-center items-center gap-2">
                                         {saving ? 'Saving...' : 'Save All Changes'}
                                     </button>
-                                    <button onClick={() => setSelectedEmail(null)} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-lg font-medium transition">Close Editor</button>
+                                    <button onClick={() => setSelectedEmail(null)} className="w-full bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-300 py-3 rounded-lg font-medium transition">Close Editor</button>
                                 </div>
                             </div>
 
                             {/* Preview Column */}
-                            <div className="flex-1 bg-gray-100 overflow-y-auto p-6 sm:p-8 flex flex-col items-center">
-                                <div className="w-full max-w-[650px] mb-4 flex justify-between items-center bg-white px-4 py-3 rounded-lg shadow-sm border border-gray-200">
-                                    <h3 className="text-sm font-bold text-gray-600 uppercase tracking-widest flex items-center gap-2">
+                            <div className="flex-1 bg-gray-100 dark:bg-slate-900 overflow-y-auto p-6 sm:p-8 flex flex-col items-center">
+                                <div className="w-full max-w-[650px] mb-4 flex justify-between items-center bg-white dark:bg-slate-800 px-4 py-3 rounded-lg shadow-sm border border-gray-200 dark:border-slate-700">
+                                    <h3 className="text-sm font-bold text-gray-600 dark:text-gray-300 uppercase tracking-widest flex items-center gap-2">
                                         <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse ring-4 ring-green-500/20"></div> 
                                         Live Mail Preview
                                     </h3>
-                                    <div className="text-xs text-gray-400">Updates instantly</div>
+                                    <div className="text-xs text-gray-400 dark:text-gray-500">Updates instantly</div>
                                 </div>
                                 
                                 <div className="w-full max-w-[650px] flex-1">
-                                    <div id="preview-container" className="shadow-xl rounded-lg overflow-hidden border border-gray-200 transition-all">
+                                    <div id="preview-container" className="shadow-xl rounded-lg overflow-hidden border border-gray-200 dark:border-slate-600 transition-all">
                                         <EmailPreviewWrapper 
                                             schoolName={content.schoolName}
                                             copyrightYear={content.copyrightYear}
@@ -427,10 +420,10 @@ const EmailContentSection = () => {
                                 </div>
 
                                 {/* Send Test Box */}
-                                <div className="mt-8 bg-white p-6 rounded-xl border border-gray-200 shadow-md w-full max-w-[650px]">
-                                    <label className="block text-sm font-semibold text-gray-800 mb-3">Test this Email Layout</label>
+                                <div className="mt-8 bg-white dark:bg-slate-800 p-6 rounded-xl border border-gray-200 dark:border-slate-700 shadow-md w-full max-w-[650px]">
+                                    <label className="block text-sm font-semibold text-gray-800 dark:text-white mb-3">Test this Email Layout</label>
                                     <div className="flex gap-3">
-                                        <input type="email" value={testEmail} onChange={e=>setTestEmail(e.target.value)} placeholder="Enter email address (e.g. you@example.com)" className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                        <input type="email" value={testEmail} onChange={e=>setTestEmail(e.target.value)} placeholder="Enter email address (e.g. you@example.com)" className="flex-1 px-4 py-2.5 border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
                                         <button onClick={handleSendTest} disabled={sendingTest} className="bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-lg font-semibold transition shadow-sm whitespace-nowrap min-w-[130px] flex justify-center items-center">
                                             {sendingTest ? 'Sending...' : 'Send Test'}
                                         </button>

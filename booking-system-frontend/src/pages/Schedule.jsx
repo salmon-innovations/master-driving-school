@@ -774,8 +774,27 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [promoTdcRawSlots])
 
-  // Show TDC slots for TDC courses (month-filtered), filtered PDC slots for PDC courses
-  const relevantSlots = isTDCCourse ? tdcSlotsForMonth : filteredPdcSlots
+  // Slots for the currently "active" date in the calendar (used primarily for mobile list view)
+  const slotsForActiveDate = (() => {
+    const d = selectingDay2 ? selectedDate2 : selectedDate
+    if (!d) return []
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const dstr = `${y}-${m}-${day}`
+    
+    let slots = filteredPdcSlots.filter(s => s.date === dstr)
+
+    // PDC Day 2 must match Day 1's session type (Morning or Afternoon)
+    if (!isTDCCourse && selectingDay2 && selectedSlot && isHalfDay(selectedSlot.session)) {
+      slots = slots.filter(s => s.session === selectedSlot.session)
+    }
+
+    return slots
+  })()
+
+  // Show TDC slots for TDC courses (month-filtered), or slots for picked date for PDC
+  const relevantSlots = isTDCCourse ? tdcSlotsForMonth : slotsForActiveDate
 
   const sessionIcon = (session) => {
     if (session === 'Morning') return '🌅'
@@ -989,8 +1008,12 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                 return (
                   <div
                     key={day}
+                    onClick={() => {
+                      if (!isAvailable || isDay1Marker) return;
+                      handleDateClick(day);
+                    }}
                     className={`min-h-[52px] sm:min-h-[140px] rounded-lg sm:rounded-xl border flex flex-col overflow-hidden transition-all relative
-                      ${!isAvailable || isDay1Marker ? 'cursor-not-allowed opacity-45' : 'cursor-default'}
+                      ${!isAvailable || isDay1Marker ? 'cursor-not-allowed opacity-45' : 'cursor-pointer hover:shadow-md'}
                       ${slotCellBorder}`}
                   >
                     {/* Day number */}
@@ -1003,32 +1026,21 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                       {isToday && <span className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full bg-[#2563eb] opacity-60 flex-shrink-0"></span>}
                     </div>
 
-                    {/* Mobile: dot indicators only */}
-                    <div className="flex sm:hidden flex-wrap gap-0.5 px-1 pb-1">
-                      {daySlots.slice(0, 3).map((slot) => {
+                    {/* Mobile: dot indicators only - made pointer-events-none so they don't block cell click */}
+                    <div className="flex sm:hidden flex-wrap gap-0.5 px-0.5 pb-1 pointer-events-none">
+                      {daySlots.slice(0, 4).map((slot) => {
                         const isFullyBooked = slot.available_slots === 0;
                         const isSlotSelected = selectedSlot?.id === slot.id || selectedSlot2?.id === slot.id;
                         return (
                           <div
                             key={slot.id}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (isFullyBooked) return;
-                              const isSessionMismatch = selectingDay2 && selectedSlot && slot.session !== selectedSlot.session;
-                              if (isSessionMismatch) {
-                                showNotification(`For Day 2, please select the same session type: ${selectedSlot.session}`, 'warning');
-                                return;
-                              }
-                              handleCalendarSlotClick(slot, day);
-                            }}
-                            className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                            className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
                               isSlotSelected ? 'bg-[#2563eb]' :
                               isFullyBooked ? 'bg-red-400' :
                               slot.session === 'Morning' ? 'bg-orange-400' :
                               slot.session === 'Afternoon' ? 'bg-yellow-400' :
                               'bg-blue-400'
-                            } ${!isFullyBooked ? 'cursor-pointer' : 'cursor-not-allowed'}`}
-                            title={`${slot.session} — ${isFullyBooked ? 'Full' : slot.available_slots + ' slots'}`}
+                            }`}
                           />
                         );
                       })}
@@ -1131,15 +1143,23 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
         )}
 
         {/* Slot Selection Panel - ONLY FOR TDC since PDC renders them in calendar directly */}
-        {!isPromoCourse && isTDCCourse ? (
-          <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-6" data-aos="fade-up" data-aos-delay="200">
+        {!isPromoCourse && (isTDCCourse || selectedDate) ? (
+          <div className={`bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-6 ${!isTDCCourse ? 'sm:hidden' : ''}`} data-aos="fade-up" data-aos-delay="200">
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h3 className="text-lg font-black text-gray-900">
-                  Available TDC Schedules
+                  {isTDCCourse 
+                    ? 'Available TDC Schedules' 
+                    : (selectingDay2 && selectedSlot) 
+                      ? `Available ${selectedSlot.session} Slots (Day 2)` 
+                      : 'Available Time Slots'
+                  }
                 </h3>
                 <p className="text-xs text-gray-500 mt-1">
-                  {tdcViewMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                  {isTDCCourse 
+                    ? tdcViewMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                    : (selectingDay2 ? selectedDate2 : selectedDate)?.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+                  }
                 </p>
               </div>
               {!loadingSlots && (
@@ -1612,11 +1632,15 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                                   ? 'border-orange-300/60 bg-orange-50/25 hover:border-orange-400 hover:shadow-sm'
                                   : hasRealSlots && !hasAvailability
                                     ? 'border-red-200/60 bg-red-50/20'
-                                    : 'border-gray-200/80 bg-white hover:border-gray-300'
-                          return (
-                            <div key={day}
+                                    : 'border-gray-200/80 bg-white hover:border-gray-300';
+                            return (
+                             <div key={day}
+                              onClick={() => {
+                                if (!avail) return;
+                                setPromoPdcDate(new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth(), day));
+                              }}
                               className={`min-h-[100px] rounded-xl border flex flex-col overflow-hidden transition-all relative ${
-                                !avail ? 'cursor-not-allowed opacity-45' : 'cursor-default'
+                                !avail ? 'cursor-not-allowed opacity-45' : 'cursor-pointer hover:shadow-md'
                               } ${slotCellBorder}`}
                             >
                               <div className="flex items-center justify-between px-2.5 pt-2.5 pb-1 flex-shrink-0">
@@ -1654,19 +1678,19 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                                       </div>
                                       <div className="text-[7px] sm:text-[8px] font-medium opacity-75 truncate leading-none">{timeStr}</div>
                                     </div>
-                                  )
+                                  );
                                 })}
                               </div>
                             </div>
-                          )
+                          );
                         })}
                       </div>
                     </div>
                   )}
 
                   {/* PDC Day 1 Slots */}
-                  {false && (promoPdcType !== 'Motorcycle' || promoPdcMotorType) && promoPdcDate && (
-                    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
+                  {(promoPdcType !== 'Motorcycle' || promoPdcMotorType) && promoPdcDate && (
+                    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4 sm:hidden">
                       <div className="flex items-center justify-between mb-5">
                         <div>
                           <h3 className="text-lg font-black text-gray-900">PDC Time Slots — {pdcTypeLabel} <span className="text-sm font-bold text-gray-400">(Day 1)</span></h3>
@@ -1809,8 +1833,12 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                           return (
                             <div key={day}
                               title={isDay1 ? 'Already used for Day 1' : undefined}
+                              onClick={() => {
+                                if (!avail || isDay1) return;
+                                setPromoPdcDate2(new Date(promoPdcDay2CalMonth.getFullYear(), promoPdcDay2CalMonth.getMonth(), day));
+                              }}
                               className={`min-h-[100px] rounded-xl border flex flex-col overflow-hidden transition-all relative ${
-                                !avail || isDay1 ? 'cursor-not-allowed opacity-45' : 'cursor-default'
+                                !avail || isDay1 ? 'cursor-not-allowed opacity-45' : 'cursor-pointer hover:shadow-md'
                               } ${cellBorder2}`}
                             >
                               <div className="flex items-center justify-between px-2.5 pt-2.5 pb-1 flex-shrink-0">
@@ -1859,19 +1887,19 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, setScheduleSe
                                       </div>
                                       <div className="text-[7px] sm:text-[8px] font-medium opacity-75 truncate leading-none">{timeStr}</div>
                                     </div>
-                                  )
+                                  );
                                 })}
                               </div>
                             </div>
-                          )
+                          );
                         })}
                       </div>
                     </div>
                   )}
 
                   {/* PDC Day 2 Slots */}
-                  {false && promoPdcSelectingDay2 && !promoPdcSlot2 && promoPdcDate2 && (
-                    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
+                  {promoPdcSelectingDay2 && !promoPdcSlot2 && promoPdcDate2 && (
+                    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4 sm:hidden">
                       <div className="flex items-center justify-between mb-5">
                         <div>
                           <h3 className="text-lg font-black text-gray-900">PDC Time Slots — {pdcTypeLabel} <span className="text-sm font-bold text-gray-400">(Day 2)</span></h3>

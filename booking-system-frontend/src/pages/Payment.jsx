@@ -894,12 +894,15 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
             <div className="p-6 flex flex-col items-center">
               {qrStatus === 'pending' && (
                 <>
-                  <div className="p-2 bg-white border-4 border-[#2157da] rounded-xl mb-4 shadow-sm">
+                  <div className="p-2 bg-white border-4 border-[#2157da] rounded-xl mb-3 shadow-sm">
                     <img
                       src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(starpayQR.codeUrl)}&size=220x220&format=png`}
                       alt="StarPay QR"
                       className="w-[220px] h-[220px]"
                     />
+                  </div>
+                  <div className="bg-blue-50 text-blue-800 text-xs px-3 py-2 rounded-lg font-semibold mb-4 text-center max-w-[260px]">
+                    📸 Please screenshot or take a picture of this QR code to upload to your e-wallet app.
                   </div>
                   <p className="text-sm font-bold text-gray-700 mb-1">Amount Due</p>
                   <p className="text-3xl font-black text-[#2157da] mb-4">₱{(starpayQR.amount || finalAmount).toLocaleString()}</p>

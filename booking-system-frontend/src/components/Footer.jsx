@@ -70,7 +70,7 @@ function Footer({ onNavigate }) {
                 className="h-20 sm:h-24 w-auto"
               />
             </div>
-            <div className="flex justify-center gap-4">
+            <div className="flex justify-center gap-4 mb-4">
               <a 
                 href="https://www.facebook.com/masterdrivingschool.ph" 
                 target="_blank" 
@@ -94,6 +94,21 @@ function Footer({ onNavigate }) {
                 </svg>
               </a>
             </div>
+
+            <a 
+              href="/MasterDriving.apk" 
+              download 
+              className="flex items-center gap-2 bg-[#F3B74C] hover:bg-[#e1a63b] text-[#1a2d6b] px-4 py-2 rounded-full font-bold text-xs transition-all transform hover:scale-105 shadow-lg group"
+            >
+              <svg 
+                className="w-5 h-5 group-hover:animate-bounce" 
+                fill="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path d="M17.523 15.3414C16.9209 15.3414 16.4318 15.8305 16.4318 16.4326C16.4318 17.0347 16.9209 17.5238 17.523 17.5238C18.1251 17.5238 18.6142 17.0347 18.6142 16.4326C18.6142 15.8305 18.1251 15.3414 17.523 15.3414ZM6.47727 15.3409C5.8752 15.3409 5.38605 15.83 5.38605 16.4321C5.38605 17.0341 5.8752 17.5233 6.47727 17.5233C7.07934 17.5233 7.56849 17.0341 7.56849 16.4321C7.56849 15.83 7.07934 15.3409 6.47727 15.3409ZM18.1631 11.4552L20.154 8.00545C20.2981 7.75548 20.2125 7.43615 19.9626 7.29202C19.7126 7.14788 19.3933 7.23351 19.2491 7.48348L17.2285 10.9855C15.656 10.2796 13.9103 9.88636 12.0741 9.88636C10.2373 9.88636 8.49081 10.2801 6.91754 10.9866L4.89694 7.48348C4.75281 7.23351 4.43348 7.14788 4.18351 7.29202C3.93354 7.43615 3.84791 7.75548 3.99205 8.00545L5.93796 11.3789C2.45423 13.2504 0.0818165 16.8927 0.0818165 21.0966H24.0664C24.0664 16.8927 21.694 13.2504 18.2103 11.3789L18.1631 11.4552Z" />
+              </svg>
+              DOWNLOAD APP
+            </a>
           </div>
         </div>
 
