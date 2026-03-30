@@ -575,6 +575,35 @@ export const adminAPI = {
   },
   exportStudents: async () => await apiRequest('/admin/export-students'),
   exportTransactions: async () => await apiRequest('/admin/export-transactions'),
+
+  clearDatabase: async () => await apiRequest('/admin/clear-database', { method: 'POST' }),
+  
+  importSQL: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return await apiRequest('/admin/import-sql', {
+      method: 'POST',
+      body: formData
+    });
+  },
+  
+  importStudentsCSV: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return await apiRequest('/admin/import-students', {
+      method: 'POST',
+      body: formData
+    });
+  },
+  
+  importTransactionsCSV: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return await apiRequest('/admin/import-transactions', {
+      method: 'POST',
+      body: formData
+    });
+  },
 };
 
 // Schedules API

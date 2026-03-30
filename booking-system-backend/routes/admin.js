@@ -31,8 +31,17 @@ const {
   getStudentDetail,
   getAddonsConfig,
   updateAddonsConfig,
+  getDatabaseBackup,
+  exportStudentsCSV,
+  exportTransactionsCSV,
+  clearDatabase,
+  importSQLBackup,
+  importStudentsCSV,
+  importTransactionsCSV,
 } = require('../controllers/adminController');
 const { authenticateToken } = require('../middleware/auth');
+const multer = require('multer');
+const upload = multer({ dest: 'tmp/' });
 
 // Middleware to check if user is admin
 const isAdmin = (req, res, next) => {
@@ -113,5 +122,16 @@ router.get('/today-students', getTodayStudents);
 
 // Full student detail (personal info + bookings/payment)
 router.get('/student-detail/:studentId', getStudentDetail);
+
+// Backup & Export routes
+router.get('/db-backup', getDatabaseBackup);
+router.get('/export-students', exportStudentsCSV);
+router.get('/export-transactions', exportTransactionsCSV);
+
+// Maintenance routes
+router.post('/clear-database', clearDatabase);
+router.post('/import-sql', upload.single('file'), importSQLBackup);
+router.post('/import-students', upload.single('file'), importStudentsCSV);
+router.post('/import-transactions', upload.single('file'), importTransactionsCSV);
 
 module.exports = router;

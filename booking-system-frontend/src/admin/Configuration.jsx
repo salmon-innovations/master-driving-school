@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import './css/branch.css';
 import { branchesAPI, rolesAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
@@ -12,17 +12,25 @@ import { adminAPI } from '../services/api';
 
 const BackupSection = () => {
     const { showNotification } = useNotification();
-    const [loading, setLoading] = useState({ db: false, students: false, transactions: false });
+    const [loading, setLoading] = useState({ db: false, students: false, transactions: false, clear: false, restore: false });
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const sqlInputRef = useRef(null);
+    const studentsInputRef = useRef(null);
+    const transInputRef = useRef(null);
 
     const downloadCSV = (data, filename) => {
         if (!data || data.length === 0) return;
         const headers = Object.keys(data[0]).join(',');
         const rows = data.map(obj => 
-            Object.values(obj).map(val => 
-                typeof val === 'string' ? `"${val.replace(/"/g, '""')}"` : val
-            ).join(',')
+            Object.values(obj).map(val => {
+                if (val === null || val === undefined) return '""';
+                const str = String(val);
+                return `"${str.replace(/"/g, '""')}"`;
+            }).join(',')
         ).join('\n');
-        const csvContent = `${headers}\n${rows}`;
+        
+        // Add BOM for Excel UTF-8 compatibility
+        const csvContent = `\ufeff${headers}\n${rows}`;
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         const url = URL.createObjectURL(blob);
@@ -57,10 +65,15 @@ const BackupSection = () => {
             setLoading(prev => ({ ...prev, students: true }));
             const res = await adminAPI.exportStudents();
             if (res.success) {
-                downloadCSV(res.data, 'mds_students_backup');
-                showNotification('Student data exported successfully', 'success');
+                if (!res.data || res.data.length === 0) {
+                    showNotification('No student records found to export', 'warning');
+                } else {
+                    downloadCSV(res.data, 'mds_students_backup');
+                    showNotification(`${res.data.length} records exported successfully`, 'success');
+                }
             }
         } catch (err) {
+            console.error('Students export err:', err);
             showNotification('Export failed', 'error');
         } finally {
             setLoading(prev => ({ ...prev, students: false }));
@@ -72,26 +85,93 @@ const BackupSection = () => {
             setLoading(prev => ({ ...prev, transactions: true }));
             const res = await adminAPI.exportTransactions();
             if (res.success) {
-                downloadCSV(res.data, 'mds_transactions_backup');
-                showNotification('Transaction records exported successfully', 'success');
+                if (!res.data || res.data.length === 0) {
+                    showNotification('No transaction records found to export', 'warning');
+                } else {
+                    downloadCSV(res.data, 'mds_transactions_backup');
+                    showNotification(`${res.data.length} records exported successfully`, 'success');
+                }
             }
         } catch (err) {
+            console.error('Transactions export err:', err);
             showNotification('Export failed', 'error');
         } finally {
             setLoading(prev => ({ ...prev, transactions: false }));
         }
     };
 
+    const handleClearDB = async () => {
+        try {
+            setLoading(prev => ({ ...prev, clear: true }));
+            const res = await adminAPI.clearDatabase();
+            if (res.success) {
+                showNotification(res.message, 'success');
+            }
+        } catch (err) {
+            showNotification(err.message || 'Failed to clear database', 'error');
+        } finally {
+            setLoading(prev => ({ ...prev, clear: false }));
+            setShowClearConfirm(false);
+        }
+    };
+
+    const handleImportFile = async (type, file) => {
+        if (!file) return;
+        try {
+            setLoading(prev => ({ ...prev, restore: true }));
+            let res;
+            if (type === 'sql') res = await adminAPI.importSQL(file);
+            else if (type === 'students') res = await adminAPI.importStudentsCSV(file);
+            else if (type === 'transactions') res = await adminAPI.importTransactionsCSV(file);
+
+            if (res.success) {
+                showNotification(res.message || 'Import successful!', 'success');
+                if (type === 'sql') window.location.reload();
+            } else {
+                showNotification(res.message, 'warning');
+            }
+        } catch (err) {
+            showNotification(err.message || 'Import failed', 'error');
+        } finally {
+            setLoading(prev => ({ ...prev, restore: false }));
+            if (sqlInputRef.current) sqlInputRef.current.value = '';
+            if (studentsInputRef.current) studentsInputRef.current.value = '';
+            if (transInputRef.current) transInputRef.current.value = '';
+        }
+    };
+
     return (
         <div className="backup-container" style={{ padding: '20px', backgroundColor: 'white', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
-            <div style={{ marginBottom: '24px' }}>
-                <h2 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>Security & Backup Tools</h2>
-                <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>Download complete system data and database snapshots for safety.</p>
+            <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>Database Maintenance & Recovery</h2>
+                    <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>Manage your data through backups, exports, and restoration tools.</p>
+                </div>
+                <button 
+                    onClick={() => setShowClearConfirm(true)}
+                    style={{ padding: '10px 16px', backgroundColor: '#fee2e2', color: '#b91c1c', borderRadius: '8px', fontSize: '0.875rem', fontWeight: '600', border: '1px solid #fecaca', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+                >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                    Clear Student Data
+                </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+            <div style={{ backgroundColor: '#f9fafb', borderRadius: '8px', padding: '16px', marginBottom: '24px', borderLeft: '4px solid #0369a1' }}>
+                <p style={{ fontSize: '0.875rem', color: '#1e40af' }}>
+                    <strong>Notice:</strong> "Clear Student Data" only removes student profiles, bookings, and schedules. It <strong>won't delete</strong> your course list or branch configurations.
+                </p>
+            </div>
+
+            <h3 style={{ fontSize: '1rem', fontWeight: '600', color: '#374151', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                Backup & Export (Server to Local)
+            </h3>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '32px' }}>
                 {/* DB Backup Card */}
-                <div style={{ padding: '24px', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ padding: '24px', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: 'white' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div style={{ width: '40px', height: '40px', borderRadius: '8px', backgroundColor: '#e0f2fe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0369a1" strokeWidth="2">
@@ -100,7 +180,7 @@ const BackupSection = () => {
                         </div>
                         <div>
                             <h3 style={{ fontWeight: '600', color: '#111827' }}>Full Database Snapshot</h3>
-                            <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>Download complete .sql file of the entire system</p>
+                            <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>Download complete .sql file</p>
                         </div>
                     </div>
                     <button 
@@ -108,13 +188,12 @@ const BackupSection = () => {
                         disabled={loading.db}
                         style={{ padding: '10px', backgroundColor: '#0369a1', color: 'white', borderRadius: '8px', fontWeight: '500', transition: 'all 0.2s', opacity: loading.db ? 0.7 : 1, cursor: 'pointer' }}
                     >
-                        {loading.db ? 'Generating Backup...' : 'Download Full SQL Backup'}
+                        {loading.db ? 'Generating...' : 'Download Full SQL Backup'}
                     </button>
-                    <p style={{ fontSize: '0.7rem', color: '#ef4444', fontStyle: 'italic' }}>* Tip: Keep this file in a secure location (Google Drive/USB).</p>
                 </div>
 
                 {/* Students Export Card */}
-                <div style={{ padding: '24px', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ padding: '24px', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: 'white' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div style={{ width: '40px', height: '40px', borderRadius: '8px', backgroundColor: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2">
@@ -125,7 +204,7 @@ const BackupSection = () => {
                         </div>
                         <div>
                             <h3 style={{ fontWeight: '600', color: '#111827' }}>Student Registry</h3>
-                            <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>Download all student details as CSV</p>
+                            <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>Export all student profiles (CSV)</p>
                         </div>
                     </div>
                     <button 
@@ -138,7 +217,7 @@ const BackupSection = () => {
                 </div>
 
                 {/* Transactions Export Card */}
-                <div style={{ padding: '24px', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ padding: '24px', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: 'white' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div style={{ width: '40px', height: '40px', borderRadius: '8px', backgroundColor: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" strokeWidth="2">
@@ -148,7 +227,7 @@ const BackupSection = () => {
                         </div>
                         <div>
                             <h3 style={{ fontWeight: '600', color: '#111827' }}>Financial History</h3>
-                            <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>Download all transaction records as CSV</p>
+                            <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>Export all transactions (CSV)</p>
                         </div>
                     </div>
                     <button 
@@ -160,6 +239,91 @@ const BackupSection = () => {
                     </button>
                 </div>
             </div>
+
+            <h3 style={{ fontSize: '1rem', fontWeight: '600', color: '#374151', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                Restore & Import (Local to Server)
+            </h3>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+                {/* SQL Restore */}
+                <div style={{ padding: '24px', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: 'white' }}>
+                    <div>
+                        <h3 style={{ fontWeight: '600', color: '#111827' }}>Restore SQL Backup</h3>
+                        <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>Upload a .sql file to overwrite current database</p>
+                    </div>
+                    <input 
+                        type="file" 
+                        ref={sqlInputRef}
+                        accept=".sql" 
+                        style={{ display: 'none' }} 
+                        onChange={(e) => handleImportFile('sql', e.target.files[0])} 
+                    />
+                    <button 
+                        onClick={() => sqlInputRef.current.click()}
+                        disabled={loading.restore}
+                        style={{ padding: '10px', border: '1px solid #0369a1', color: '#0369a1', borderRadius: '8px', fontWeight: '500', cursor: 'pointer' }}
+                    >
+                        {loading.restore ? 'Uploading...' : 'Upload & Restore SQL'}
+                    </button>
+                </div>
+
+                {/* Students Import */}
+                <div style={{ padding: '24px', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: 'white' }}>
+                    <div>
+                        <h3 style={{ fontWeight: '600', color: '#111827' }}>Import Students</h3>
+                        <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>Legacy student data import (CSV)</p>
+                    </div>
+                    <input 
+                        type="file" 
+                        ref={studentsInputRef}
+                        accept=".csv" 
+                        style={{ display: 'none' }} 
+                        onChange={(e) => handleImportFile('students', e.target.files[0])} 
+                    />
+                    <button 
+                        onClick={() => studentsInputRef.current.click()}
+                        disabled={loading.restore}
+                        style={{ padding: '10px', border: '1px solid #15803d', color: '#15803d', borderRadius: '8px', fontWeight: '500', cursor: 'pointer' }}
+                    >
+                        {loading.restore ? 'Uploading...' : 'Import Students CSV'}
+                    </button>
+                </div>
+
+                {/* Transactions Import */}
+                <div style={{ padding: '24px', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: 'white' }}>
+                    <div>
+                        <h3 style={{ fontWeight: '600', color: '#111827' }}>Import Transactions</h3>
+                        <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>Import external payment logs (CSV)</p>
+                    </div>
+                    <input 
+                        type="file" 
+                        ref={transInputRef}
+                        accept=".csv" 
+                        style={{ display: 'none' }} 
+                        onChange={(e) => handleImportFile('transactions', e.target.files[0])} 
+                    />
+                    <button 
+                        onClick={() => transInputRef.current.click()}
+                        disabled={loading.restore}
+                        style={{ padding: '10px', border: '1px solid #b91c1c', color: '#b91c1c', borderRadius: '8px', fontWeight: '500', cursor: 'pointer' }}
+                    >
+                        {loading.restore ? 'Uploading...' : 'Import Transactions CSV'}
+                    </button>
+                </div>
+            </div>
+
+            {/* Clear Confirm Modal */}
+            <ConfirmModal 
+                show={showClearConfirm}
+                onClose={() => setShowClearConfirm(false)}
+                onConfirm={handleClearDB}
+                title="Wipe Student & Booking Data?"
+                message="This will permanently delete all student accounts, bookings, and payments. Courses and branch configurations will be kept. This is irreversible!"
+                confirmText="Yes, Wipe Data"
+                loading={loading.clear}
+                danger={true}
+            />
         </div>
     );
 };

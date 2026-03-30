@@ -1982,6 +1982,324 @@ const getStudentDetail = async (req, res) => {
   }
 };
 
+// FULL DATABASE BACKUP (.sql)
+const getDatabaseBackup = async (req, res) => {
+  try {
+    const { exec } = require('child_process');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `backup_${timestamp}.sql`;
+    const filepath = path.join(__dirname, '..', 'tmp', filename);
+
+    // Ensure tmp exists
+    if (!fs.existsSync(path.join(__dirname, '..', 'tmp'))) {
+      fs.mkdirSync(path.join(__dirname, '..', 'tmp'));
+    }
+
+    const { execSync } = require('child_process');
+    // On Windows, use quotes around path. Handle both locally and cloud (DATABASE_URL preferred)
+    const dumpPath = '"C:\\Program Files\\PostgreSQL\\18\\bin\\pg_dump.exe"';
+    
+    let cmd = '';
+    const dbUrl = process.env.DATABASE_URL;
+
+    if (dbUrl) {
+      cmd = `${dumpPath} -d "${dbUrl}" --inserts -F p -f "${filepath}"`;
+    } else {
+      // Use individual params
+      const { DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD } = process.env;
+      if (!DB_NAME) throw new Error('Database Configuration not found in environment');
+      
+      // Set PGPASSWORD so pg_dump doesn't prompt
+      process.env.PGPASSWORD = DB_PASSWORD;
+      cmd = `${dumpPath} -h ${DB_HOST || 'localhost'} -p ${DB_PORT || 5432} -U ${DB_USER || 'postgres'} --inserts -F p -f "${filepath}" ${DB_NAME}`;
+    }
+    
+    console.log(`🚀 Starting DB backup to ${filename}...`);
+    exec(cmd, (error, stdout, stderr) => {
+      // Clear password from env after use
+      delete process.env.PGPASSWORD;
+      
+      if (error) {
+        console.error('Backup error:', error);
+        return res.status(500).json({ error: 'Failed to generate backup' });
+      }
+      
+      res.download(filepath, filename, (err) => {
+        if (err) console.error('Download error:', err);
+        // Delete after sending
+        setTimeout(() => fs.unlinkSync(filepath), 10000);
+      });
+    });
+  } catch (error) {
+    console.error('DB backup controller error:', error);
+    res.status(500).json({ error: error.message || 'Backup failed' });
+  }
+};
+
+// EXPORT STUDENTS AS CSV
+const exportStudentsCSV = async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        u.first_name as "First Name", 
+        u.middle_name as "Middle Name", 
+        u.last_name as "Last Name", 
+        u.email as "Email Address", 
+        u.gender as "Gender", 
+        u.age as "Age", 
+        TO_CHAR(u.birthday, 'YYYY-MM-DD') as "Birthday",
+        u.address as "Home Address", 
+        u.contact_numbers as "Contact Number",
+        TO_CHAR(u.created_at, 'Month DD, YYYY') as "Registration Date",
+        u.status as "Account Status", 
+        b.name as "Primary Branch"
+      FROM users u
+      LEFT JOIN branches b ON u.branch_id = b.id
+      WHERE u.role IN ('student', 'walkin_student')
+      ORDER BY u.created_at DESC
+    `;
+    const result = await pool.query(query);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error('Export error:', error);
+    res.status(500).json({ error: 'Export failed' });
+  }
+};
+
+// EXPORT TRANSACTIONS AS CSV
+const exportTransactionsCSV = async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        b.id as "Booking ID", 
+        TO_CHAR(b.created_at, 'Month DD, YYYY') as "Transaction Date",
+        UPPER(u.first_name || ' ' || u.last_name) as "Student Name",
+        u.email as "Student Email",
+        c.name as "Course Name", 
+        b.course_type as "Category",
+        b.total_amount as "Paid Amount",
+        UPPER(b.status) as "Payment Status",
+        b.payment_type as "Pay Type", 
+        b.payment_method as "Method",
+        br.name as "Branch",
+        b.enrollment_type as "Enrollment"
+      FROM bookings b
+      LEFT JOIN users u ON b.user_id = u.id
+      LEFT JOIN courses c ON b.course_id = c.id
+      LEFT JOIN branches br ON b.branch_id = br.id
+      ORDER BY b.created_at DESC
+    `;
+    const result = await pool.query(query);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error('Export error:', error);
+    res.status(500).json({ error: 'Export failed' });
+  }
+};
+
+// CLEAR DATABASE (STUDENTS & BOOKINGS ONLY)
+const clearDatabase = async (req, res) => {
+  try {
+    // Start a transaction for safety
+    await pool.query('BEGIN');
+    
+    console.log('🚮 Clearing database (Students & Bookings)...');
+    
+    // Delete in order due to foreign key constraints
+    await pool.query('DELETE FROM schedule_enrollments');
+    await pool.query('DELETE FROM bookings');
+    await pool.query("DELETE FROM users WHERE role IN ('student', 'walkin_student')");
+    
+    await pool.query('COMMIT');
+    res.json({ success: true, message: 'Database cleared: All student and booking data removed successfully.' });
+  } catch (error) {
+    if (pool) await pool.query('ROLLBACK');
+    console.error('Clear DB error:', error);
+    res.status(500).json({ error: 'Failed to clear database' });
+  }
+};
+
+// IMPORT SQL BACKUP
+const importSQLBackup = async (req, res) => {
+  try {
+    const { file } = req;
+    if (!file) return res.status(400).json({ error: 'No backup file provided' });
+
+    const { exec } = require('child_process');
+    const psqlPath = '"C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe"';
+    const filepath = file.path;
+    
+    let cmd = '';
+    const dbUrl = process.env.DATABASE_URL;
+
+    if (dbUrl) {
+      cmd = `${psqlPath} -d "${dbUrl}" -f "${filepath}"`;
+    } else {
+      const { DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD } = process.env;
+      process.env.PGPASSWORD = DB_PASSWORD;
+      cmd = `${psqlPath} -h ${DB_HOST || 'localhost'} -p ${DB_PORT || 5432} -U ${DB_USER || 'postgres'} -d ${DB_NAME} -f "${filepath}"`;
+    }
+
+    console.log(`📥 Importing SQL backup from ${file.originalname}...`);
+    exec(cmd, (error, stdout, stderr) => {
+      delete process.env.PGPASSWORD;
+      // Also delete the temp uploaded file
+      try { fs.unlinkSync(filepath); } catch(e) {}
+      
+      if (error) {
+        console.error('Import error:', error);
+        return res.status(500).json({ error: 'Failed to import backup' });
+      }
+      res.json({ success: true, message: 'Database restored successfully!' });
+    });
+  } catch (error) {
+    console.error('Import controller error:', error);
+    res.status(500).json({ error: 'Import process failed' });
+  }
+};
+
+const importStudentsCSV = async (req, res) => {
+  try {
+    const { file } = req;
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const csv = require('csv-parser');
+    const results = [];
+    const filepath = file.path;
+
+    fs.createReadStream(filepath)
+      .pipe(csv())
+      .on('data', (data) => results.push(data))
+      .on('end', async () => {
+        let imported = 0;
+        let skipped = 0;
+
+        for (const row of results) {
+          try {
+            // Basic mapping
+            const email = row.email || row.student_email;
+            if (!email) { skipped++; continue; }
+
+            // Find branch if provided
+            let branchId = null;
+            if (row.branch_name) {
+              const bRes = await pool.query('SELECT id FROM branches WHERE name ILIKE $1', [row.branch_name]);
+              if (bRes.rows.length > 0) branchId = bRes.rows[0].id;
+            }
+
+            const query = `
+              INSERT INTO users (
+                first_name, last_name, email, contact_numbers, gender, address, branch_id, role, password, is_verified
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+              ON CONFLICT (email) DO NOTHING
+            `;
+            
+            const values = [
+              row.first_name || row.fullname?.split(' ')[0] || 'Student',
+              row.last_name || row.fullname?.split(' ').slice(1).join(' ') || 'User',
+              email,
+              row.mobile || row.phone || row.contact_numbers || '',
+              row.gender || 'Not specified',
+              row.address || '',
+              branchId,
+              row.role || 'student',
+              '$2a$10$7d...hashPlaceholder...', // Default password hash should be handled
+              true
+            ];
+
+            const insertRes = await pool.query(query, values);
+            if (insertRes.rowCount > 0) imported++;
+            else skipped++;
+          } catch (err) {
+            console.error('Row import error:', err);
+            skipped++;
+          }
+        }
+
+        try { fs.unlinkSync(filepath); } catch(e) {}
+        res.json({ success: true, message: `Import complete: ${imported} imported, ${skipped} skipped (duplicates/errors).` });
+      });
+  } catch (error) {
+    console.error('Import error:', error);
+    res.status(500).json({ error: 'Failed to process CSV' });
+  }
+};
+
+const importTransactionsCSV = async (req, res) => {
+  try {
+    const { file } = req;
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const csv = require('csv-parser');
+    const results = [];
+    const filepath = file.path;
+
+    fs.createReadStream(filepath)
+      .pipe(csv())
+      .on('data', (data) => results.push(data))
+      .on('end', async () => {
+        let imported = 0;
+        let skipped = 0;
+
+        for (const row of results) {
+          try {
+            // Find student
+            const email = row.student_email || row.email;
+            const courseName = row.course_name;
+            
+            if (!email || !courseName) { skipped++; continue; }
+
+            const userRes = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+            const courseRes = await pool.query('SELECT id FROM courses WHERE name ILIKE $1', [courseName]);
+            
+            if (userRes.rows.length === 0 || courseRes.rows.length === 0) {
+              skipped++;
+              continue;
+            }
+
+            const userId = userRes.rows[0].id;
+            const courseId = courseRes.rows[0].id;
+
+            // Optional: Find branch
+            let branchId = null;
+            if (row.branch_name) {
+              const bRes = await pool.query('SELECT id FROM branches WHERE name ILIKE $1', [row.branch_name]);
+              if (bRes.rows.length > 0) branchId = bRes.rows[0].id;
+            }
+
+            const query = `
+              INSERT INTO bookings (
+                user_id, course_id, branch_id, total_amount, status, payment_type, payment_method, enrollment_type, course_type
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            `;
+            
+            const values = [
+              userId, courseId, branchId,
+              row.amount || 0,
+              row.payment_status || 'paid',
+              row.payment_type || 'full',
+              row.payment_method || 'walk-in',
+              row.enrollment_type || 'walk-in',
+              row.course_type || 'Personal'
+            ];
+
+            await pool.query(query, values);
+            imported++;
+          } catch (err) {
+            console.error('Transaction row error:', err);
+            skipped++;
+          }
+        }
+
+        try { fs.unlinkSync(filepath); } catch(e) {}
+        res.json({ success: true, message: `Import complete: ${imported} transactions imported, ${skipped} skipped.` });
+      });
+  } catch (error) {
+    console.error('Import error:', error);
+    res.status(500).json({ error: 'Failed to process CSV' });
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getAllBookings,
@@ -2013,5 +2331,12 @@ module.exports = {
   getStudentDetail,
   getAddonsConfig,
   updateAddonsConfig,
+  getDatabaseBackup,
+  exportStudentsCSV,
+  exportTransactionsCSV,
+  clearDatabase,
+  importSQLBackup,
+  importStudentsCSV,
+  importTransactionsCSV,
 };
 
