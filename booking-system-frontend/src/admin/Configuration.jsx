@@ -8,6 +8,161 @@ import SettingsSection from './config/SettingsSection';
 import CourseTypesSection from './config/CourseTypesSection';
 import EmailContentSection from './config/EmailContentSection';
 import { BranchModal, RoleModal, ConfirmModal } from './config/Modals';
+import { adminAPI } from '../services/api';
+
+const BackupSection = () => {
+    const { showNotification } = useNotification();
+    const [loading, setLoading] = useState({ db: false, students: false, transactions: false });
+
+    const downloadCSV = (data, filename) => {
+        if (!data || data.length === 0) return;
+        const headers = Object.keys(data[0]).join(',');
+        const rows = data.map(obj => 
+            Object.values(obj).map(val => 
+                typeof val === 'string' ? `"${val.replace(/"/g, '""')}"` : val
+            ).join(',')
+        ).join('\n');
+        const csvContent = `${headers}\n${rows}`;
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `${filename}_${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const handleDBBackup = async () => {
+        try {
+            setLoading(prev => ({ ...prev, db: true }));
+            const blob = await adminAPI.getDatabaseBackup();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `mds_full_backup_${new Date().toISOString().split('T')[0]}.sql`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            showNotification('Database backup generated and download started!', 'success');
+        } catch (err) {
+            showNotification(err.message || 'Failed to generate database backup', 'error');
+        } finally {
+            setLoading(prev => ({ ...prev, db: false }));
+        }
+    };
+
+    const handleExportStudents = async () => {
+        try {
+            setLoading(prev => ({ ...prev, students: true }));
+            const res = await adminAPI.exportStudents();
+            if (res.success) {
+                downloadCSV(res.data, 'mds_students_backup');
+                showNotification('Student data exported successfully', 'success');
+            }
+        } catch (err) {
+            showNotification('Export failed', 'error');
+        } finally {
+            setLoading(prev => ({ ...prev, students: false }));
+        }
+    };
+
+    const handleExportTransactions = async () => {
+        try {
+            setLoading(prev => ({ ...prev, transactions: true }));
+            const res = await adminAPI.exportTransactions();
+            if (res.success) {
+                downloadCSV(res.data, 'mds_transactions_backup');
+                showNotification('Transaction records exported successfully', 'success');
+            }
+        } catch (err) {
+            showNotification('Export failed', 'error');
+        } finally {
+            setLoading(prev => ({ ...prev, transactions: false }));
+        }
+    };
+
+    return (
+        <div className="backup-container" style={{ padding: '20px', backgroundColor: 'white', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
+            <div style={{ marginBottom: '24px' }}>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>Security & Backup Tools</h2>
+                <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>Download complete system data and database snapshots for safety.</p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+                {/* DB Backup Card */}
+                <div style={{ padding: '24px', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ width: '40px', height: '40px', borderRadius: '8px', backgroundColor: '#e0f2fe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0369a1" strokeWidth="2">
+                                <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 style={{ fontWeight: '600', color: '#111827' }}>Full Database Snapshot</h3>
+                            <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>Download complete .sql file of the entire system</p>
+                        </div>
+                    </div>
+                    <button 
+                        onClick={handleDBBackup} 
+                        disabled={loading.db}
+                        style={{ padding: '10px', backgroundColor: '#0369a1', color: 'white', borderRadius: '8px', fontWeight: '500', transition: 'all 0.2s', opacity: loading.db ? 0.7 : 1, cursor: 'pointer' }}
+                    >
+                        {loading.db ? 'Generating Backup...' : 'Download Full SQL Backup'}
+                    </button>
+                    <p style={{ fontSize: '0.7rem', color: '#ef4444', fontStyle: 'italic' }}>* Tip: Keep this file in a secure location (Google Drive/USB).</p>
+                </div>
+
+                {/* Students Export Card */}
+                <div style={{ padding: '24px', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ width: '40px', height: '40px', borderRadius: '8px', backgroundColor: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2">
+                                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                                <circle cx="8.5" cy="7" r="4" />
+                                <polyline points="17 11 19 13 23 9" />
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 style={{ fontWeight: '600', color: '#111827' }}>Student Registry</h3>
+                            <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>Download all student details as CSV</p>
+                        </div>
+                    </div>
+                    <button 
+                        onClick={handleExportStudents} 
+                        disabled={loading.students}
+                        style={{ padding: '10px', backgroundColor: '#15803d', color: 'white', borderRadius: '8px', fontWeight: '500', opacity: loading.students ? 0.7 : 1, cursor: 'pointer' }}
+                    >
+                        {loading.students ? 'Processing...' : 'Export Students (CSV)'}
+                    </button>
+                </div>
+
+                {/* Transactions Export Card */}
+                <div style={{ padding: '24px', border: '1px solid #e5e7eb', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ width: '40px', height: '40px', borderRadius: '8px', backgroundColor: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" strokeWidth="2">
+                                <rect x="2" y="5" width="20" height="14" rx="2" />
+                                <line x1="2" y1="10" x2="22" y2="10" />
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 style={{ fontWeight: '600', color: '#111827' }}>Financial History</h3>
+                            <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>Download all transaction records as CSV</p>
+                        </div>
+                    </div>
+                    <button 
+                        onClick={handleExportTransactions} 
+                        disabled={loading.transactions}
+                        style={{ padding: '10px', backgroundColor: '#b91c1c', color: 'white', borderRadius: '8px', fontWeight: '500', opacity: loading.transactions ? 0.7 : 1, cursor: 'pointer' }}
+                    >
+                        {loading.transactions ? 'Processing...' : 'Export Transactions (CSV)'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const Configuration = ({ initialTab = 'branches' }) => {
     const { showNotification } = useNotification();
@@ -250,6 +405,17 @@ const Configuration = ({ initialTab = 'branches' }) => {
                 </svg>
             )
         },
+        {
+            key: 'backup',
+            label: 'Backup & Data',
+            icon: (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+            )
+        },
     ];
 
     return (
@@ -332,6 +498,9 @@ const Configuration = ({ initialTab = 'branches' }) => {
                 )}
                 {activeTab === 'emailcontent' && (
                     <EmailContentSection />
+                )}
+                {activeTab === 'backup' && (
+                    <BackupSection />
                 )}
             </div>
 

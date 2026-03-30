@@ -563,6 +563,18 @@ export const adminAPI = {
   searchStudents: async (name) => {
     return await apiRequest(`/admin/search-students?name=${encodeURIComponent(name)}`);
   },
+
+  // Backup & Export
+  getDatabaseBackup: async () => {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/admin/db-backup`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) throw new Error('Failed to fetch database backup');
+    return await response.blob();
+  },
+  exportStudents: async () => await apiRequest('/admin/export-students'),
+  exportTransactions: async () => await apiRequest('/admin/export-transactions'),
 };
 
 // Schedules API
