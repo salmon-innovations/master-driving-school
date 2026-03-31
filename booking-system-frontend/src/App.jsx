@@ -140,7 +140,10 @@ function App() {
       const saved = localStorage.getItem('scheduleSelection')
       if (saved && saved !== 'undefined') {
         const parsed = JSON.parse(saved)
-        if (parsed && parsed.date) parsed.date = new Date(parsed.date)
+        if (parsed) {
+          if (parsed.date) parsed.date = new Date(parsed.date)
+          if (parsed.date2) parsed.date2 = new Date(parsed.date2)
+        }
         return parsed
       }
     } catch { return null }

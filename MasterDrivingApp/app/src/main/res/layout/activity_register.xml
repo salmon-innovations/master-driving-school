@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/white">
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- TOP HEADER BAR — Responsive & STICKY   -->
+    <!-- ══════════════════════════════════════ -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@color/white"
+        android:elevation="8dp"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="18dp"
+        android:paddingBottom="14dp">
+
+        <!-- Back + Title row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:id="@+id/tv_back"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="← BACK"
+                android:textColor="@color/gray_500"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.08"
+                android:clickable="true"
+                android:focusable="true"
+                android:padding="4dp"
+                android:layout_marginEnd="12dp" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Enrollment"
+                android:textColor="@color/brand_blue_dark"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.02" />
+        </LinearLayout>
+
+        <!-- Step indicator row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+                <TextView
+                    android:id="@+id/tv_step_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Step 1: Personal Details"
+                    android:textColor="@color/brand_blue"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+                <!-- Progress bar line -->
+                <View
+                    android:layout_width="64dp"
+                    android:layout_height="4dp"
+                    android:background="@color/brand_blue"
+                    android:layout_marginTop="4dp" />
+            </LinearLayout>
+
+            <!-- Status Dots -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+                <View android:id="@+id/dot1" android:layout_width="14dp" android:layout_height="14dp" android:background="@drawable/bg_step_circle_blue" android:layout_marginEnd="8dp" />
+                <View android:id="@+id/dot2" android:layout_width="10dp" android:layout_height="10dp" android:background="@drawable/bg_step_circle_inactive" android:layout_marginEnd="8dp" />
+                <View android:id="@+id/dot3" android:layout_width="10dp" android:layout_height="10dp" android:background="@drawable/bg_step_circle_inactive" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ══════════════════ -->
+    <!-- FORM CONTENT      -->
+    <!-- ══════════════════ -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingTop="24dp"
+            android:paddingBottom="24dp">
+
+            <!-- Error Banner -->
+            <TextView
+                android:id="@+id/tv_error"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:background="#FFF5F5"
+                android:padding="14dp"
+                android:textColor="#DC2626"
+                android:textSize="13sp"
+                android:drawableStart="@android:drawable/stat_notify_error"
+                android:drawablePadding="10dp"
+                android:visibility="gone" />
+
+            <!-- STEP 1: Personal -->
+            <LinearLayout android:id="@+id/step1_layout" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="visible">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Full Name" android:textColor="@color/gray_500" android:textSize="12sp" android:textStyle="bold" android:letterSpacing="0.05" android:layout_marginBottom="8dp" />
+                <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" app:hintEnabled="false" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_first_name" android:layout_width="match_parent" android:layout_height="56dp" android:hint="First Name" android:inputType="textPersonName" android:textSize="15sp" android:textColor="@color/gray_900" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" app:hintEnabled="false" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_middle_name" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Middle Name (Optional)" android:inputType="textPersonName" android:textSize="15sp" android:textColor="@color/gray_900" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" app:hintEnabled="false" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_last_name" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Last Name" android:inputType="textPersonName" android:textSize="15sp" android:textColor="@color/gray_900" />
+                </com.google.android.material.textfield.TextInputLayout>
+                
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Details" android:textColor="@color/gray_500" android:textSize="12sp" android:textStyle="bold" android:letterSpacing="0.05" android:layout_marginBottom="8dp" />
+                <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" app:hintEnabled="false" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_birthday" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Birth Date (YYYY-MM-DD)" android:inputType="datetime" android:textSize="15sp" android:textColor="@color/gray_900" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="16dp">
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btn_gender_male" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" android:text="MALE" android:layout_marginEnd="10dp" android:textColor="@color/brand_blue" app:backgroundTint="#F0F4FF" app:cornerRadius="12dp" app:strokeColor="@color/brand_blue" app:strokeWidth="1dp" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btn_gender_female" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" android:text="FEMALE" android:textColor="@color/brand_blue" app:backgroundTint="#F0F4FF" app:cornerRadius="12dp" app:strokeColor="@color/brand_blue" app:strokeWidth="1dp" />
+                </LinearLayout>
+
+                <Spinner android:id="@+id/sp_civil_status" android:layout_width="match_parent" android:layout_height="56dp" android:background="@drawable/bg_search_bar" android:paddingStart="16dp" android:paddingEnd="16dp" android:layout_marginBottom="16dp" />
+                <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" app:hintEnabled="false" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_nationality" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Nationality" android:inputType="textPersonName" android:textSize="15sp" android:textColor="@color/gray_900" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+
+            <!-- STEP 2: Contact -->
+            <LinearLayout android:id="@+id/step2_layout" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Address" android:textColor="@color/gray_500" android:textSize="12sp" android:textStyle="bold" android:letterSpacing="0.05" android:layout_marginBottom="8dp" />
+                <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" app:hintEnabled="false" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_address" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Home Address" android:inputType="textPostalAddress" android:textSize="15sp" android:textColor="@color/gray_900" />
+                </com.google.android.material.textfield.TextInputLayout>
+                
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="16dp">
+                    <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginEnd="10dp" app:hintEnabled="false" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_zip_code" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Zip Code" android:inputType="number" android:textSize="15sp" android:textColor="@color/gray_900" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="2" app:hintEnabled="false" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_birth_place" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Place of Birth" android:inputType="text" android:textSize="15sp" android:textColor="@color/gray_900" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                </LinearLayout>
+
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Contact Information" android:textColor="@color/gray_500" android:textSize="12sp" android:textStyle="bold" android:letterSpacing="0.05" android:layout_marginBottom="8dp" />
+                <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" app:hintEnabled="false" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_phone" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Mobile No. (09XX...)" android:inputType="phone" android:textSize="15sp" android:textColor="@color/gray_900" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" app:hintEnabled="false" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_email" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Email Address" android:inputType="textEmailAddress" android:textSize="15sp" android:textColor="@color/gray_900" />
+                </com.google.android.material.textfield.TextInputLayout>
+                
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Emergency Contact" android:textColor="@color/gray_500" android:textSize="12sp" android:textStyle="bold" android:letterSpacing="0.05" android:layout_marginBottom="8dp" />
+                <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" app:hintEnabled="false" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_emergency_person" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Contact Person Name" android:inputType="textPersonName" android:textSize="15sp" android:textColor="@color/gray_900" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" app:hintEnabled="false" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_emergency_number" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Contact Number (09XX...)" android:inputType="phone" android:textSize="15sp" android:textColor="@color/gray_900" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+
+            <!-- STEP 3: Account -->
+            <LinearLayout android:id="@+id/step3_layout" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Security" android:textColor="@color/gray_500" android:textSize="12sp" android:textStyle="bold" android:letterSpacing="0.05" android:layout_marginBottom="8dp" />
+                <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" app:hintEnabled="false" app:endIconMode="password_toggle" app:endIconTint="@color/gray_400" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_password" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Password (min 8 chars)" android:inputType="textPassword" android:textSize="15sp" android:textColor="@color/gray_900" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="24dp" app:hintEnabled="false" app:endIconMode="password_toggle" app:endIconTint="@color/gray_400" app:boxCornerRadiusTopStart="12dp" app:boxCornerRadiusTopEnd="12dp" app:boxCornerRadiusBottomStart="12dp" app:boxCornerRadiusBottomEnd="12dp" app:boxStrokeColor="@color/brand_blue">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_confirm_password" android:layout_width="match_parent" android:layout_height="56dp" android:hint="Confirm Password" android:inputType="textPassword" android:textSize="15sp" android:textColor="@color/gray_900" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- ════════════════════════════ -->
+    <!-- BOTTOM NAVIGATION BUTTONS   -->
+    <!-- ════════════════════════════ -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@color/white"
+        android:elevation="24dp"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="28dp">
+
+        <ProgressBar
+            android:id="@+id/progress_bar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:visibility="gone"
+            android:indeterminateTint="@color/brand_blue"
+            android:layout_marginBottom="12dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_previous"
+                android:layout_width="0dp"
+                android:layout_height="60dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="12dp"
+                android:text="PREV"
+                android:textColor="@color/gray_700"
+                android:textStyle="bold"
+                android:letterSpacing="0.1"
+                app:backgroundTint="@color/gray_100"
+                app:cornerRadius="16dp"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_register"
+                android:layout_width="0dp"
+                android:layout_height="60dp"
+                android:layout_weight="1.5"
+                android:text="CONTINUE"
+                android:textColor="@color/white"
+                android:textStyle="bold"
+                android:letterSpacing="0.1"
+                app:backgroundTint="@color/brand_blue_dark"
+                app:cornerRadius="16dp"
+                app:elevation="4dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tv_sign_in"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="16dp"
+            android:text="ALREADY HAVE AN ACCOUNT? SIGN IN"
+            android:textColor="@color/brand_blue"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.08"
+            android:clickable="true"
+            android:focusable="true" />
+    </LinearLayout>
+
+</LinearLayout>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">booking-system-ej5o.onrender.com</domain>
+        <domain includeSubdomains="true">masterdriving.ph</domain>
+        <domain includeSubdomains="true">www.masterdriving.ph</domain>
+    </domain-config>
+</network-security-config>

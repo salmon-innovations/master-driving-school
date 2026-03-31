@@ -52,7 +52,8 @@ router.get('/', async (req, res) => {
             comment: row.comment,
             course: row.course_name || 'Driving Course',
             videoUrl: row.video_url,
-            imageUrl: row.image_url
+            imageUrl: row.image_url,
+            isFeatured: row.is_featured
         }));
         
         res.json({ success: true, testimonials: formatter });
@@ -89,6 +90,41 @@ router.post('/', authenticateToken, upload.fields([{ name: 'videoFile', maxCount
         );
         
         res.json({ success: true, message: 'Testimonial submitted successfully' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+});
+
+// Feature a specific testimonial (and unfeature all others)
+// Toggle feature status for a testimonial (up to 5 total)
+router.put('/:id/feature', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Check current status
+        const currentRes = await pool.query('SELECT is_featured FROM testimonials WHERE id = $1', [id]);
+        if (currentRes.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Testimonial not found' });
+        }
+        
+        const isCurrentlyFeatured = currentRes.rows[0].is_featured;
+        
+        if (!isCurrentlyFeatured) {
+            // Check if we already have 5 featured
+            const countRes = await pool.query('SELECT COUNT(*) FROM testimonials WHERE is_featured = TRUE');
+            const count = parseInt(countRes.rows[0].count);
+            
+            if (count >= 5) {
+                return res.status(400).json({ success: false, message: 'Maximum of 5 featured testimonials reached. Unfeature one to add another.' });
+            }
+        }
+        
+        // Toggle
+        const newStatus = !isCurrentlyFeatured;
+        await pool.query('UPDATE testimonials SET is_featured = $1 WHERE id = $2', [newStatus, id]);
+        
+        res.json({ success: true, message: newStatus ? 'Testimonial featured' : 'Testimonial unfeatured' });
     } catch (err) {
         console.error(err);
         res.status(500).json({ success: false, message: 'Server Error' });

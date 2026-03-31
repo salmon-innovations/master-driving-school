@@ -2039,6 +2039,27 @@ const getDatabaseBackup = async (req, res) => {
 // EXPORT STUDENTS AS CSV
 const exportStudentsCSV = async (req, res) => {
   try {
+    const { startDate, endDate, branchId } = req.query;
+    let queryParams = [];
+    let paramIndex = 1;
+
+    let whereClauses = ["u.role IN ('student', 'walkin_student')"];
+    
+    if (startDate) {
+      whereClauses.push(`u.created_at >= $${paramIndex++}`);
+      queryParams.push(startDate + ' 00:00:00');
+    }
+    if (endDate) {
+      whereClauses.push(`u.created_at <= $${paramIndex++}`);
+      queryParams.push(endDate + ' 23:59:59');
+    }
+    if (branchId) {
+      whereClauses.push(`u.branch_id = $${paramIndex++}`);
+      queryParams.push(parseInt(branchId));
+    }
+
+    const whereSQL = whereClauses.join(' AND ');
+
     const query = `
       SELECT 
         u.first_name as "First Name", 
@@ -2055,10 +2076,10 @@ const exportStudentsCSV = async (req, res) => {
         b.name as "Primary Branch"
       FROM users u
       LEFT JOIN branches b ON u.branch_id = b.id
-      WHERE u.role IN ('student', 'walkin_student')
+      WHERE ${whereSQL}
       ORDER BY u.created_at DESC
     `;
-    const result = await pool.query(query);
+    const result = await pool.query(query, queryParams);
     res.json({ success: true, data: result.rows });
   } catch (error) {
     console.error('Export error:', error);
@@ -2069,6 +2090,27 @@ const exportStudentsCSV = async (req, res) => {
 // EXPORT TRANSACTIONS AS CSV
 const exportTransactionsCSV = async (req, res) => {
   try {
+    const { startDate, endDate, branchId } = req.query;
+    let queryParams = [];
+    let paramIndex = 1;
+
+    let whereClauses = [];
+    
+    if (startDate) {
+      whereClauses.push(`b.created_at >= $${paramIndex++}`);
+      queryParams.push(startDate + ' 00:00:00');
+    }
+    if (endDate) {
+      whereClauses.push(`b.created_at <= $${paramIndex++}`);
+      queryParams.push(endDate + ' 23:59:59');
+    }
+    if (branchId) {
+      whereClauses.push(`b.branch_id = $${paramIndex++}`);
+      queryParams.push(parseInt(branchId));
+    }
+
+    const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
     const query = `
       SELECT 
         b.id as "Booking ID", 
@@ -2087,9 +2129,10 @@ const exportTransactionsCSV = async (req, res) => {
       LEFT JOIN users u ON b.user_id = u.id
       LEFT JOIN courses c ON b.course_id = c.id
       LEFT JOIN branches br ON b.branch_id = br.id
+      ${whereSQL}
       ORDER BY b.created_at DESC
     `;
-    const result = await pool.query(query);
+    const result = await pool.query(query, queryParams);
     res.json({ success: true, data: result.rows });
   } catch (error) {
     console.error('Export error:', error);

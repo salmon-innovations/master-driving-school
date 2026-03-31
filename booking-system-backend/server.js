@@ -149,6 +149,17 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+// Handle uncaught exceptions and unhandled rejections to prevent crashing
+process.on('uncaughtException', (err) => {
+  console.error('CRITICAL: Uncaught Exception:', err.message);
+  console.error(err.stack);
+  // Optional: Graceful shutdown if needed, but for now we'll log it.
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
 });
