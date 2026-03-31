@@ -460,6 +460,12 @@ const getFromAddress = () => {
   return fallbackFrom;
 };
 
+const getFrontendUrl = () => {
+  const url = process.env.FRONTEND_URL || 'http://localhost:5173';
+  // If multiple URLs are provided (comma-separated), take the first one.
+  return url.split(',')[0].trim();
+};
+
 // Generate 6-digit verification code
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -616,7 +622,7 @@ const sendPasswordEmail = async (email, password, firstName, role) => {
               <p>${EMAIL_CONTENT.newAccount.loginPrompt}</p>
               
               <p style="text-align: center;">
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/signin" class="btn" style="display: inline-block; padding: 12px 24px; background-color: #2157da; color: #ffffff !important; text-decoration: none; border-radius: 5px; margin-top: 15px; font-weight: bold;">${EMAIL_CONTENT.newAccount.loginButtonText}</a>
+                <a href="${getFrontendUrl()}/signin" class="btn" style="display: inline-block; padding: 12px 24px; background-color: #2157da; color: #ffffff !important; text-decoration: none; border-radius: 5px; margin-top: 15px; font-weight: bold;">${EMAIL_CONTENT.newAccount.loginButtonText}</a>
               </p>
             </div>
             <div class="footer">
@@ -894,7 +900,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
               </div>
 
               <p style="text-align: center; margin-top: 25px;">
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify-email?email=${encodeURIComponent(email)}" class="btn">${EMAIL_CONTENT.walkIn.verifyButtonText}</a>
+                <a href="${getFrontendUrl()}/verify-email?email=${encodeURIComponent(email)}" class="btn">${EMAIL_CONTENT.walkIn.verifyButtonText}</a>
               </p>
               ` : `
                <div class="credentials" style="background: #f0fdf4; border-color: #15803d;">
@@ -904,7 +910,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
               </div>
               
               <p style="text-align: center; margin-top: 25px;">
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/signin" class="btn">Log In to Your Account</a>
+                <a href="${getFrontendUrl()}/signin" class="btn">Log In to Your Account</a>
               </p>
               `}
 
@@ -1218,7 +1224,7 @@ const sendNoShowEmail = async (email, firstName, lastName, enrollmentDetails) =>
               </div>
               
               <div style="text-align: center; margin-top: 30px;">
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/profile" class="btn">${EMAIL_CONTENT.noShow.loginButtonText}</a>
+                <a href="${getFrontendUrl()}/profile" class="btn">${EMAIL_CONTENT.noShow.loginButtonText}</a>
               </div>
             </div>
           </div>
@@ -1280,7 +1286,7 @@ const sendNewsPromoEmail = async (email, firstName, newsTitle, newsDescription, 
               </div>
 
               <div style="text-align: center; margin-top: 25px;">
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}" style="display: inline-block; padding: 12px 24px; background-color: #1a4fba; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">${EMAIL_CONTENT.news.visitButton}</a>
+                <a href="${getFrontendUrl()}" style="display: inline-block; padding: 12px 24px; background-color: #1a4fba; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">${EMAIL_CONTENT.news.visitButton}</a>
               </div>
             </div>
             <div class="footer">
@@ -1438,7 +1444,7 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
               ` : ''}
 
               <p style="text-align:center;margin-top:20px;">
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/profile"
+                <a href="${getFrontendUrl()}/profile"
                    style="display:inline-block;padding:12px 28px;background:linear-gradient(135deg,#1a4fba,#3b82f6);color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">
                   ${EMAIL_CONTENT.receipt.viewAccountButton}
                 </a>
