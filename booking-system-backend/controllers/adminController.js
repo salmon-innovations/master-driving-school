@@ -1997,7 +1997,9 @@ const getDatabaseBackup = async (req, res) => {
 
     const { execSync } = require('child_process');
     // On Windows, use quotes around path. Handle both locally and cloud (DATABASE_URL preferred)
-    const dumpPath = '"C:\\Program Files\\PostgreSQL\\18\\bin\\pg_dump.exe"';
+    const dumpPath = process.platform === 'win32' 
+      ? '"C:\\Program Files\\PostgreSQL\\18\\bin\\pg_dump.exe"' 
+      : 'pg_dump';
     
     let cmd = '';
     const dbUrl = process.env.DATABASE_URL;
