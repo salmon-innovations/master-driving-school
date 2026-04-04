@@ -295,11 +295,10 @@ const initiatePayment = async (req, res) => {
                                       WHEN LOWER(COALESCE(payment_type, '')) ~ 'down[\\s-]*payment' THEN 'collectable'
                                       ELSE 'paid'
                                     END,
-                            transaction_id = COALESCE($2, transaction_id),
-                            total_amount = COALESCE($3, total_amount),
+                            total_amount = COALESCE($2, total_amount),
                             updated_at = CURRENT_TIMESTAMP
                       WHERE id = $1 AND status = 'pending'`,
-                    [bookingId, testOrderNo, parseFloat(amount || 0)]
+                    [bookingId, parseFloat(amount || 0)]
                 );
             }
             return res.json({
@@ -383,10 +382,10 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
                                                                 ELSE 'paid'
                                                              END,
                 total_amount = $1,
-                transaction_id = COALESCE($2, transaction_id)
+                                        updated_at = CURRENT_TIMESTAMP
           WHERE transaction_id = $3 AND status = 'pending'
                     RETURNING id, user_id, notes, status`,
-        [amountPhp, orderNo, originalMsgId]
+                                [amountPhp, orderNo, originalMsgId]
     );
 
     if (!rows.length) return null;
@@ -770,6 +769,44 @@ const checkStatus = async (req, res) => {
         }
     }
 
+    // Fallback path: older rows may have had transaction_id replaced by orderNo
+    // after success. Query StarPay directly, then resolve by returned orderNo.
+    try {
+        const queryMsgId = `QRY${Date.now()}`;
+        const spResult = await queryRepayment(queryMsgId, msgId);
+        const spResponse = spResult?.response || spResult;
+        const trxState = String(spResponse?.trxState || '').toUpperCase();
+
+        if (trxState === 'SUCCESS') {
+            const orderNo = spResponse?.orderNo;
+            if (orderNo) {
+                const { rows: orderRows } = await pool.query(
+                    `SELECT id, status, total_amount FROM bookings WHERE transaction_id = $1 ORDER BY id DESC LIMIT 1`,
+                    [orderNo]
+                );
+
+                if (orderRows.length) {
+                    const booking = orderRows[0];
+                    return res.json({
+                        success: true,
+                        localStatus: booking.status || 'paid',
+                        starpayState: 'SUCCESS',
+                        bookingId: booking.id,
+                        amount: booking.total_amount,
+                    });
+                }
+            }
+
+            return res.json({ success: true, localStatus: 'paid', starpayState: 'SUCCESS' });
+        }
+
+        if (['FAIL', 'CLOSE', 'REVERSED', 'CANCEL'].includes(trxState)) {
+            return res.json({ success: true, localStatus: 'cancelled', starpayState: trxState });
+        }
+    } catch (err) {
+        console.error('[StarPay] checkStatus final fallback error:', err.message);
+    }
+
     return res.status(404).json({ success: false, message: 'Order not found' });
 };
 
@@ -959,11 +996,10 @@ const initiateGuestPayment = async (req, res) => {
                                       WHEN LOWER(COALESCE(payment_type, '')) ~ 'down[\\s-]*payment' THEN 'collectable'
                                       ELSE 'paid'
                                     END,
-                            transaction_id = COALESCE($2, transaction_id),
-                            total_amount = COALESCE($3, total_amount),
+                            total_amount = COALESCE($2, total_amount),
                             updated_at = CURRENT_TIMESTAMP
                       WHERE id = $1 AND status = 'pending'`,
-                    [bookingId, testOrderNo, parseFloat(amount || 0)]
+                    [bookingId, parseFloat(amount || 0)]
                 );
             }
             return res.json({

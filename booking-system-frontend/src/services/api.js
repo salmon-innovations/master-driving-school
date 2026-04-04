@@ -366,7 +366,16 @@ export const starpayAPI = {
     method: 'POST',
     body: JSON.stringify(data),
   }),
-  checkStatus: async (msgId) => await apiRequest(`/starpay/status/${msgId}`),
+  checkStatus: async (msgId) => {
+    try {
+      return await apiRequest(`/starpay/status/${msgId}`);
+    } catch (error) {
+      if (error?.statusCode === 404 && /order not found/i.test(String(error?.message || ''))) {
+        return { success: true, localStatus: 'pending', starpayState: 'UNKNOWN' };
+      }
+      throw error;
+    }
+  },
   payRescheduleFee: async (enrollmentId) => await apiRequest(`/starpay/reschedule-fee/${enrollmentId}`, {
     method: 'POST',
   }),
