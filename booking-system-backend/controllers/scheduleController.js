@@ -4,7 +4,7 @@ const { sendNoShowEmail, sendPaymentReceiptEmail } = require('../utils/emailServ
 // Get slots (either by specific date, or all upcoming if date is omitted)
 const getSlotsByDate = async (req, res) => {
   try {
-    const { date, branch_id, type } = req.query;
+    const { date, start_date, end_date, branch_id, type } = req.query;
 
     let query = `
       SELECT 
@@ -53,6 +53,15 @@ const getSlotsByDate = async (req, res) => {
     if (date) {
       query += ` AND $${paramCount} BETWEEN ss.date AND ss.end_date`;
       params.push(date);
+      paramCount++;
+    } else if (start_date && end_date) {
+      // Overlap logic: slot starts before windown ends AND slot ends after window starts
+      query += ` AND ss.date <= $${paramCount + 1} AND COALESCE(ss.end_date, ss.date) >= $${paramCount}`;
+      params.push(start_date, end_date);
+      paramCount += 2;
+    } else if (start_date) {
+      query += ` AND ss.date >= $${paramCount}`;
+      params.push(start_date);
       paramCount++;
     } else {
       query += ` AND ss.date >= CURRENT_DATE`;
@@ -432,6 +441,7 @@ const getMyEnrollments = async (req, res) => {
     const result = await pool.query(
       `SELECT
           b.id                        AS booking_id,
+          b.notes                     AS booking_notes,
           c.name                      AS course_name,
           b.total_amount              AS amount_paid,
           b.payment_type              AS payment_status,
@@ -449,6 +459,7 @@ const getMyEnrollments = async (req, res) => {
           sel.enrollment_id,
           sel.enrollment_status,
           sel.reschedule_fee_paid,
+          sel.enrollment_updated_at,
           sel.schedule_date,
           sel.schedule_end_date,
           sel.session,
@@ -462,6 +473,7 @@ const getMyEnrollments = async (req, res) => {
               se.id                   AS enrollment_id,
               se.enrollment_status,
               se.reschedule_fee_paid,
+              se.updated_at           AS enrollment_updated_at,
               ss.date                 AS schedule_date,
               ss.end_date             AS schedule_end_date,
               ss.session,
@@ -707,7 +719,7 @@ const processNoShow = async (req, res) => {
     const detailsResult = await pool.query(
       `SELECT 
          u.first_name, u.last_name, u.email,
-         ss.date, ss.session, ss.time_range,
+         ss.date, ss.session, ss.time_range, ss.type,
          c.name as course_name
        FROM users u
        JOIN schedule_slots ss ON ss.id = $1
@@ -727,10 +739,11 @@ const processNoShow = async (req, res) => {
       const enrollmentDetails = {
         courseName: details.course_name || 'Driving Course Session',
         scheduleDate: details.date,
-        scheduleSession: details.session
+        scheduleSession: details.session,
+        type: details.type
       };
 
-      // 4. Send the 1000 PHP Fee No-Show Email
+      // 4. Send the dynamically computed No-Show Email
       try {
         await sendNoShowEmail(details.email, details.first_name, details.last_name, enrollmentDetails);
       } catch (e) {
@@ -827,7 +840,7 @@ const payRemainingBalance = async (req, res) => {
   try {
     const studentId = req.user.id;
     const { bookingId } = req.params;
-    const { payment_method } = req.body;
+    const { payment_method, payment_type } = req.body;
 
     // Verify this booking belongs to the logged-in student
     const bookingResult = await pool.query(
@@ -852,27 +865,42 @@ const payRemainingBalance = async (req, res) => {
     const coursePrice = parseFloat(booking.course_price || 0);
     const previousAmount = parseFloat(booking.total_amount || 0);
 
-    // Update to full payment
+    const normalizedChoice = String(payment_type || '').toLowerCase();
+    const wantsDownpayment = ['downpayment', 'down payment', 'down-payment'].includes(normalizedChoice);
+    const isPending = String(booking.status || '').toLowerCase() === 'pending';
+
+    let nextStatus = 'paid';
+    let nextPaymentType = 'Full Payment';
+    let amountPaid = coursePrice;
+
+    if (isPending && wantsDownpayment) {
+      nextStatus = 'collectable';
+      nextPaymentType = 'Downpayment';
+      amountPaid = Math.max(0, coursePrice * 0.5);
+    }
+
     await pool.query(
       `UPDATE bookings
-       SET status = 'paid', total_amount = $1, payment_type = 'Full Payment',
-           payment_method = COALESCE($2, payment_method), updated_at = CURRENT_TIMESTAMP
-       WHERE id = $3`,
-      [coursePrice, payment_method || null, bookingId]
+       SET status = $1,
+           total_amount = $2,
+           payment_type = $3,
+           payment_method = COALESCE($4, payment_method),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $5`,
+      [nextStatus, amountPaid, nextPaymentType, payment_method || null, bookingId]
     );
 
-    // Send full payment receipt email
     try {
       await sendPaymentReceiptEmail(booking.email, booking.first_name, booking.last_name, {
         bookingId: booking.id,
         transactionId: `TXN-${new Date().getFullYear()}-${String(booking.id).padStart(3, '0')}`,
         courseName: booking.course_name || 'N/A',
-        amountPaid: coursePrice,
+        amountPaid,
         coursePrice,
         paymentMethod: payment_method || 'Online',
         paymentDate: new Date(),
-        isFullPayment: true,
-        balanceDue: 0,
+        isFullPayment: nextStatus === 'paid',
+        balanceDue: Math.max(0, coursePrice - amountPaid),
       });
     } catch (emailErr) {
       console.error('Receipt email failed (non-fatal):', emailErr.message);
@@ -880,12 +908,59 @@ const payRemainingBalance = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Balance paid successfully! A receipt has been sent to your email.',
-      balance_collected: Math.max(0, coursePrice - previousAmount),
+      message: nextStatus === 'collectable'
+        ? 'Downpayment received successfully! Remaining balance is now collectable.'
+        : 'Payment processed successfully! A receipt has been sent to your email.',
+      status: nextStatus,
+      payment_type: nextPaymentType,
+      amount_paid: amountPaid,
+      balance_due: Math.max(0, coursePrice - amountPaid),
+      balance_collected: Math.max(0, amountPaid - previousAmount),
     });
   } catch (error) {
     console.error('Pay remaining balance error:', error);
     res.status(500).json({ error: 'Server error while processing payment' });
+  }
+};
+
+// Request free reschedule within 5 days
+const requestFreeReschedule = async (req, res) => {
+  try {
+    const { enrollmentId } = req.params;
+    const studentId = req.user.userId || req.user.id; // handle different token structures
+
+    const checkResult = await pool.query(
+      `SELECT updated_at 
+       FROM schedule_enrollments 
+       WHERE id = $1 AND student_id = $2 AND enrollment_status = 'no-show'`,
+      [enrollmentId, studentId]
+    );
+
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'No-Show enrollment not found or unauthorized' });
+    }
+
+    const { updated_at } = checkResult.rows[0];
+    const diffDays = (Date.now() - new Date(updated_at).getTime()) / (1000 * 3600 * 24);
+
+    if (diffDays > 5) {
+      return res.status(400).json({ error: '5-day grace period has expired' });
+    }
+
+    await pool.query(
+      `UPDATE schedule_enrollments
+       SET reschedule_fee_paid = TRUE,
+           walkin_fee_amount = 0,
+           walkin_payment_method = 'Free Grace Period',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [enrollmentId]
+    );
+
+    res.json({ success: true, message: 'Free reschedule processed. You can now book a new session.' });
+  } catch (error) {
+    console.error('Request free reschedule error:', error);
+    res.status(500).json({ error: 'Server error processing request' });
   }
 };
 
@@ -948,6 +1023,7 @@ module.exports = {
   markFeePaid,
   getMyEnrollments,
   processNoShow,
+  requestFreeReschedule,
   rescheduleEnrollment,
   getUnassignedPdcStudents,
   payRemainingBalance,

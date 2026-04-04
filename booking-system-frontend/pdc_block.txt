@@ -1,0 +1,607 @@
+{/* ---- STEP 2: PDC Calendar + Slot Selection ---- */}
+              {promoStep === 2 && (
+                <>
+                  {/* ---- Motor Type Selector (Motorcycle PDC bundles only) ---- */}
+                  {promoPdcType === 'Motorcycle' && (
+                    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center flex-shrink-0 text-xl">🏍️</div>
+                        <div>
+                          <h3 className="text-base font-black text-gray-900">Select Motorcycle Transmission</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">Choose Manual or Automatic before picking a schedule date</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        {[
+                          { key: 'MT', label: 'Manual', sub: 'Manual Transmission', icon: '⚙️' },
+                          { key: 'AT', label: 'Automatic', sub: 'Automatic Transmission', icon: '🔄' },
+                        ].map(({ key, label, sub, icon }) => {
+                          const isSel = promoPdcMotorType === key
+                          return (
+                            <button key={key}
+                              onClick={() => { setPromoPdcMotorType(key); setPromoPdcDate(null); setPromoPdcSlot(null) }}
+                              className={`p-4 rounded-2xl border-2 text-left transition-all ${isSel
+                                ? 'border-[#2157da] bg-blue-50 shadow-md shadow-blue-100'
+                                : 'border-gray-200 bg-gray-50 hover:border-[#2157da] hover:bg-blue-50 hover:scale-105'
+                                }`}
+                            >
+                              <div className="text-2xl mb-2">{icon}</div>
+                              <p className={`font-black text-sm ${isSel ? 'text-[#2157da]' : 'text-gray-900'}`}>{label}</p>
+                              <p className="text-xs text-gray-500 mt-0.5">{sub}</p>
+                              {isSel && (
+                                <div className="mt-2 flex items-center gap-1 text-[#2157da]">
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                                  <span className="text-xs font-black">Selected</span>
+                                </div>
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PDC Calendar — only shown once motor type selected (for Motorcycle) */}
+                  {(promoPdcType !== 'Motorcycle' || promoPdcMotorType) && (
+                    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
+                      <div className="flex items-center gap-3 mb-5">
+                        <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0">
+                          <span className="text-white font-black text-sm">2</span>
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-black text-gray-900">{promoPdcSelectingDay2 ? 'Step 2: Select PDC Day 2' : 'Step 2: Select PDC Schedule'}</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">{promoPdcSelectingDay2 ? `Pick a different date from the calendar — must match ${promoPdcSlot?.session}` : `${pdcTypeLabel} — pick a date from the calendar`}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between mb-6">
+                        <button onClick={() => setPromoPdcCalMonth(new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth() - 1))} className="w-10 h-10 flex items-center justify-center rounded-xl border border-gray-200 hover:border-[#2157da] hover:bg-blue-50 transition-all">
+                          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
+                        </button>
+                        <h2 className="text-lg sm:text-xl font-black text-gray-900">{monthNames[promoPdcCalMonth.getMonth()]} {promoPdcCalMonth.getFullYear()}</h2>
+                        <button onClick={() => setPromoPdcCalMonth(new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth() + 1))} className="w-10 h-10 flex items-center justify-center rounded-xl border border-gray-200 hover:border-[#2157da] hover:bg-blue-50 transition-all">
+                          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-7 gap-1.5 sm:gap-2 mb-2">
+                        {dayNames.map(d => <div key={d} className="text-center text-[10px] sm:text-xs font-black text-gray-400 uppercase tracking-wider py-2">{d}</div>)}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+                        {[...Array(promoPdcStartDay)].map((_, i) => <div key={`ep-${i}`} className="aspect-square" />)}
+                        {[...Array(promoPdcDaysInMonth)].map((_, i) => {
+                          const day = i + 1
+                          const cellDate = new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth(), day)
+                          const isDay2 = promoPdcSelectingDay2 && promoPdcDate;
+                          const minAllowedDate = isDay2 ? new Date(promoPdcDate.getTime() + 86400000) : promoPdcMinDate;
+                          const avail = cellDate >= minAllowedDate && cellDate.getDay() !== 0
+                          const today = new Date(); today.setHours(0, 0, 0, 0)
+                          const isToday = cellDate.getTime() === today.getTime()
+                          const isSel = promoPdcDate?.getDate() === day && promoPdcDate?.getMonth() === promoPdcCalMonth.getMonth() && promoPdcDate?.getFullYear() === promoPdcCalMonth.getFullYear()
+                          const isSel2 = promoPdcDate2?.getDate() === day && promoPdcDate2?.getMonth() === promoPdcCalMonth.getMonth() && promoPdcDate2?.getFullYear() === promoPdcCalMonth.getFullYear()
+                          const currentDayStr = `${promoPdcCalMonth.getFullYear()}-${String(promoPdcCalMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+                          const daySlots = promoPdcAllFiltered
+                            .filter(s => s.date === currentDayStr)
+                            .sort((a, b) => ({ morning: 1, afternoon: 2, 'whole day': 3 }[(a.session || '').toLowerCase()] || 99) - ({ morning: 1, afternoon: 2, 'whole day': 3 }[(b.session || '').toLowerCase()] || 99))
+                          const hasRealSlots = daySlots.length > 0
+                          const hasAvailability = daySlots.some(s => s.available_slots > 0)
+                          const slotCellBorder = isSel2
+                            ? 'border-[#2563eb] border-2 bg-blue-50/40 shadow-md'
+                            : isSel
+                              ? 'border-[#2563eb] border-2 bg-blue-50/40 shadow-md'
+                              : isToday
+                                ? 'border-[#2563eb] bg-blue-50/30'
+                                : (!avail && !isSel)
+                                  ? 'border-transparent bg-gray-50/50'
+                                  : hasRealSlots && hasAvailability
+                                    ? 'border-orange-300/60 bg-orange-50/25 hover:border-orange-400 hover:shadow-sm'
+                                    : hasRealSlots && !hasAvailability
+                                      ? 'border-red-200/60 bg-red-50/20'
+                                      : 'border-gray-200/80 bg-white hover:border-gray-300';
+                            return (
+                             <div key={day}
+                              onClick={() => {
+                                if (!avail && !isSel) return;
+                                if (promoPdcSelectingDay2) {
+                                  if (promoPdcDate && cellDate.getTime() === promoPdcDate.getTime()) {
+                                    showNotification('Day 2 must be a different date than Day 1.', 'warning');
+                                    return;
+                                  }
+                                  setPromoPdcDate2(new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth(), day));
+                                } else {
+                                  setPromoPdcDate(new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth(), day));
+                                }
+                              }}
+                              className={`min-h-[52px] sm:min-h-[140px] rounded-lg sm:rounded-xl border flex flex-col overflow-hidden transition-all relative ${
+                                (!avail && !isSel) ? 'cursor-not-allowed opacity-45' : 'cursor-pointer hover:shadow-md'
+                              } ${slotCellBorder}`}
+                            >
+                              <div className="flex items-center justify-between px-2.5 pt-2.5 pb-1 flex-shrink-0">
+                                <span className={`text-[13px] font-bold leading-none ${
+                                  isSel2 ? 'text-[#2563eb]' : isSel ? 'text-[#2563eb]' : isToday ? 'text-[#2563eb]' : 'text-gray-500'
+                                }`}>{day}</span>
+                                {isToday && !isSel && <span className="w-1.5 h-1.5 rounded-full bg-[#2563eb] opacity-60 flex-shrink-0"></span>}
+                                {isSel && <span className="text-[8px] font-black text-white bg-[#2563eb] px-1 rounded-sm">D1</span>}
+                                {isSel2 && <span className="text-[8px] font-black text-white bg-[#2563eb] px-1 rounded-sm">D2</span>}
+                              </div>
+                              
+                                {/* Mobile: dot indicators only - made pointer-events-none so they don't block cell click */}
+                                <div className="flex sm:hidden flex-wrap gap-0.5 px-0.5 pb-1 pointer-events-none">
+                                  {daySlots.slice(0, 4).map((slot) => {
+                                    const isFullyBooked = slot.available_slots === 0;
+                                    const isSlotSelected = promoPdcSlot?.id === slot.id || promoPdcSlot2?.id === slot.id;
+                                    return (
+                                      <div
+                                        key={slot.id}
+                                        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                          isSlotSelected ? 'bg-[#2563eb]' :
+                                          isFullyBooked ? 'bg-red-400' :
+                                          slot.session === 'Morning' ? 'bg-orange-400' :
+                                          slot.session === 'Afternoon' ? 'bg-yellow-400' :
+                                          'bg-blue-400'
+                                        }`}
+                                      />
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Desktop: Slot pills — full labels */}
+                                <div className="hidden sm:flex flex-col gap-[3px] px-1.5 pb-2 flex-1">
+  
+                                {daySlots.map(slot => {
+                                  const isFullyBooked = slot.available_slots === 0
+                                  const isSlotSel = promoPdcSlot?.id === slot.id
+                                  const isSlotSel2 = promoPdcSlot2?.id === slot.id
+                                  const isSessionMismatch = promoPdcSelectingDay2 && promoPdcSlot && slot.session !== promoPdcSlot.session;
+                                  
+                                  const sessionLabel = (() => {
+                                    const sn = (slot.session || '').toLowerCase()
+                                    if (sn.includes('morning')) return 'Morning Class'
+                                    if (sn.includes('afternoon')) return 'Afternoon Class'
+                                    if (sn.includes('whole')) return 'Whole Day'
+                                    return slot.session || 'PDC'
+                                  })()
+                                  
+                                  const countLabel = isFullyBooked ? 'FULL' : `${slot.available_slots} Slots`
+                                  const timeStr = (slot.time_range || '').toLowerCase().replace(/ - /g, ' / ').replace(/ am/g, 'am').replace(/ pm/g, 'pm')
+
+                                  return (
+                                    <div key={slot.id} onClick={(e) => { 
+                                      e.stopPropagation(); 
+                                      if (isFullyBooked) return; 
+                                      if (isSessionMismatch) {
+                                        showNotification(`For Day 2, please select the same session type: ${promoPdcSlot.session}`, 'warning');
+                                        return;
+                                      }
+                                      if (promoPdcSelectingDay2) {
+                                        setPromoPdcDate2(new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth(), day));
+                                      } else {
+                                        setPromoPdcDate(new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth(), day));
+                                      }
+                                      handleSlotClick(slot); 
+                                    }} className={`w-full text-left rounded-[7px] border px-1.5 py-1 flex flex-col gap-[2px] ${!isFullyBooked && !isSessionMismatch ? 'cursor-pointer hover:shadow-md transition-all' : 'cursor-not-allowed opacity-50'} ${
+                                      isSlotSel2 ? 'border-[#2563eb] bg-[#2563eb] text-white shadow-sm'
+                                        : isSlotSel ? 'border-[#2563eb] bg-[#2563eb] text-white shadow-sm'
+                                        : (isFullyBooked || isSessionMismatch) ? 'border-red-200 bg-red-50 text-red-500 opacity-70'
+                                        : 'border-orange-200 bg-orange-50 text-orange-700'
+                                    }`}>
+                                      <div className="flex items-center justify-between gap-1 leading-none">
+                                        <span className="text-[9px] sm:text-[10px] font-black truncate flex-1 min-w-0">{sessionLabel}</span>
+                                        <span className={`text-[8px] font-bold flex-shrink-0 px-1 rounded leading-[1.5] ${
+                                          (isSlotSel || isSlotSel2) ? 'bg-white/25 text-white'
+                                            : (isFullyBooked || isSessionMismatch) ? 'bg-red-100 text-red-600'
+                                              : 'bg-orange-100 text-orange-700'
+                                        }`}>{countLabel}</span>
+                                      </div>
+                                      <div className={`text-[7px] sm:text-[8px] font-medium truncate leading-none ${isSessionMismatch ? 'opacity-40' : 'opacity-75'}`}>{timeStr}</div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PDC Day 1 Slots */}
+                  {(promoPdcType !== 'Motorcycle' || promoPdcMotorType) && promoPdcDate && !promoPdcSelectingDay2 && (
+                    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4 sm:hidden">
+                      <div className="flex items-center justify-between mb-5">
+                        <div>
+                          <h3 className="text-lg font-black text-gray-900">PDC Time Slots — {pdcTypeLabel} <span className="text-sm font-bold text-gray-400">(Day 1)</span></h3>
+                          <p className="text-xs text-gray-500 mt-1">{new Date(promoPdcDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                        </div>
+                        {!loadingPromoPdc && <div className="px-3 py-1.5 bg-blue-50 rounded-lg"><span className="text-xs font-bold text-[#2157da]">{promoPdcFiltered.length} Slots</span></div>}
+                      </div>
+                      {loadingPromoPdc ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-4">
+                          <div className="w-10 h-10 border-4 border-[#2157da] border-t-transparent rounded-full animate-spin" />
+                          <p className="text-sm text-gray-500">Loading PDC slots...</p>
+                        </div>
+                      ) : promoPdcFiltered.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                          <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center"><span className="text-3xl">📭</span></div>
+                          <p className="text-base font-black text-gray-700">No {pdcTypeLabel} PDC slots on this date</p>
+                          <p className="text-sm text-gray-500">Pick a different date from the calendar above.</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {promoPdcFiltered.map(slot => {
+                  const isFull = slot.available_slots === 0
+                  const isDay1 = promoPdcSlot?.id === slot.id
+                              const isSel = promoPdcSlot?.id === slot.id
+                  const isDay2 = false
+                  const bookedPct = ((slot.total_capacity - slot.available_slots) / slot.total_capacity) * 100
+
+                  const sessionMeta = {
+                    'Morning': { icon: '🌅', color: '#ea580c', bg: '#fff7ed', border: '#fed7aa', pill: 'bg-orange-100 text-orange-700' },
+                    'Afternoon': { icon: '☀️', color: '#ca8a04', bg: '#fefce8', border: '#fde68a', pill: 'bg-yellow-100 text-yellow-700' },
+                    'Whole Day': { icon: '🕐', color: '#2157da', bg: '#eff6ff', border: '#bfdbfe', pill: 'bg-blue-100 text-blue-700' },
+                  }[slot.session] || { icon: '🕐', color: '#2157da', bg: '#eff6ff', border: '#bfdbfe', pill: 'bg-blue-100 text-blue-700' }
+
+                  const courseLabel = (() => {
+                    const base = slot.type?.toLowerCase() === 'tdc' ? 'TDC' : 'PDC';
+                    const parts = [base];
+                    if (slot.course_type && slot.course_type !== 'both' && slot.course_type !== 'any') {
+                      parts.push(slot.course_type);
+                    }
+                    if (slot.transmission) {
+                      parts.push(slot.transmission);
+                    }
+                    return parts.join(' · ');
+                  })()
+
+                  const statusColor = isFull ? '#ef4444' : bookedPct > 70 ? '#f59e0b' : '#22c55e';
+                  const statusLabel = isFull ? 'FULL' : bookedPct > 70 ? 'FILLING UP' : 'OPEN';
+                  const statusBg = isFull ? '#fef2f2' : bookedPct > 70 ? '#fffbeb' : '#f0fdf4';
+                  const statusText = isFull ? '#dc2626' : bookedPct > 70 ? '#b45309' : '#15803d';
+
+                  const cardBg = isDay1
+                    ? 'linear-gradient(135deg, #1a4fba 0%, #1e3a8a 100%)'
+                    : isDay2
+                      ? '#f0fdf4'
+                      : isFull
+                        ? '#f8fafc'
+                        : 'white';
+                  const cardBorder = isDay1
+                    ? 'transparent'
+                    : isDay2
+                      ? '#22c55e'
+                      : isFull
+                        ? '#e2e8f0'
+                        : '#e2e8f0';
+
+                  return (
+                    <button
+                      key={slot.id}
+                      onClick={() => handleSlotClick(slot)}
+                      disabled={isFull}
+                      style={{ background: cardBg, borderColor: cardBorder }}
+                      className={`group relative flex flex-col text-left rounded-2xl border-2 transition-all overflow-hidden ${isFull
+                        ? 'opacity-60 cursor-not-allowed'
+                        : isDay1
+                          ? 'shadow-xl shadow-blue-500/30 scale-[1.02]'
+                          : isDay2
+                            ? 'shadow-lg shadow-green-500/20'
+                            : 'hover:border-[#2157da] hover:shadow-lg hover:scale-[1.02] hover:-translate-y-0.5'
+                        }`}
+                    >
+                      <div
+                        className="h-1.5 w-full flex-shrink-0"
+                        style={{ background: isDay1 ? 'rgba(255,255,255,0.3)' : isDay2 ? '#22c55e' : sessionMeta.color }}
+                      />
+                      <div className="p-5 flex flex-col flex-1">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl leading-none">{sessionMeta.icon}</span>
+                            <span
+                              className="text-xs font-black uppercase tracking-wider px-2.5 py-1 rounded-full"
+                              style={isDay1
+                                ? { background: 'rgba(255,255,255,0.18)', color: '#fff' }
+                                : { background: sessionMeta.bg, color: sessionMeta.color, border: `1px solid ${sessionMeta.border}` }
+                              }
+                            >
+                              {slot.session}
+                            </span>
+                          </div>
+                          <span
+                            className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full"
+                            style={isFull
+                              ? { background: '#fef2f2', color: '#dc2626' }
+                              : isDay1
+                                ? { background: 'rgba(255,255,255,0.18)', color: '#fff' }
+                                : isDay2
+                                  ? { background: '#dcfce7', color: '#15803d' }
+                                  : { background: statusBg, color: statusText }
+                            }
+                          >
+                            {isDay1 ? '✓ DAY 1' : isDay2 ? '✓ DAY 2' : statusLabel}
+                          </span>
+                        </div>
+                        <p
+                          className="text-[11px] font-bold uppercase tracking-wider mb-2 leading-tight"
+                          style={{ color: isDay1 ? 'rgba(255,255,255,0.65)' : '#94a3b8' }}
+                        >
+                          {courseLabel}
+                        </p>
+                        <p
+                          className="text-base font-black mb-1"
+                          style={{ color: isDay1 ? '#fff' : isDay2 ? '#166534' : '#1e293b' }}
+                        >
+                          {slot.session} Session
+                        </p>
+                        {isTDCCourse && slot.date && (
+                          <p
+                            className="text-xs font-semibold mb-3"
+                            style={{ color: isDay1 ? 'rgba(255,255,255,0.7)' : '#64748b' }}
+                          >
+                            📅 {slot.end_date && slot.end_date !== slot.date
+                              ? `${new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(slot.end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                              : new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}
+                          </p>
+                        )}
+                        <div
+                          className="flex items-center gap-1.5 text-sm font-bold mb-4"
+                          style={{ color: isDay1 ? 'rgba(255,255,255,0.9)' : '#334155' }}
+                        >
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10" strokeWidth="2" />
+                            <polyline points="12 6 12 12 16 14" strokeWidth="2" />
+                          </svg>
+                          {slot.time_range}
+                        </div>
+                        <div className="mt-auto">
+                          <div
+                            className="h-1.5 rounded-full overflow-hidden mb-2"
+                            style={{ background: isDay1 ? 'rgba(255,255,255,0.2)' : '#e2e8f0' }}
+                          >
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${bookedPct}%`,
+                                background: isDay1 ? 'rgba(255,255,255,0.8)' : statusColor
+                              }}
+                            />
+                          </div>
+                          <p
+                            className="text-xs font-semibold"
+                            style={{ color: isDay1 ? 'rgba(255,255,255,0.65)' : '#64748b' }}
+                          >
+                            {(slot.total_capacity || 0) - (slot.available_slots || 0)} / {slot.total_capacity} Students Enrolled
+                          </p>
+                        </div>
+                      </div>
+                      {isDay1 && (
+                        <div className="absolute top-4 right-4">
+                          <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center shadow">
+                            <svg className="w-4 h-4 text-[#2157da]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                        </div>
+                      )}
+                    </button>
+                  )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ---- PDC Day 1 selected banner (half-day) ---- */}
+                  {promoPdcSlot && isHalfDay(promoPdcSlot.session) && !promoPdcSlot2 && (
+                    <div className="bg-blue-50 border-2 border-[#2157da] rounded-2xl p-4 mb-4 flex items-center gap-3">
+                      <div className="w-10 h-10 bg-[#2157da] rounded-xl flex items-center justify-center flex-shrink-0">
+                        <span className="text-white font-black text-sm">1</span>
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-black text-[#2157da] text-sm">PDC Day 1 Selected — {promoPdcSlot.session} · {promoPdcSlot.time_range}</p>
+                        <p className="text-xs text-blue-600 mt-0.5">{promoPdcSlot.session} sessions require 2 days. Pick a different date above for <strong>Day 2</strong>.</p>
+                      </div>
+                      <button onClick={() => { setPromoPdcSlot(null); setPromoPdcSlot2(null); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]) }}
+                        className="text-xs text-[#2157da] underline hover:no-underline font-bold flex-shrink-0">Change Day 1</button>
+                    </div>
+                  )}
+
+                  {/* ---- PDC Day 2 complete banner ---- */}
+                  {promoPdcSlot && promoPdcSlot2 && (
+                    <div className="bg-green-50 border-2 border-green-500 rounded-2xl p-4 mb-4 flex items-center gap-3">
+                      <div className="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-black text-green-800 text-sm">PDC Both Days Selected!</p>
+                        <p className="text-xs text-green-700 mt-0.5">
+                          Day 1: {promoPdcSlot.session} · {new Date(promoPdcDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} &nbsp;|&nbsp;
+                          Day 2: {promoPdcSlot2.session} · {new Date(promoPdcDate2).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </p>
+                      </div>
+                      <button onClick={() => { setPromoPdcSlot(null); setPromoPdcSlot2(null); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]) }}
+                        className="text-xs text-green-700 underline hover:no-underline font-bold flex-shrink-0">Change</button>
+                    </div>
+                  )}
+
+                  {/* PDC Day 2 Slots */}
+                  {promoPdcSelectingDay2 && !promoPdcSlot2 && promoPdcDate2 && (
+                    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4 sm:hidden">
+                      <div className="flex items-center justify-between mb-5">
+                        <div>
+                          <h3 className="text-lg font-black text-gray-900">PDC Time Slots — {pdcTypeLabel} <span className="text-sm font-bold text-gray-400">(Day 2)</span></h3>
+                          <p className="text-xs text-gray-500 mt-1">{new Date(promoPdcDate2).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} · {promoPdcSlot?.session} session only</p>
+                        </div>
+                        {!loadingPromoPdc2 && <div className="px-3 py-1.5 bg-green-50 rounded-lg"><span className="text-xs font-bold text-green-700">{promoPdcFiltered2.length} Slots</span></div>}
+                      </div>
+                      {loadingPromoPdc2 ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-4">
+                          <div className="w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full animate-spin" />
+                          <p className="text-sm text-gray-500">Loading Day 2 slots...</p>
+                        </div>
+                      ) : promoPdcFiltered2.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                          <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center"><span className="text-3xl">📭</span></div>
+                          <p className="text-base font-black text-gray-700">No {promoPdcSlot?.session} slots on this date</p>
+                          <p className="text-sm text-gray-500">Pick a different date for Day 2.</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {promoPdcFiltered2.map(slot => {
+                  const isFull = slot.available_slots === 0
+                  const isDay1 = false
+                              const isSel = promoPdcSlot2?.id === slot.id
+                  const isDay2 = promoPdcSlot2?.id === slot.id
+                  const bookedPct = ((slot.total_capacity - slot.available_slots) / slot.total_capacity) * 100
+
+                  const sessionMeta = {
+                    'Morning': { icon: '🌅', color: '#ea580c', bg: '#fff7ed', border: '#fed7aa', pill: 'bg-orange-100 text-orange-700' },
+                    'Afternoon': { icon: '☀️', color: '#ca8a04', bg: '#fefce8', border: '#fde68a', pill: 'bg-yellow-100 text-yellow-700' },
+                    'Whole Day': { icon: '🕐', color: '#2157da', bg: '#eff6ff', border: '#bfdbfe', pill: 'bg-blue-100 text-blue-700' },
+                  }[slot.session] || { icon: '🕐', color: '#2157da', bg: '#eff6ff', border: '#bfdbfe', pill: 'bg-blue-100 text-blue-700' }
+
+                  const courseLabel = (() => {
+                    const base = slot.type?.toLowerCase() === 'tdc' ? 'TDC' : 'PDC';
+                    const parts = [base];
+                    if (slot.course_type && slot.course_type !== 'both' && slot.course_type !== 'any') {
+                      parts.push(slot.course_type);
+                    }
+                    if (slot.transmission) {
+                      parts.push(slot.transmission);
+                    }
+                    return parts.join(' · ');
+                  })()
+
+                  const statusColor = isFull ? '#ef4444' : bookedPct > 70 ? '#f59e0b' : '#22c55e';
+                  const statusLabel = isFull ? 'FULL' : bookedPct > 70 ? 'FILLING UP' : 'OPEN';
+                  const statusBg = isFull ? '#fef2f2' : bookedPct > 70 ? '#fffbeb' : '#f0fdf4';
+                  const statusText = isFull ? '#dc2626' : bookedPct > 70 ? '#b45309' : '#15803d';
+
+                  const cardBg = isDay1 ? 'linear-gradient(135deg, #1a4fba 0%, #1e3a8a 100%)' : isDay2 ? 'linear-gradient(135deg, #1a4fba 0%, #1e3a8a 100%)'
+                      : isFull
+                        ? '#f8fafc'
+                        : 'white';
+                  const cardBorder = isDay1 ? 'transparent' : isDay2 ? 'transparent'
+                      : isFull
+                        ? '#e2e8f0'
+                        : '#e2e8f0';
+
+                  return (
+                    <button
+                      key={slot.id}
+                      onClick={() => handleSlotClick(slot)}
+                      disabled={isFull}
+                      style={{ background: cardBg, borderColor: cardBorder }}
+                      className={`group relative flex flex-col text-left rounded-2xl border-2 transition-all overflow-hidden ${isFull
+                        ? 'opacity-60 cursor-not-allowed'
+                        : isDay1
+                          ? 'shadow-xl shadow-blue-500/30 scale-[1.02]'
+                          : isDay2
+                            ? 'shadow-xl shadow-blue-500/30 scale-[1.02]'
+                            : 'hover:border-[#2157da] hover:shadow-lg hover:scale-[1.02] hover:-translate-y-0.5'
+                        }`}
+                    >
+                      <div
+                        className="h-1.5 w-full flex-shrink-0"
+                        style={{ background: isDay1 ? 'rgba(255,255,255,0.3)' : isDay2 ? 'rgba(255,255,255,0.3)' : sessionMeta.color }}
+                      />
+                      <div className="p-5 flex flex-col flex-1">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl leading-none">{sessionMeta.icon}</span>
+                            <span
+                              className="text-xs font-black uppercase tracking-wider px-2.5 py-1 rounded-full"
+                              style={isDay1
+                                ? { background: 'rgba(255,255,255,0.18)', color: '#fff' }
+                                : { background: sessionMeta.bg, color: sessionMeta.color, border: `1px solid ${sessionMeta.border}` }
+                              }
+                            >
+                              {slot.session}
+                            </span>
+                          </div>
+                          <span
+                            className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full"
+                            style={isFull
+                              ? { background: '#fef2f2', color: '#dc2626' }
+                              : isDay1
+                                ? { background: 'rgba(255,255,255,0.18)', color: '#fff' }
+                                : isDay2
+                                  ? { background: 'rgba(255,255,255,0.18)', color: '#fff' }
+                                  : { background: statusBg, color: statusText }
+                            }
+                          >
+                            {isDay1 ? '✓ DAY 1' : isDay2 ? '✓ DAY 2' : statusLabel}
+                          </span>
+                        </div>
+                        <p
+                          className="text-[11px] font-bold uppercase tracking-wider mb-2 leading-tight"
+                          style={{ color: isDay1 ? 'rgba(255,255,255,0.65)' : '#94a3b8' }}
+                        >
+                          {courseLabel}
+                        </p>
+                        <p
+                          className="text-base font-black mb-1"
+                          style={{ color: isDay1 ? '#fff' : isDay2 ? '#fff' : '#1e293b' }}
+                        >
+                          {slot.session} Session
+                        </p>
+                        {isTDCCourse && slot.date && (
+                          <p
+                            className="text-xs font-semibold mb-3"
+                            style={{ color: isDay1 ? 'rgba(255,255,255,0.7)' : '#64748b' }}
+                          >
+                            📅 {slot.end_date && slot.end_date !== slot.date
+                              ? `${new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(slot.end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                              : new Date(slot.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}
+                          </p>
+                        )}
+                        <div
+                          className="flex items-center gap-1.5 text-sm font-bold mb-4"
+                          style={{ color: isDay1 ? 'rgba(255,255,255,0.9)' : '#334155' }}
+                        >
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10" strokeWidth="2" />
+                            <polyline points="12 6 12 12 16 14" strokeWidth="2" />
+                          </svg>
+                          {slot.time_range}
+                        </div>
+                        <div className="mt-auto">
+                          <div
+                            className="h-1.5 rounded-full overflow-hidden mb-2"
+                            style={{ background: isDay1 ? 'rgba(255,255,255,0.2)' : '#e2e8f0' }}
+                          >
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${bookedPct}%`,
+                                background: isDay1 ? 'rgba(255,255,255,0.8)' : statusColor
+                              }}
+                            />
+                          </div>
+                          <p
+                            className="text-xs font-semibold"
+                            style={{ color: isDay1 ? 'rgba(255,255,255,0.65)' : '#64748b' }}
+                          >
+                            {(slot.total_capacity || 0) - (slot.available_slots || 0)} / {slot.total_capacity} Students Enrolled
+                          </p>
+                        </div>
+                      </div>
+                      {isDay1 && (
+                        <div className="absolute top-4 right-4">
+                          <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center shadow">
+                            <svg className="w-4 h-4 text-[#2157da]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                        </div>
+                      )}
+                    </button>
+                  )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              

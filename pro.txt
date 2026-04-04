@@ -1,0 +1,13 @@
+(promoPdcSelectingDay2 ? promoPdcFiltered2 : promoPdcFiltered).map(slot => {
+const isSessionMismatch = promoPdcSelectingDay2 && slot.session !== promoPdcSlot?.session;
+                  const isFull = slot.available_slots === 0;
+
+                  const isDay1 = promoPdcSlot?.id === slot.id && !promoPdcSelectingDay2;
+                  const isDay2 = promoPdcSlot2?.id === slot.id && promoPdcSelectingDay2;
+                  const bookedPct = ((slot.total_capacity - slot.available_slots) / slot.total_capacity) * 100
+
+                  const sessionMeta = {
+                    'Morning': { icon: '🌅', color: '#ea580c', bg: '#fff7ed', border: '#fed7aa', pill: 'bg-orange-100 text-orange-700' },
+                    'Afternoon': { icon: '☀️', color: '#ca8a04', bg: '#fefce8', border: '#fde68a', pill: 'bg-yellow-100 text-yellow-700' },
+                    'Whole Day': { icon: '🕐', color: '#2157da', bg: '#eff6ff', border: '#bfdbfe', pill: 'bg-blue-100 text-blue-700' },
+                  

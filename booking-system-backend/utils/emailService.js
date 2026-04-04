@@ -110,11 +110,11 @@ let EMAIL_CONTENT = (() => {
     greeting: 'Hello {first} {last},',
     intro: 'We noticed that you did not attend your scheduled training session for <strong>{courseName}</strong> on <strong>{date}</strong> ({session}).',
     feeHeading: 'Rescheduling Fee Required',
-    feeNote: 'As per our Cancellation and Refund Policy (Section 3), a rescheduling fee of <b>₱1,000.00</b> is required for unattended sessions before you can re-book.',
+    feeNote: 'As per our Cancellation and Refund Policy (Section 3), a rescheduling fee of <b>₱{fee}</b> is required for unattended sessions before you can re-book.',
     howToHeading: 'How to Reschedule:',
     howToSteps: [
       'Log in to your student portal.',
-      'Settle the ₱1,000 rescheduling fee.',
+      'Settle the ₱{fee} rescheduling fee.',
       'Select a new training date from the available schedules.',
     ],
     loginButtonText: 'Log In to Reschedule',
@@ -983,7 +983,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
 const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails, hasReviewer = false, hasVehicleTips = false) => {
   try {
     const transporter = createTransporter();
-    const { courseName, courseCategory, courseType, branchName, branchAddress, scheduleDate, scheduleSession, scheduleTime, scheduleDate2, scheduleSession2, scheduleTime2, paymentMethod, amountPaid, paymentStatus } = enrollmentDetails;
+    const { courseName, courseList, courseCategory, courseType, branchName, branchAddress, scheduleDate, scheduleSession, scheduleTime, scheduleDate2, scheduleSession2, scheduleTime2, pdcSchedules, paymentMethod, amountPaid, paymentStatus } = enrollmentDetails;
 
     const isTDC = (courseCategory || '').toUpperCase() === 'TDC';
     const formattedDate = formatDisplayDate(scheduleDate);
@@ -992,6 +992,113 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
     const effectiveDate2 = (isTDC && !scheduleDate2) ? computeTDCDay2(scheduleDate) : formatDisplayDate(scheduleDate2);
     const effectiveSession2 = (isTDC && !scheduleSession2) ? scheduleSession : scheduleSession2;
     const effectiveTime2 = (isTDC && !scheduleTime2) ? scheduleTime : scheduleTime2;
+    const hasMultiPdc = Array.isArray(pdcSchedules) && pdcSchedules.length > 0;
+    const hasPrimarySchedule = !!scheduleDate;
+    const incomingCourseList = Array.isArray(courseList) ? courseList.filter(Boolean) : [];
+    const fallbackCourseList = [];
+    if (!incomingCourseList.length) {
+      if (courseName) {
+        fallbackCourseList.push({
+          name: courseName,
+          type: courseType || (isTDC ? 'TDC' : 'standard'),
+          category: courseCategory || null,
+        });
+      }
+      if (hasMultiPdc) {
+        pdcSchedules.forEach((s) => {
+          fallbackCourseList.push({
+            name: s?.label || 'PDC',
+            type: 'PDC',
+            category: 'PDC',
+          });
+        });
+      }
+    }
+
+    const normalizeCourseName = (value = '') => String(value)
+      .toLowerCase()
+      .replace(/\(pdc\)/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const dedupedCourseMap = new Map();
+    [...incomingCourseList, ...fallbackCourseList].forEach((c) => {
+      const nameKey = normalizeCourseName(c?.name || '');
+      const typeKey = String(c?.type || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const key = `${nameKey}::${typeKey}`;
+      if (!dedupedCourseMap.has(key) && (nameKey || typeKey)) {
+        dedupedCourseMap.set(key, c);
+      }
+    });
+    const normalizedCourseList = [...dedupedCourseMap.values()];
+    const hasCourseList = normalizedCourseList.length > 0;
+
+    const courseListHtml = hasCourseList
+      ? normalizedCourseList.map((c, idx) => {
+          const n = c?.name || `Course ${idx + 1}`;
+          const t = c?.type ? String(c.type).toUpperCase() : 'STANDARD';
+          return `<div style="margin: 0 0 6px 0;"><span style="font-weight:700; color:#0f172a;">${idx + 1}.</span> ${n} <span style="color:#64748b;">(${t})</span></div>`;
+        }).join('')
+      : '';
+
+    const sanitizeType = (value = '') => {
+      const t = String(value || '').toUpperCase().trim();
+      if (!t || t === 'STANDARD' || t === 'PDC' || t === 'TDC') return null;
+      return t;
+    };
+
+    const courseTypeSummary = hasCourseList
+      ? [...new Set(normalizedCourseList.map((c) => sanitizeType(c?.type)).filter(Boolean))].join(', ') || (courseType || 'N/A').toUpperCase()
+      : (courseType || 'N/A').toUpperCase();
+
+    const multiPdcHtml = hasMultiPdc
+      ? pdcSchedules.map((s, idx) => {
+          const d1 = formatDisplayDate(s.scheduleDate);
+          const d2 = formatDisplayDate(s.scheduleDate2);
+          return `
+            <div style="margin-top: ${idx === 0 ? '0' : '16px'}; padding-top: ${idx === 0 ? '0' : '16px'}; border-top: ${idx === 0 ? 'none' : '2px dashed #93c5fd'};">
+              <div style="font-size: 12px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">${s.label || `PDC ${idx + 1}`}</div>
+              ${d2 ? `
+                <div style="font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 1</div>
+                <div class="schedule-date">${d1}</div>
+                <div class="schedule-session">${s.scheduleSession || 'N/A'}</div>
+                <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${s.scheduleTime || 'N/A'}</div>
+                <div style="margin-top:10px; font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 2</div>
+                <div class="schedule-date">${d2}</div>
+                <div class="schedule-session">${s.scheduleSession2 || 'N/A'}</div>
+                <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${s.scheduleTime2 || 'N/A'}</div>
+              ` : `
+                <div class="schedule-date">${d1}</div>
+                <div class="schedule-session">${s.scheduleSession || 'N/A'}</div>
+                <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${s.scheduleTime || 'N/A'}</div>
+              `}
+            </div>
+          `;
+        }).join('')
+      : '';
+
+    const primaryScheduleHtml = hasPrimarySchedule
+      ? (effectiveDate2 ? `
+        <div style="margin-bottom: ${hasMultiPdc ? '18px' : '0'}; padding-bottom: ${hasMultiPdc ? '14px' : '0'}; border-bottom: ${hasMultiPdc ? '2px dashed #93c5fd' : 'none'};">
+          <div style="font-size: 12px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">${courseName || 'Primary Schedule'}</div>
+          <div style="font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 1</div>
+          <div class="schedule-date">${formattedDate}</div>
+          <div class="schedule-session">${scheduleSession || 'N/A'}</div>
+          <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${scheduleTime || 'N/A'}</div>
+          <div style="margin-top:10px; font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 2</div>
+          <div class="schedule-date">${effectiveDate2}</div>
+          <div class="schedule-session">${effectiveSession2 || 'N/A'}</div>
+          <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${effectiveTime2 || 'N/A'}</div>
+        </div>
+      ` : `
+        <div style="margin-bottom: ${hasMultiPdc ? '18px' : '0'}; padding-bottom: ${hasMultiPdc ? '14px' : '0'}; border-bottom: ${hasMultiPdc ? '2px dashed #93c5fd' : 'none'};">
+          <div style="font-size: 12px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">${courseName || 'Primary Schedule'}</div>
+          <div class="schedule-date">${formattedDate}</div>
+          <div class="schedule-session">${scheduleSession || 'N/A'}</div>
+          <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${scheduleTime || 'N/A'}</div>
+        </div>
+      `)
+      : '';
     const isDownpayment = paymentStatus && paymentStatus.toLowerCase().includes('downpayment');
     const courseNameLower = (courseName || '').toLowerCase();
     const isB1B2 = courseNameLower.includes('b1') || courseNameLower.includes('b2') || courseNameLower.includes('van') || courseNameLower.includes('l300');
@@ -1058,24 +1165,12 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
               
               <div class="schedule-highlight">
                 <h3>${EMAIL_CONTENT.guest.scheduleHeading}</h3>
-                ${effectiveDate2 ? `
-                <div style="margin-bottom: 15px;">
-                  <div style="font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 1</div>
-                  <div class="schedule-date">${formattedDate}</div>
-                  <div class="schedule-session">${scheduleSession}</div>
-                  <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${scheduleTime}</div>
-                </div>
-                <hr style="border: none; border-top: 2px dashed #93c5fd; margin: 15px 0;">
-                <div>
-                  <div style="font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 2</div>
-                  <div class="schedule-date">${effectiveDate2}</div>
-                  <div class="schedule-session">${effectiveSession2}</div>
-                  <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${effectiveTime2}</div>
-                </div>
-                ` : `
-                <div class="schedule-date">${formattedDate}</div>
-                <div class="schedule-session">${scheduleSession}</div>
-                <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${scheduleTime}</div>
+                ${(hasMultiPdc || hasPrimarySchedule)
+                  ? `${primaryScheduleHtml}${multiPdcHtml}`
+                  : `
+                <div class="schedule-date">N/A</div>
+                <div class="schedule-session">No schedule data found</div>
+                <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">Please contact support if this persists.</div>
                 `}
               </div>
 
@@ -1096,9 +1191,10 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
                   <span class="detail-label">Course:&nbsp;&nbsp;</span>
                   <span class="detail-value">${courseName}</span>
                 </div>
+                ${hasCourseList ? `<div class="detail-row"><span class="detail-label">Enrolled Courses (${normalizedCourseList.length}):&nbsp;&nbsp;</span><span class="detail-value" style="line-height:1.4;">${courseListHtml}</span></div>` : ''}
                 <div class="detail-row">
                   <span class="detail-label">Type:&nbsp;&nbsp;</span>
-                  <span class="detail-value">${(courseType || 'N/A').toUpperCase()}</span>
+                  <span class="detail-value">${courseTypeSummary}</span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Branch:&nbsp;&nbsp;</span>
@@ -1162,7 +1258,13 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
         </body>
         </html>
       `,
-      text: `Hello ${firstName} ${lastName}!\n\nYour enrollment has been successfully processed.\n\nSchedule Day 1: ${formattedDate}\nSession: ${scheduleSession}\nTime: ${scheduleTime}\n${effectiveDate2 ? `\nSchedule Day 2: ${effectiveDate2}\nSession: ${effectiveSession2}\nTime: ${effectiveTime2}\n` : ''}Course: ${courseName} (${courseType})\nBranch: ${branchName}\n\n${isDownpayment ? `REMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n\n` : ''}${isB1B2 ? `VEHICLE RENTAL NOTE: For PDC - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}${isTricycle ? `VEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}Thank you for choosing Master Driving School!`,
+      text: `Hello ${firstName} ${lastName}!\n\nYour enrollment has been successfully processed.\n\n${[hasPrimarySchedule ? `${courseName || 'Primary Schedule'}\nDay 1: ${formattedDate}\nSession: ${scheduleSession || 'N/A'}\nTime: ${scheduleTime || 'N/A'}${effectiveDate2 ? `\nDay 2: ${effectiveDate2}\nSession: ${effectiveSession2 || 'N/A'}\nTime: ${effectiveTime2 || 'N/A'}` : ''}` : '', hasMultiPdc
+        ? pdcSchedules.map((s, idx) => {
+            const d1 = formatDisplayDate(s.scheduleDate);
+            const d2 = formatDisplayDate(s.scheduleDate2);
+            return `${s.label || `PDC ${idx + 1}`}\nDay 1: ${d1}\nSession: ${s.scheduleSession || 'N/A'}\nTime: ${s.scheduleTime || 'N/A'}${d2 ? `\nDay 2: ${d2}\nSession: ${s.scheduleSession2 || 'N/A'}\nTime: ${s.scheduleTime2 || 'N/A'}` : ''}`;
+          }).join('\n\n')
+        : ''].filter(Boolean).join('\n\n')}\nCourse: ${courseName} (${courseType})\n${hasCourseList ? `Enrolled Courses:\n${normalizedCourseList.map((c, idx) => `${idx + 1}. ${c?.name || `Course ${idx + 1}`} (${(c?.type || 'standard').toUpperCase()})`).join('\n')}\n` : ''}Branch: ${branchName}\n\n${isDownpayment ? `REMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n\n` : ''}${isB1B2 ? `VEHICLE RENTAL NOTE: For PDC - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}${isTricycle ? `VEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}Thank you for choosing Master Driving School!`,
     };
 
     const info = await sendMailWithFallback(transporter, mailOptions);
@@ -1181,6 +1283,7 @@ const sendNoShowEmail = async (email, firstName, lastName, enrollmentDetails) =>
     const transporter = createTransporter();
     const { courseName, scheduleDate, scheduleSession } = enrollmentDetails;
     const formattedDate = formatDisplayDate(scheduleDate);
+    const feeAmount = (enrollmentDetails.type || courseName || '').toLowerCase().includes('tdc') ? '300.00' : '1,000.00';
 
     const mailOptions = {
       from: getFromAddress(),
@@ -1213,15 +1316,13 @@ const sendNoShowEmail = async (email, firstName, lastName, enrollmentDetails) =>
               
               <div class="fee-box">
                 <h3 style="margin-top: 0; color: #991b1b;">${EMAIL_CONTENT.noShow.feeHeading}</h3>
-                <p style="margin: 0 0 10px 0; font-size: 14px; color: #7f1d1d;">${EMAIL_CONTENT.noShow.feeNote}</p>
-              </div>
+                  <p style="margin: 0 0 10px 0; font-size: 14px; color: #7f1d1d;">${EMAIL_CONTENT.noShow.feeNote.replace('{fee}', feeAmount)}</p>
+                </div>
 
-              <div class="details">
-                <h4 style="margin-top: 0;">${EMAIL_CONTENT.noShow.howToHeading}</h4>
-                <ol style="margin-bottom: 0;">
-                  ${EMAIL_CONTENT.noShow.howToSteps.map(s => `<li>${s}</li>`).join('\n                  ')}
-                </ol>
-              </div>
+                <div class="details">
+                  <h4 style="margin-top: 0;">${EMAIL_CONTENT.noShow.howToHeading}</h4>
+                  <ol style="margin-bottom: 0;">
+                    ${EMAIL_CONTENT.noShow.howToSteps.map(s => s.replace('{fee}', feeAmount)).map(s => `<li>${s}</li>`).join('\n                  ')}
               
               <div style="text-align: center; margin-top: 30px;">
                 <a href="${getFrontendUrl()}/profile" class="btn">${EMAIL_CONTENT.noShow.loginButtonText}</a>

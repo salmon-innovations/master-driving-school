@@ -13,6 +13,7 @@ const {
   markFeePaid,
   getMyEnrollments,
   processNoShow,
+  requestFreeReschedule,
   rescheduleEnrollment,
   getUnassignedPdcStudents,
   payRemainingBalance,
@@ -43,6 +44,9 @@ router.delete('/slots/:id', authenticateToken, deleteSlot);
 // Get enrollments for a slot
 router.get('/slots/:slotId/enrollments', authenticateToken, getSlotEnrollments);
 
+// Release temporary atomic locks (placeholder for future implementation)
+router.post('/slots/release-locks', (req, res) => res.json({ success: true, message: 'Locks cleared successfully' }));
+
 // Enroll student in slot
 router.post('/slots/:slotId/enroll', authenticateToken, enrollStudent);
 
@@ -54,6 +58,9 @@ router.delete('/enrollments/:enrollmentId', authenticateToken, cancelEnrollment)
 
 // Process No-Show with fee notification
 router.post('/enrollments/:enrollmentId/no-show', authenticateToken, processNoShow);
+
+// Request a free reschedule within 5 days of a no-show
+router.post('/enrollments/:enrollmentId/request-free-reschedule', authenticateToken, requestFreeReschedule);
 
 // Reschedule student to a different slot
 router.post('/enrollments/:enrollmentId/reschedule', authenticateToken, rescheduleEnrollment);

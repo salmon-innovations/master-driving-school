@@ -138,4 +138,10 @@
         <item name="android:textColor">@color/gray_400</item>
     </style>
 
+    <style name="TextApparance.App.Tab" parent="TextAppearance.MaterialComponents.Button">
+        <item name="android:textSize">13sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:letterSpacing">0.02</item>
+    </style>
 </resources>

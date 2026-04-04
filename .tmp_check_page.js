@@ -1,0 +1,2 @@
+const https=require('https');
+https.get('https://www.philippineszipcode.com/location/calabarzon/quezon/?page=2',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{console.log('len',d.length); const m=d.match(/<td align="center"><strong><a href="\/\d+\/" title="([^"]+)">/i); console.log('first muni',m&&m[1]); const p=d.match(/Results <strong>([^<]+)<\/strong> of/i); console.log('results',p&&p[1]);});});

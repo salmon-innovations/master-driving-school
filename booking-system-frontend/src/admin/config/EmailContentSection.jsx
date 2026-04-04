@@ -128,7 +128,6 @@ const EmailContentSection = () => {
     if (!content) return <div className="p-8 text-center text-red-500">Error loading content</div>;
 
     const emailTypes = [
-        { id: 'online', title: 'Online Student', desc: 'Sent to online students enrolling themselves.', color: 'cyan', icon: Icons?.online },
         { id: 'walkIn', title: 'Walk-In Enrollment', desc: 'Sent to walk-in students with credentials.', color: 'emerald', icon: Icons?.walkIn },
         { id: 'guest', title: 'Guest Enrollment', desc: 'Sent to guests enrolling themselves.', color: 'blue', icon: Icons?.guest },
         { id: 'noShow', title: 'No-Show / Missed', desc: 'Sent when a student misses a session.', color: 'rose', icon: Icons?.noShow },

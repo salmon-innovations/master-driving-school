@@ -546,10 +546,14 @@ export const adminAPI = {
   },
 
   // Mark a downpayment booking as fully paid (collects remaining balance)
-  markAsPaid: async (id, paymentMethod) => {
+  markAsPaid: async (id, paymentMethod, transactionId = null, amountToCollect = null) => {
     return await apiRequest(`/admin/bookings/${id}/mark-paid`, {
       method: 'PATCH',
-      body: JSON.stringify({ payment_method: paymentMethod }),
+      body: JSON.stringify({
+        payment_method: paymentMethod,
+        transaction_id: transactionId || undefined,
+        amount_to_collect: amountToCollect == null ? undefined : amountToCollect,
+      }),
     });
   },
 
@@ -620,6 +624,15 @@ export const adminAPI = {
 
 // Schedules API
 export const schedulesAPI = {
+  // Release temporary atomic slot locks before navigating away
+  releaseLocks: async (slotIds) => {
+    if (!slotIds || slotIds.length === 0) return { success: true };
+    return await apiRequest('/schedules/slots/release-locks', {
+      method: 'POST',
+      body: JSON.stringify({ slotIds }),
+    });
+  },
+
   // Get all schedules
   getAll: async (date = null, branchId = null) => {
     const params = new URLSearchParams();
@@ -657,10 +670,12 @@ export const schedulesAPI = {
     });
   },
 
-  // Get slots for a specific date or upcoming slots
-  getSlotsByDate: async (date = null, branchId = null, type = null) => {
+  // Get slots for a specific date, date range, or upcoming slots
+  getSlotsByDate: async (date = null, branchId = null, type = null, startDate = null, endDate = null) => {
     const params = new URLSearchParams();
     if (date) params.append('date', date);
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
     if (branchId) params.append('branch_id', branchId);
     if (type) params.append('type', type);
     return await apiRequest(`/schedules/slots?${params.toString()}`);
@@ -717,6 +732,13 @@ export const schedulesAPI = {
     });
   },
 
+  // Request free reschedule within 5 days
+  requestFreeReschedule: async (enrollmentId) => {
+    return await apiRequest(`/schedules/enrollments/${enrollmentId}/request-free-reschedule`, {
+      method: 'POST',
+    });
+  },
+
   // Reschedule student to a different slot
   rescheduleEnrollment: async (enrollmentId, newSlotId) => {
     return await apiRequest(`/schedules/enrollments/${enrollmentId}/reschedule`, {
@@ -752,11 +774,11 @@ export const schedulesAPI = {
     return await apiRequest('/schedules/my-enrollments');
   },
 
-  // Student pays their remaining balance online
-  payRemainingBalance: async (bookingId, paymentMethod) => {
+  // Student pays pending/downpayment/remaining balance online
+  payRemainingBalance: async (bookingId, paymentMethod, paymentType = null) => {
     return await apiRequest(`/schedules/pay-balance/${bookingId}`, {
       method: 'PATCH',
-      body: JSON.stringify({ payment_method: paymentMethod }),
+      body: JSON.stringify({ payment_method: paymentMethod, payment_type: paymentType }),
     });
   },
 

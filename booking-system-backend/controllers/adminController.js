@@ -1250,7 +1250,8 @@ const getAllTransactions = async (req, res) => {
         status: isPaid ? 'Success' : 'Collectable',
         course_name: row.course_name || 'N/A',
         branch_name: row.branch_name || 'Unknown',
-        branch_id: row.branch_id || null
+        branch_id: row.branch_id || null,
+        notes: row.notes || null
       });
 
       // Emit a separate row for the rescheduling fee if present in notes
@@ -1407,7 +1408,7 @@ const getBranchPerformance = async (req, res) => {
 const markBookingAsPaid = async (req, res) => {
   try {
     const { id } = req.params;
-    const { payment_method } = req.body;
+    const { payment_method, transaction_id, amount_to_collect } = req.body;
 
     // Fetch booking + course price
     const bookingResult = await pool.query(
@@ -1425,19 +1426,33 @@ const markBookingAsPaid = async (req, res) => {
     const booking = bookingResult.rows[0];
     const coursePrice = parseFloat(booking.course_price || 0);
     const previousAmount = parseFloat(booking.total_amount || 0);
-    const remainingBalance = Math.max(0, coursePrice - previousAmount);
+    const isDownpaymentBooking = String(booking.payment_type || '').toLowerCase().includes('down');
+    const estimatedAssessment = isDownpaymentBooking && previousAmount > 0
+      ? (previousAmount * 2)
+      : coursePrice;
+    const targetAssessment = Math.max(estimatedAssessment, previousAmount, coursePrice);
 
-    // Mark booking as fully paid — set amount to full course price
+    let collectAmount = Number(amount_to_collect);
+    if (!Number.isFinite(collectAmount) || collectAmount <= 0) {
+      collectAmount = Math.max(0, targetAssessment - previousAmount);
+    }
+
+    const nextTotalAmount = Math.min(targetAssessment, previousAmount + collectAmount);
+    const remainingBalance = Math.max(0, Number((targetAssessment - nextTotalAmount).toFixed(2)));
+    const nextStatus = remainingBalance <= 0.009 ? 'paid' : 'collectable';
+    const nextPaymentType = nextStatus === 'paid' ? 'Full Payment' : 'Downpayment';
+
     const result = await pool.query(
       `UPDATE bookings
-       SET status = 'paid',
-           total_amount = $1,
-           payment_type = 'Full Payment',
-           payment_method = COALESCE($2, payment_method),
+       SET status = $1,
+           total_amount = $2,
+           payment_type = $3,
+           payment_method = COALESCE($4, payment_method),
+           transaction_id = COALESCE($5, transaction_id),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $3
+       WHERE id = $6
        RETURNING *`,
-      [coursePrice, payment_method || null, id]
+      [nextStatus, Number(nextTotalAmount.toFixed(2)), nextPaymentType, payment_method || null, transaction_id || null, id]
     );
 
     // Auto-enroll in schedule slot(s) if stored in notes (e.g. StarPay guest bookings)
@@ -1461,41 +1476,44 @@ const markBookingAsPaid = async (req, res) => {
       console.error('Auto-enroll on markAsPaid failed (non-fatal):', enrollErr.message);
     }
 
-    // Auto-send full payment receipt email
-    try {
-      const userResult = await pool.query(
-        `SELECT u.first_name, u.last_name, u.email, c.name AS course_name
-         FROM bookings b
-         JOIN users u ON b.user_id = u.id
-         LEFT JOIN courses c ON b.course_id = c.id
-         WHERE b.id = $1`,
-        [id]
-      );
-      if (userResult.rows.length > 0) {
-        const u = userResult.rows[0];
-        await sendPaymentReceiptEmail(u.email, u.first_name, u.last_name, {
-          bookingId: id,
-          transactionId: `TXN-${new Date().getFullYear()}-${String(id).padStart(3, '0')}`,
-          courseName: u.course_name || 'N/A',
-          amountPaid: coursePrice,
-          coursePrice,
-          paymentMethod: payment_method || 'Cash',
-          paymentDate: new Date(),
-          isFullPayment: true,
-          balanceDue: 0,
-        });
+    // Auto-send receipt only when fully paid.
+    if (nextStatus === 'paid') {
+      try {
+        const userResult = await pool.query(
+          `SELECT u.first_name, u.last_name, u.email, c.name AS course_name
+           FROM bookings b
+           JOIN users u ON b.user_id = u.id
+           LEFT JOIN courses c ON b.course_id = c.id
+           WHERE b.id = $1`,
+          [id]
+        );
+        if (userResult.rows.length > 0) {
+          const u = userResult.rows[0];
+          await sendPaymentReceiptEmail(u.email, u.first_name, u.last_name, {
+            bookingId: id,
+            transactionId: transaction_id || `TXN-${new Date().getFullYear()}-${String(id).padStart(3, '0')}`,
+            courseName: u.course_name || 'N/A',
+            amountPaid: nextTotalAmount,
+            coursePrice: targetAssessment,
+            paymentMethod: payment_method || 'Cash',
+            paymentDate: new Date(),
+            isFullPayment: true,
+            balanceDue: 0,
+          });
+        }
+      } catch (emailErr) {
+        console.error('Receipt email failed (non-fatal):', emailErr.message);
       }
-    } catch (emailErr) {
-      console.error('Receipt email failed (non-fatal):', emailErr.message);
     }
 
     res.json({
       success: true,
-      message: 'Booking marked as fully paid',
+      message: nextStatus === 'paid' ? 'Booking marked as fully paid' : 'Partial payment recorded',
       booking: result.rows[0],
-      course_price: coursePrice,
+      course_price: targetAssessment,
       previous_amount: previousAmount,
-      balance_collected: remainingBalance,
+      balance_collected: Number((nextTotalAmount - previousAmount).toFixed(2)),
+      remaining_balance: remainingBalance,
     });
   } catch (error) {
     console.error('Mark as paid error:', error);

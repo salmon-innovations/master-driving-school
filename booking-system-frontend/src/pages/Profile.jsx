@@ -53,14 +53,18 @@ function Profile({ onNavigate, setIsLoggedIn }) {
 
   // Pay balance modal state
   const [payModal, setPayModal] = useState(null) // { bookingId, balanceDue, courseName }
-  const [payMethod, setPayMethod] = useState('GCash')
+  const [payMethod, setPayMethod] = useState('StarPay')
+  const [payTypeChoice, setPayTypeChoice] = useState('full')
   const [payLoading, setPayLoading] = useState(false)
   const [payToast, setPayToast] = useState(null)
+  const [pendingNow, setPendingNow] = useState(Date.now())
+  const [expandedBundles, setExpandedBundles] = useState({})
 
   // Reschedule fee payment state
   const [rescheduleFeeModal, setRescheduleFeeModal] = useState(null) // { enrollmentId, loading, codeUrl, msgId, qrStatus }
   const reschedulePollRef = useRef(null)
   const [waitTimers, setWaitTimers] = useState({}) // { [enrollmentId]: secondsLeft }
+  const autoCancelingRef = useRef(new Set())
 
   // Feedback modal state
   const [feedbackModal, setFeedbackModal] = useState(null) // enrollment object
@@ -94,6 +98,54 @@ function Profile({ onNavigate, setIsLoggedIn }) {
     }, 1000)
     return () => clearInterval(interval)
   }, [waitTimers])
+
+  useEffect(() => {
+    const hasPending = courseHistory.some((item) => {
+      const rowStatus = String(item?.booking_status || item?.enrollment_status || '').toLowerCase()
+      return rowStatus === 'pending'
+    })
+    if (!hasPending) return
+
+    const interval = setInterval(() => setPendingNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [courseHistory])
+
+  useEffect(() => {
+    const now = Date.now()
+    const expiredPending = courseHistory.filter((item) => {
+      const rowStatus = String(item?.booking_status || item?.enrollment_status || '').toLowerCase()
+      const enrolledAtMs = item?.enrolled_at ? new Date(item.enrolled_at).getTime() : NaN
+      const isExpired = Number.isFinite(enrolledAtMs) && now >= enrolledAtMs + (20 * 60 * 1000)
+      return rowStatus === 'pending' && isExpired && item?.enrollment_id && !autoCancelingRef.current.has(item.enrollment_id)
+    })
+
+    if (expiredPending.length === 0) return
+
+    let cancelledCount = 0
+    expiredPending.forEach((row) => autoCancelingRef.current.add(row.enrollment_id))
+
+    ;(async () => {
+      for (const row of expiredPending) {
+        try {
+          await schedulesAPI.cancelEnrollment(row.enrollment_id)
+          cancelledCount += 1
+          setCourseHistory((prev) => prev.map((entry) => {
+            if (entry.enrollment_id !== row.enrollment_id) return entry
+            return { ...entry, booking_status: 'cancelled', enrollment_status: 'cancelled' }
+          }))
+        } catch (err) {
+          // Keep current state if cancellation fails.
+        } finally {
+          autoCancelingRef.current.delete(row.enrollment_id)
+        }
+      }
+
+      if (cancelledCount > 0) {
+        showNotification(`${cancelledCount} expired booking${cancelledCount > 1 ? 's were' : ' was'} cancelled automatically.`, 'info')
+        fetchUserData()
+      }
+    })()
+  }, [courseHistory, pendingNow, showNotification])
 
   const fetchUserData = async () => {
     try {
@@ -133,7 +185,11 @@ function Profile({ onNavigate, setIsLoggedIn }) {
     if (!payModal) return
     setPayLoading(true)
     try {
-      const response = await schedulesAPI.payRemainingBalance(payModal.bookingId, payMethod)
+      const response = await schedulesAPI.payRemainingBalance(
+        payModal.bookingId,
+        payMethod,
+        payModal?.isPending ? payTypeChoice : 'full'
+      )
       if (response.success) {
         setPayModal(null)
         setPayToast({ msg: 'Payment successful! A receipt has been sent to your email! 🎉', type: 'success' })
@@ -341,6 +397,59 @@ function Profile({ onNavigate, setIsLoggedIn }) {
     return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
       month: 'short', day: 'numeric', year: 'numeric'
     })
+  }
+
+  const parseBookingNotes = (notes) => {
+    if (!notes) return {}
+    if (typeof notes === 'object') return notes
+    if (typeof notes !== 'string') return {}
+    try {
+      return JSON.parse(notes)
+    } catch {
+      return {}
+    }
+  }
+
+  const normalizeCourseName = (name) => String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+
+  const toDisplayDate = (dateStr) => {
+    if (!dateStr) return 'TBA'
+    const raw = String(dateStr).trim()
+    if (!raw) return 'TBA'
+
+    let d = null
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      d = new Date(`${raw}T00:00:00`)
+    } else {
+      d = new Date(raw)
+    }
+
+    if (Number.isNaN(d.getTime())) {
+      // Keep original value if backend stored a human-readable date format.
+      return raw
+    }
+
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  const findScheduleForCourse = (courseName, scheduleEntries) => {
+    const target = normalizeCourseName(courseName)
+    if (!target || !Array.isArray(scheduleEntries) || scheduleEntries.length === 0) return null
+
+    const exact = scheduleEntries.find((entry) => normalizeCourseName(entry?.label) === target)
+    if (exact) return exact
+
+    return scheduleEntries.find((entry) => {
+      const label = normalizeCourseName(entry?.label)
+      return label && (label.includes(target) || target.includes(label))
+    }) || null
+  }
+
+  const toggleBundle = (bundleKey) => {
+    setExpandedBundles((prev) => ({ ...prev, [bundleKey]: !prev[bundleKey] }))
   }
 
   if (loading) {
@@ -607,19 +716,139 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {courseHistory.map((enrollment) => {
+                    { (() => {
+  const grouped = [];
+  const map = new Map();
+  courseHistory.forEach(e => {
+    const key = e.booking_id || e.enrollment_id || e._displayKey;
+    if(!map.has(key)) {
+       map.set(key, []);
+       grouped.push(map.get(key));
+    }
+    map.get(key).push(e);
+  });
+  return grouped;
+})().map((bundle, bIdx) => {
+  const isBundle = bundle.length > 1;
+  const bundleKey = bundle[0].booking_id || bundle[0].enrollment_id || bundle[0]._displayKey;
+  const isExpanded = isBundle ? !!expandedBundles[bundleKey] : true;
+  return (
+    <div key={bundleKey} className={isBundle ? "mb-6 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden" : "mb-4"}>
+      {isBundle && (
+        <button onClick={() => toggleBundle(bundleKey)} className="w-full flex items-center justify-between p-4 bg-gray-50/80 border-b border-gray-200 hover:bg-gray-100 transition-colors text-left">
+          <div className="flex items-center gap-3">
+             <div className="w-10 h-10 rounded-full bg-blue-100 text-[#2157da] flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+             </div>
+             <div>
+               <p className="font-extrabold text-gray-900 leading-tight">Booking Bundle ({bundle.length} Courses)</p>
+               <p className="text-[12px] text-gray-500 font-semibold mt-0.5">Booked {new Date(bundle[0].enrolled_at || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+             </div>
+          </div>
+          <div className="flex items-center gap-3">
+             <span className="text-xs font-bold text-blue-700 bg-blue-100 px-3 py-1 rounded-full hidden sm:inline-block">{isExpanded ? 'Hide Details' : 'View Full Details'}</span>
+             <svg className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+          </div>
+        </button>
+      )}
+      <div className={`flex flex-col ${isExpanded ? 'block' : 'hidden'} ${isBundle ? 'divide-y divide-gray-100 border-t border-gray-100' : ''}`}>
+        {bundle.map((enrollment, cardIdx) => {
+          const isPrimaryCard = cardIdx === 0;
+
+          // -- WE INJECT THE OLD MAP BODY LOGIC HERE --
+          
                       const courseName = enrollment.course_full_name || (enrollment.slot_type ? enrollment.slot_type.toUpperCase() + ' Course' : 'Course')
                       const schedDate = formatDate(enrollment.schedule_date)
                       const schedEndDate = enrollment.schedule_end_date && enrollment.schedule_end_date !== enrollment.schedule_date
                         ? formatDate(enrollment.schedule_end_date)
                         : null
-                      const rawStatus = enrollment.enrollment_status || enrollment.booking_status || 'booked'
+                      const rawStatus = enrollment.booking_status || enrollment.enrollment_status || 'booked'
+                      const bookingStatus = String(enrollment.booking_status || rawStatus || '').toLowerCase()
                       const statusLabel = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1)
+                      const isPendingBooking = bookingStatus === 'pending'
+                      const pendingExpiresAtMs = isPendingBooking && enrollment?.enrolled_at
+                        ? (new Date(enrollment.enrolled_at).getTime() + (20 * 60 * 1000))
+                        : null
+                      const pendingSecondsLeft = Number.isFinite(pendingExpiresAtMs)
+                        ? Math.max(0, Math.floor((pendingExpiresAtMs - pendingNow) / 1000))
+                        : null
+                      const pendingMinutesLeft = pendingSecondsLeft != null ? Math.floor(pendingSecondsLeft / 60) : null
+                      const pendingSecondsRem = pendingSecondsLeft != null ? pendingSecondsLeft % 60 : null
                       const isNoShow = enrollment.enrollment_id && enrollment.enrollment_status === 'no-show'
                       const timerSecs = waitTimers[enrollment.enrollment_id] || 0
                       const timerActive = timerSecs > 0
                       const timerMins = Math.floor(timerSecs / 60)
                       const timerSecsRem = timerSecs % 60
+                      const bookingMeta = parseBookingNotes(enrollment.booking_notes)
+                      const bookingCourseList = Array.isArray(bookingMeta.courseList) ? bookingMeta.courseList : []
+                      const normalizedCourseName = normalizeCourseName(courseName)
+                      const normalizedCategoryType = normalizeCourseName(enrollment.course_category || enrollment.slot_type)
+                      const matchedCoursesFromNotes = bookingCourseList.filter((course) => {
+                        const listedName = normalizeCourseName(course?.name || course?.label || course?.courseName)
+                        return listedName && listedName === normalizedCourseName
+                      })
+                      const preferredNoteType = [...matchedCoursesFromNotes]
+                        .reverse()
+                        .map((course) => String(course?.type || '').trim())
+                        .find((typeValue) => {
+                          const normalizedType = normalizeCourseName(typeValue)
+                          return normalizedType && normalizedType !== normalizedCategoryType && normalizedType !== normalizedCourseName
+                        }) || ''
+                      const fallbackCourseType = String(enrollment.course_type || enrollment.slot_type || '').trim()
+                      const fallbackNormalizedType = normalizeCourseName(fallbackCourseType)
+                      const displayCourseType = String(
+                        preferredNoteType || (
+                          fallbackNormalizedType
+                            && fallbackNormalizedType !== normalizedCategoryType
+                            && fallbackNormalizedType !== normalizedCourseName
+                            ? fallbackCourseType
+                            : ''
+                        )
+                      ).toUpperCase().trim()
+                      const noteScheduleEntries = bookingMeta?.pdcSelections && typeof bookingMeta.pdcSelections === 'object'
+                        ? Object.values(bookingMeta.pdcSelections)
+                            .map((selection) => ({
+                              label: selection?.courseName || selection?.label || 'PDC',
+                              date1: selection?.pdcDate || selection?.date || null,
+                              date2: selection?.pdcDate2 || selection?.date2 || null,
+                              session: selection?.session || selection?.scheduleSession || selection?.pdcSession || null,
+                              time: selection?.time
+                                || selection?.scheduleTime
+                                || selection?.timeRange
+                                || selection?.time_range
+                                || selection?.pdcSlotDetails?.time_range
+                                || selection?.pdcSlotDetails?.time
+                                || selection?.slot?.time_range
+                                || selection?.slot?.time
+                                || null,
+                            }))
+                            .filter((entry) => entry.date1 || entry.time)
+                        : []
+                      const otherAvailedCourses = bookingCourseList.filter((course) => {
+                        const listedName = normalizeCourseName(course?.name || course?.label || course?.courseName)
+                        return listedName && listedName !== normalizeCourseName(courseName)
+                      })
+                      const bundleScheduleEntries = bundle
+                        .filter((row) => row !== enrollment)
+                        .map((row) => ({
+                          label: row.course_full_name || (row.slot_type ? `${row.slot_type.toUpperCase()} Course` : 'Course'),
+                          date1: row.schedule_date || null,
+                          date2: row.schedule_end_date && row.schedule_end_date !== row.schedule_date ? row.schedule_end_date : null,
+                          session: row.session || null,
+                          time: row.time_range || null,
+                        }))
+                        .filter((entry) => entry.date1 || entry.time)
+                      const mergedScheduleEntries = [...bundleScheduleEntries]
+                      const seenScheduleKey = new Set()
+                      const allScheduleEntries = mergedScheduleEntries.filter((entry) => {
+                        const key = `${normalizeCourseName(entry.label)}|${entry.date1 || ''}|${entry.date2 || ''}|${entry.time || ''}`
+                        if (seenScheduleKey.has(key)) return false
+                        seenScheduleKey.add(key)
+                        return true
+                      })
+                      const hasAdditionalSchedules = otherAvailedCourses.length > 0 || allScheduleEntries.length > 0
+                      const detailsKey = `booking-extra-${bundleKey}-${enrollment.enrollment_id || cardIdx}`
+                      const isDetailsExpanded = !!expandedBundles[detailsKey]
                       const accentColor = rawStatus === 'completed' ? 'border-l-green-400'
                         : rawStatus === 'enrolled' || rawStatus === 'confirmed' ? 'border-l-blue-400'
                         : rawStatus === 'no-show' ? 'border-l-red-400'
@@ -629,8 +858,8 @@ function Profile({ onNavigate, setIsLoggedIn }) {
 
                       return (
                         <div
-                          key={enrollment.booking_id}
-                          className={`bg-white rounded-2xl border border-gray-200 border-l-4 ${accentColor} shadow-sm hover:shadow-md transition-all overflow-hidden`}
+                          key={enrollment.enrollment_id || `${enrollment.booking_id}-${enrollment.course_id || cardIdx}`}
+                          className={`bg-white ${isBundle ? "" : "rounded-2xl border border-gray-200"} border-l-4 ${accentColor} transition-all overflow-hidden`}
                         >
                           {/* Card header */}
                           <div className="p-5 pb-4">
@@ -642,13 +871,15 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                                       {enrollment.course_category || enrollment.slot_type?.toUpperCase()}
                                     </span>
                                   )}
-                                  {enrollment.course_type && (
-                                    <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                                      {enrollment.course_type}
+                                </div>
+                                <div className="flex items-center justify-center gap-2 flex-wrap mt-5">
+                                  <h3 className="text-base font-bold text-gray-900 leading-tight">{courseName}</h3>
+                                  {displayCourseType && (
+                                    <span className="inline-flex items-center justify-center self-center text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-md bg-gray-100 text-gray-500 border border-gray-200 leading-none">
+                                      {displayCourseType}
                                     </span>
                                   )}
                                 </div>
-                                <h3 className="text-base font-bold text-gray-900 leading-tight">{courseName}</h3>
                               </div>
                               <div className="flex flex-col items-end gap-1.5 shrink-0">
                                 <span className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${getStatusColor(rawStatus)}`}>
@@ -692,6 +923,126 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                                 )}
                               </div>
                             )}
+
+                            {hasAdditionalSchedules && (
+                              <div className="mt-4 border-t border-gray-100/80 pt-3">
+                                <button
+                                  onClick={() => toggleBundle(detailsKey)}
+                                  className="w-full flex items-center justify-between px-3 py-2 bg-gray-50/50 hover:bg-black/5 text-gray-600 rounded-xl transition-all group"
+                                >
+                                  <span className="text-[11px] font-black uppercase tracking-wider text-gray-500 group-hover:text-blue-600 transition-colors">
+                                    {isDetailsExpanded ? 'Hide Extra Details' : 'View Included Courses & Schedules'}
+                                  </span>
+                                  <div className={`w-6 h-6 rounded-full bg-white shadow-sm flex items-center justify-center border border-gray-100 transition-transform ${isDetailsExpanded ? 'rotate-180 bg-blue-50 border-blue-200' : ''}`}>
+                                    <svg className={`w-3.5 h-3.5 ${isDetailsExpanded ? 'text-blue-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                  </div>
+                                </button>
+                                
+                                {isDetailsExpanded && (
+                                  <div className={`mt-3 grid grid-cols-1 ${allScheduleEntries.length > 0 ? 'md:grid-cols-2' : 'md:grid-cols-1'} gap-3 px-1`}>
+                                    {otherAvailedCourses.length > 0 && (
+                                      <div className="w-full">
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-[#2157da]/70 mb-2 px-1 flex items-center gap-1.5">
+                                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+                                          Courses Availed
+                                        </p>
+                                        <ul className="space-y-1.5">
+                                          {otherAvailedCourses.map((course, otherIdx) => {
+                                            const displayName = course?.name || course?.label || course?.courseName || 'Course'
+                                            const scheduleFromNote = findScheduleForCourse(displayName, noteScheduleEntries)
+                                            const noteDate1 = scheduleFromNote?.date1 ? toDisplayDate(scheduleFromNote.date1) : null
+                                            const noteDate2 = scheduleFromNote?.date2 ? toDisplayDate(scheduleFromNote.date2) : null
+                                            const noteTime = [scheduleFromNote?.session, scheduleFromNote?.time].filter(Boolean).join(' · ')
+                                            const displayTime = noteTime || 'Time to be announced'
+                                            const displayBranch = enrollment?.branch_name || bookingMeta?.branchName || 'Branch to be announced'
+                                            return (
+                                            <li key={`other-${otherIdx}`} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+                                              <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-400 to-[#2157da]" />
+                                              <p className="text-sm font-extrabold text-gray-900 text-center leading-tight">{displayName}</p>
+                                              <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                                                {noteDate1 && (
+                                                  <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5 text-xs text-gray-600">
+                                                    <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                    </svg>
+                                                    <span className="font-medium">{noteDate1}{noteDate2 ? ` - ${noteDate2}` : ''}</span>
+                                                  </div>
+                                                )}
+                                                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5 text-xs text-gray-600">
+                                                  <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                  </svg>
+                                                  <span className="font-medium">{displayTime}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5 text-xs text-gray-600">
+                                                    <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                    </svg>
+                                                  <span className="font-medium">{displayBranch}</span>
+                                                  </div>
+                                                {course?.type && (
+                                                  <span className="text-[10px] font-bold uppercase px-2.5 py-1.5 rounded-lg bg-gray-50 border border-gray-100 text-gray-600">
+                                                    {course.type}
+                                                  </span>
+                                                )}
+                                                {!noteDate1 && !noteTime && (
+                                                  <span className="text-[10px] font-bold uppercase px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-100 text-amber-600">
+                                                    Schedule pending
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </li>
+                                            )
+                                          })}
+                                        </ul>
+                                      </div>
+                                    )}
+                                    {allScheduleEntries.length > 0 && (
+                                      <div>
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600/80 mb-2 px-1 flex items-center gap-1.5">
+                                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                          Assigned Schedules
+                                        </p>
+                                        <ul className="space-y-1.5">
+                                          {allScheduleEntries.map((entry, scheduleIdx) => {
+                                            const d1 = toDisplayDate(entry.date1);
+                                            const d2 = entry.date2 ? toDisplayDate(entry.date2) : '';
+                                            const scheduleTime = [entry.session, entry.time].filter(Boolean).join(' · ')
+                                            return (
+                                              <li key={`sch-${scheduleIdx}`} className="bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-sm relative overflow-hidden flex flex-col justify-center">
+                                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-emerald-400 to-emerald-600" />
+                                                <p className="text-xs font-bold text-gray-800">{entry.label}</p>
+                                                <p className="text-[11px] font-semibold text-gray-500 mt-0.5 flex flex-wrap items-center gap-x-2 w-full gap-y-0.5">
+                                                    {(d1 !== 'TBA' || d2) ? (
+                                                      <>
+                                                        <span className="bg-gray-100 px-1.5 rounded">{d1}</span>
+                                                        {d2 && d2 !== 'TBA' && (
+                                                          <>
+                                                            <span className="text-gray-300">-</span>
+                                                            <span className="bg-gray-100 px-1.5 rounded">{d2}</span>
+                                                          </>
+                                                        )}
+                                                      </>
+                                                    ) : (
+                                                      <span className="bg-gray-100 text-gray-400 px-1.5 rounded uppercase text-[9px] tracking-wider">TBA</span>
+                                                    )}
+                                                </p>
+                                                <p className="text-[10px] text-gray-500 mt-1">
+                                                  {scheduleTime || 'Time to be announced'}
+                                                </p>
+                                              </li>
+                                            )
+                                          })}
+                                        </ul>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
 
                           {/* Card footer row */}
@@ -712,22 +1063,73 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                             )}
                           </div>
 
-                          {/* Pay Balance */}
+                          {isPendingBooking && (
+                            <div className="px-5 py-3 bg-amber-50 border-t border-amber-200">
+                              <p className="text-[11px] text-amber-700 font-semibold text-center">
+                                {pendingSecondsLeft === 0
+                                  ? 'Expired. This pending booking will be automatically cancelled.'
+                                  : `Expires in ${pendingMinutesLeft}:${String(pendingSecondsRem).padStart(2, '0')} before automatic cancellation.`}
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Pay Balance / Pending */}
                           {(() => {
-                            const balanceDue = Math.max(0, (enrollment.course_price || 0) - (enrollment.amount_paid || 0))
-                            const canPay = enrollment.booking_status === 'collectable' && balanceDue > 0
+                            const rowStatus = String(enrollment.booking_status || rawStatus || '').toLowerCase()
+                            const normalizedPaymentType = String(enrollment.payment_status || '').toLowerCase()
+                            const coursePriceNum = Math.max(0, Number(enrollment.course_price || 0))
+                            const amountPaidNum = Math.max(0, Number(enrollment.amount_paid || 0))
+                            const balanceDue = Math.max(0, coursePriceNum - amountPaidNum)
+                            const collectableFallbackDue = normalizedPaymentType.includes('downpayment')
+                              ? Math.max(0, amountPaidNum)
+                              : coursePriceNum
+                            const payableBalanceDue = balanceDue > 0 ? balanceDue : collectableFallbackDue
+                            const isPendingForPay = rowStatus === 'pending' && (pendingSecondsLeft == null || pendingSecondsLeft > 0)
+                            const isCollectableForPay = rowStatus === 'collectable' && payableBalanceDue > 0
+                            const canPay = isPendingForPay || isCollectableForPay
                             return canPay ? (
-                              <div className="px-5 py-4 bg-orange-50 border-t border-orange-100 flex items-center justify-between gap-4">
-                                <div>
-                                  <p className="text-[11px] text-orange-600 font-semibold uppercase tracking-wide">Remaining Balance</p>
-                                  <p className="text-xl font-extrabold text-orange-500">₱{balanceDue.toLocaleString()}</p>
+                              <div className="px-5 py-4 bg-orange-50 border-t border-orange-100">
+                                <div className="flex items-center justify-between gap-4">
+                                  <div>
+                                    <p className="text-[11px] text-orange-600 font-semibold uppercase tracking-wide">
+                                      {isPendingForPay ? 'Pending Payment' : 'Remaining Balance'}
+                                    </p>
+                                    <p className="text-xl font-extrabold text-orange-500">₱{(isPendingForPay ? coursePriceNum : payableBalanceDue).toLocaleString()}</p>
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      setPayModal({
+                                        bookingId: enrollment.booking_id,
+                                        balanceDue: payableBalanceDue,
+                                        courseName,
+                                        coursePrice: coursePriceNum,
+                                        amountPaid: amountPaidNum,
+                                        isPending: isPendingForPay,
+                                        paymentStatus: enrollment.payment_status,
+                                        bookingNotes: enrollment.booking_notes,
+                                        branchName: enrollment.branch_name,
+                                      bundleCourses: bundle.map((row) => ({
+                                        name: row.course_full_name || (row.slot_type ? `${row.slot_type.toUpperCase()} Course` : 'Course'),
+                                        type: row.course_type || row.slot_type || null,
+                                      })),
+                                      })
+                                      setPayTypeChoice(isPendingForPay ? 'downpayment' : 'full')
+                                      setPayMethod('StarPay')
+                                    }}
+                                    className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold text-sm hover:shadow-md transition-all shrink-0"
+                                  >
+                                    {isPendingForPay
+                                      ? 'Pay via StarPay'
+                                      : (normalizedPaymentType.includes('downpayment')
+                                        ? 'Pay Remaining via StarPay'
+                                        : 'Pay Balance via StarPay')}
+                                  </button>
                                 </div>
-                                <button
-                                  onClick={() => { setPayModal({ bookingId: enrollment.booking_id, balanceDue, courseName }); setPayMethod('GCash') }}
-                                  className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold text-sm hover:shadow-md transition-all shrink-0"
-                                >
-                                  Pay Balance
-                                </button>
+                                {isCollectableForPay && (
+                                  <p className="mt-2 text-[11px] text-orange-700 font-medium">
+                                    Note: You can also pay walk-in on the day of your first face-to-face lesson.
+                                  </p>
+                                )}
                               </div>
                             ) : null
                           })()}
@@ -794,7 +1196,12 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                           )}
                         </div>
                       )
-                    })}
+                    
+        })}
+      </div>
+    </div>
+  )
+})}
                   </div>
                 )}
               </div>
@@ -812,28 +1219,117 @@ function Profile({ onNavigate, setIsLoggedIn }) {
       >
         <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
           <div className="bg-gradient-to-r from-[#2157da] to-[#3b82f6] p-6 text-white">
-            <h2 className="text-xl font-bold">Pay Remaining Balance</h2>
+            <h2 className="text-xl font-bold">{payModal.isPending ? 'Pay Pending Course' : 'Pay Remaining Balance'}</h2>
             <p className="text-blue-100 text-sm mt-1">Complete your enrollment payment online</p>
           </div>
           <div className="p-6">
-            <div className="bg-gray-50 rounded-xl p-4 mb-5">
-              <p className="text-sm text-gray-500 mb-1">Course</p>
-              <p className="font-bold text-gray-800">{payModal.courseName}</p>
-              <div className="flex justify-between mt-3 pt-3 border-t border-gray-200">
-                <span className="text-orange-500 font-bold">Amount to Pay</span>
-                <span className="text-2xl font-extrabold text-orange-500">₱{payModal.balanceDue.toLocaleString()}</span>
+            {(() => {
+              const selectedAmount = payModal.isPending
+                ? (payTypeChoice === 'downpayment' ? Math.max(0, (payModal.coursePrice || 0) * 0.5) : Math.max(0, payModal.coursePrice || 0))
+                : Math.max(0, payModal.balanceDue || 0)
+              const modalMeta = parseBookingNotes(payModal.bookingNotes)
+              const modalBundleCourses = Array.isArray(payModal.bundleCourses) ? payModal.bundleCourses : []
+              const notesCourseList = Array.isArray(modalMeta.courseList) ? modalMeta.courseList : []
+              const rawModalCourses = [
+                ...modalBundleCourses,
+                ...notesCourseList,
+              ]
+              if (rawModalCourses.length === 0) {
+                rawModalCourses.push({ name: payModal.courseName, type: null })
+              }
+              const modalCourseMap = new Map()
+              rawModalCourses.forEach((course) => {
+                const courseName = course?.name || course?.courseName || course?.label || ''
+                const key = normalizeCourseName(courseName)
+                if (!key) return
+                modalCourseMap.set(key, {
+                  ...course,
+                  name: courseName,
+                  type: course?.type || course?.slotType || null,
+                })
+              })
+              const modalCourseList = modalCourseMap.size > 0
+                ? Array.from(modalCourseMap.values())
+                : [{ name: payModal.courseName, type: null }]
+              const normalizedStatus = String(payModal.paymentStatus || '').toLowerCase()
+              const isDownpaymentFlow = payModal.isPending
+                ? payTypeChoice === 'downpayment'
+                : normalizedStatus.includes('downpayment')
+              const totalAssessment = payModal.isPending
+                ? Math.max(0, Number(payModal.coursePrice || 0))
+                : Math.max(0, Number(payModal.amountPaid || 0) + Number(payModal.balanceDue || 0), Number(payModal.coursePrice || 0))
+              const paidSoFar = payModal.isPending ? 0 : Math.max(0, Number(payModal.amountPaid || 0))
+              const remainingAfterThis = Math.max(0, totalAssessment - (paidSoFar + selectedAmount))
+
+              return (
+                <>
+            <div className="bg-gray-50 rounded-xl p-4 mb-5 border border-gray-200">
+              <p className="text-base font-black text-gray-900 mb-3">Enrollment Summary</p>
+
+              <div className="space-y-2 mb-3">
+                {modalCourseList.map((course, idx) => (
+                  <div key={`modal-course-${idx}`} className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-bold text-gray-800 leading-snug">{course?.name || course?.courseName || 'Course'}</p>
+                      {course?.type && (
+                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200 shrink-0">
+                          {course.type}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-lg border border-emerald-100 bg-emerald-50/40 p-3 text-sm">
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-gray-600">Payment Method</span>
+                  <span className="font-semibold text-gray-800">StarPay</span>
+                </div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-gray-600">Payment Type</span>
+                  <span className="font-semibold text-gray-800">{isDownpaymentFlow ? 'Downpayment (50%)' : 'Full Payment'}</span>
+                </div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-gray-600">Total Assessment</span>
+                  <span className="font-semibold text-gray-800">₱{totalAssessment.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-gray-600">Paid So Far</span>
+                  <span className="font-semibold text-emerald-700">₱{paidSoFar.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center border-t border-emerald-100 pt-1.5">
+                  <span className="text-orange-600 font-bold">Amount to Pay</span>
+                  <span className="text-2xl font-extrabold text-orange-500">₱{selectedAmount.toLocaleString()}</span>
+                </div>
+                {remainingAfterThis > 0 && (
+                  <p className="mt-1.5 text-[11px] text-gray-500 text-right">Remaining after this payment: ₱{remainingAfterThis.toLocaleString()}</p>
+                )}
               </div>
             </div>
+
+            {payModal.isPending && (
+              <>
+                <label className="block text-sm font-semibold text-gray-600 mb-2">Payment Type</label>
+                <select
+                  value={payTypeChoice}
+                  onChange={(e) => setPayTypeChoice(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-gray-800 font-medium focus:outline-none focus:border-[#2157da] mb-4"
+                >
+                  <option value="full">Full Payment</option>
+                  <option value="downpayment">Downpayment</option>
+                </select>
+              </>
+            )}
+
             <label className="block text-sm font-semibold text-gray-600 mb-2">Payment Method</label>
-            <select
-              value={payMethod}
-              onChange={(e) => setPayMethod(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-gray-800 font-medium focus:outline-none focus:border-[#2157da] mb-6"
-            >
-              <option>GCash</option>
-              <option>Cash</option>
-              <option>Bank Transfer</option>
-            </select>
+            <div className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-[#2b4db8] bg-[#f0f4ff] mb-6">
+              <img src="/images/starpay.png" alt="StarPay" className="w-8 h-8 rounded-lg object-cover shadow-sm border border-gray-200 bg-white shrink-0" onError={(e) => e.target.style.display='none'} />
+              <div className="flex flex-col overflow-hidden">
+                <span className="font-black text-gray-900 text-sm leading-tight">StarPay</span>
+                <span className="text-xs text-gray-500 mt-1 truncate">Scan QR Ph in GCash, Maya, GrabPay, BDO, BPI and more</span>
+              </div>
+            </div>
             <div className="flex gap-3">
               <button
                 onClick={() => !payLoading && setPayModal(null)}
@@ -847,9 +1343,16 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                 disabled={payLoading}
                 className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-[#2157da] to-[#3b82f6] text-white font-bold hover:shadow-lg transition-all disabled:opacity-60"
               >
-                {payLoading ? 'Processing…' : `Pay ₱${payModal.balanceDue.toLocaleString()}`}
+                {payLoading
+                  ? 'Processing...'
+                  : (payModal.isPending && payTypeChoice === 'downpayment'
+                    ? `Pay Downpayment via StarPay - ₱${selectedAmount.toLocaleString()}`
+                    : `Pay via StarPay - ₱${selectedAmount.toLocaleString()}`)}
               </button>
             </div>
+            </>
+              )
+            })()}
           </div>
         </div>
       </div>

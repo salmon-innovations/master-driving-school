@@ -377,6 +377,16 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
           // and just check if the category/vehicle class matches
           if (!isTDC && !courseTypeMatches(s.course_type)) return false
           
+          if (!isTDC && courseType) {
+            const tr = (s.transmission || '').toLowerCase()
+            const cType = courseType.toLowerCase()
+            if (cType.includes('automatic') || cType === 'at' || cType.includes('auto')) {
+              if (tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false
+            } else if (cType.includes('manual') || cType === 'mt') {
+              if (tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false
+            }
+          }
+          
           return s.available_slots == null || s.available_slots > 0
         }) : []
         setHasAvailableSlots(available.length > 0)

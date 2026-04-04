@@ -420,9 +420,29 @@
 
 .booking-table {
     width: 100%;
+    min-width: 900px;
+    table-layout: fixed;
     border-collapse: separate;
     border-spacing: 0;
 }
+
+.booking-table th:nth-child(1),
+.booking-table td:nth-child(1) { width: 90px; }
+
+.booking-table th:nth-child(2),
+.booking-table td:nth-child(2) { width: 360px; }
+
+.booking-table th:nth-child(3),
+.booking-table td:nth-child(3) { width: 250px; }
+
+.booking-table th:nth-child(4),
+.booking-table td:nth-child(4) { width: 220px; }
+
+.booking-table th:nth-child(5),
+.booking-table td:nth-child(5) { width: 130px; }
+
+.booking-table th:nth-child(6),
+.booking-table td:nth-child(6) { width: 130px; }
 
 .booking-table th {
     text-align: left;
@@ -441,7 +461,7 @@
 }
 
 .booking-table td {
-    padding: 16px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--border-color);
     font-size: 0.88rem;
     color: var(--text-color);
@@ -456,6 +476,15 @@
     background: var(--primary-light);
 }
 
+.bk-clickable-row {
+    cursor: pointer;
+}
+
+.bk-clickable-row:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: -2px;
+}
+
 .bk-table-row:last-child td {
     border-bottom: none;
 }
@@ -464,22 +493,23 @@
 .bk-table-student {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
 }
 
 .bk-student-avatar {
-    width: 36px;
-    height: 36px;
-    min-width: 36px;
-    border-radius: 10px;
-    background: var(--primary-light);
-    color: var(--primary-color);
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    border-radius: 9999px;
+    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: 700;
-    font-size: 0.8rem;
-    letter-spacing: -0.3px;
+    font-weight: 800;
+    font-size: 0.78rem;
+    letter-spacing: -0.2px;
 }
 
 .bk-id {
@@ -493,7 +523,10 @@
     font-weight: 700;
     color: var(--text-color);
     display: block;
+    line-height: 1.2;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .type-badge {
@@ -1383,6 +1416,187 @@
 .bkv2-body::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 .bkv2-body::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
+.bk-mark-paid-modal {
+    width: 95%;
+    max-width: 620px;
+    max-height: 90vh;
+    background: #ffffff;
+    border-radius: 20px;
+    box-shadow: 0 24px 64px rgba(15, 23, 42, 0.2), 0 10px 30px rgba(15, 23, 42, 0.12);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.bk-mark-paid-head {
+    flex-shrink: 0;
+}
+
+.bk-mark-paid-head.bkv2-header {
+    padding: 18px 22px;
+}
+
+.bk-mark-paid-close {
+    border: none;
+}
+
+.bk-mark-paid-body {
+    padding: 16px 18px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: #f1f5f9;
+    overflow-y: auto;
+}
+
+.bk-mark-paid-panel {
+    background: #ffffff;
+}
+
+.bk-mark-paid-form-card {
+    border-left: 4px solid #2563eb;
+}
+
+.bk-mark-paid-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.9rem;
+    color: #475569;
+    gap: 10px;
+}
+
+.bk-mark-paid-row.highlight {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    padding: 10px 12px;
+    color: #1e3a8a;
+    font-weight: 700;
+    margin-top: 4px;
+}
+
+.bk-mark-paid-row.sub {
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 8px 10px;
+    margin-top: 2px;
+}
+
+.bk-mark-paid-row strong {
+    color: #0f172a;
+    text-align: right;
+    font-weight: 800;
+}
+
+.bk-mark-paid-label {
+    font-size: 0.76rem;
+    font-weight: 800;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 2px;
+}
+
+.bk-mark-paid-input {
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 11px 12px;
+    font-size: 0.9rem;
+    color: #0f172a;
+    background: #fff;
+    outline: none;
+    box-sizing: border-box;
+    width: 100%;
+}
+
+.bk-mark-paid-input:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.bk-mark-paid-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 14px 18px;
+    border-top: 1px solid #e2e8f0;
+    background: #ffffff;
+    flex-shrink: 0;
+}
+
+.bk-mark-paid-cancel,
+.bk-mark-paid-confirm {
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 10px 20px;
+    font-size: 0.9rem;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+.bk-mark-paid-cancel {
+    background: #f1f5f9;
+    color: #334155;
+    border-color: #e2e8f0;
+}
+
+.bk-mark-paid-cancel:hover {
+    background: #cbd5e1;
+    border-color: #cbd5e1;
+    transform: translateY(-1px);
+}
+
+.bk-mark-paid-confirm {
+    background: linear-gradient(135deg, #16a34a, #15803d);
+    color: #fff;
+}
+
+.bk-mark-paid-confirm:hover {
+    filter: brightness(0.95);
+    transform: translateY(-1px);
+}
+
+.bk-mark-paid-metrobank-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.bk-mark-paid-cancel:disabled,
+.bk-mark-paid-confirm:disabled,
+.bk-mark-paid-input:disabled,
+.bk-mark-paid-close:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+@media (max-width: 560px) {
+    .bk-mark-paid-head.bkv2-header {
+        padding: 16px 14px;
+        gap: 10px;
+    }
+
+    .bk-mark-paid-modal {
+        width: calc(100% - 16px);
+    }
+
+    .bk-mark-paid-body {
+        padding: 12px;
+    }
+
+    .bk-mark-paid-actions {
+        padding: 12px;
+    }
+
+    .bk-mark-paid-cancel,
+    .bk-mark-paid-confirm {
+        padding: 10px 14px;
+    }
+}
+
 /* ── Student card ── */
 .bkv2-student-card {
     display: flex;
@@ -1444,7 +1658,7 @@
 /* ── 2-column info grid ── */
 .bkv2-row-2 {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 14px;
 }
 
@@ -1666,7 +1880,7 @@
 
 .bkv2-sched-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 12px;
 }
 
@@ -1690,9 +1904,29 @@
 .bkv2-sched-card.tdc .bkv2-sched-badge { background: #e2e8f0; color: #475569; }
 .bkv2-sched-card.pdc .bkv2-sched-badge { background: #bae6fd; color: #0369a1; }
 
-.bkv2-sched-days { display: flex; flex-direction: column; gap: 10px; }
+.bkv2-sched-title {
+    margin: 0 0 4px;
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.25;
+    text-align: center;
+    overflow-wrap: anywhere;
+}
 
-.bkv2-sched-day { display: flex; flex-direction: column; gap: 2px; }
+.bkv2-sched-sub {
+    margin: 0 0 8px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #64748b;
+    line-height: 1.25;
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+
+.bkv2-sched-days { display: flex; flex-direction: column; gap: 8px; }
+
+.bkv2-sched-day { display: flex; flex-direction: column; gap: 2px; align-items: center; text-align: center; }
 
 .bkv2-day-label {
     font-size: 0.65rem;
@@ -1708,6 +1942,54 @@
     color: #1e293b;
 }
 .bkv2-sched-card.pdc .bkv2-day-val { color: #0369a1; }
+
+.bkv2-time-line {
+    font-size: 0.74rem;
+    font-weight: 600;
+    line-height: 1.25;
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+
+.bkv2-time-line.shared {
+    font-weight: 700;
+}
+
+.bkv2-time-line.tdc {
+    color: #475569;
+}
+
+.bkv2-time-line.pdc {
+    color: #0369a1;
+}
+
+.bkv2-course-sched-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.bkv2-course-sched-card {
+    background: #f8fafc;
+    border: 1px solid #dbe5ef;
+    border-radius: 14px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+}
+
+.bkv2-course-sched-card .bkv2-card-label {
+    margin-bottom: 8px;
+}
+
+.bkv2-course-sched-card .bkv2-card-title {
+    text-align: center;
+}
+
+.bkv2-course-sched-card .bkv2-card-sub {
+    display: block;
+    text-align: center;
+    margin-top: 6px;
+}
 
 /* ── Footer ── */
 .bkv2-footer {
@@ -1755,7 +2037,8 @@
 }
 
 .bk-course-display {
-    max-width: 180px;
+    max-width: 100%;
+    min-width: 0;
 }
 
 .type-badge.bundle {
@@ -1767,12 +2050,17 @@
     font-size: 0.75rem;
     display: inline-block;
     line-height: 1.4;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    max-width: 100%;
 }
 
 .schedule-info-v2 {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    min-width: 0;
 }
 
 .sched-tag {
@@ -1784,6 +2072,7 @@
     padding: 2px 8px 2px 2px;
     border-radius: 6px;
     width: fit-content;
+    max-width: 100%;
 }
 
 .sched-tag .label {
@@ -1802,11 +2091,15 @@
     font-size: 0.75rem;
     font-weight: 700;
     color: #334155;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .payment-info-v2 {
     display: flex;
     flex-direction: column;
+    min-width: 0;
 }
 
 .payment-info-v2 .amount {
@@ -1819,6 +2112,8 @@
     font-size: 0.7rem;
     color: #64748b;
     font-weight: 600;
+    white-space: normal;
+    line-height: 1.25;
 }
 
 .table-actions {
@@ -1850,4 +2145,4 @@
 
 .view-action-btn { color: var(--primary-color); }
 .view-action-btn:hover { background: #eff6ff; border-color: var(--primary-color); transform: translateY(-2px); }
-
+

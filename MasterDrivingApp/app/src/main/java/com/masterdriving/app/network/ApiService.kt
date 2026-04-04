@@ -147,7 +147,7 @@ class ApiService(private val context: Context) {
             JSONArray(trimmed)
         } else if (trimmed.startsWith("{")) {
             val obj = JSONObject(trimmed)
-            val wrapperKeys = arrayOf("data", "courses", "branches", "slots", "enrollments")
+            val wrapperKeys = arrayOf("data", "courses", "branches", "slots", "enrollments", "news")
             var finalArray: JSONArray? = null
             for (key in wrapperKeys) {
                 if (obj.has(key)) {

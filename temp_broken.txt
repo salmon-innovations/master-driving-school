@@ -1,0 +1,54 @@
+const fs = require('fs');
+
+let code = fs.readFileSync('booking-system-frontend/src/pages/Schedule.jsx', 'utf8');
+
+// The mobile list array
+const lenPattern = /promoPdcFiltered\.length/g;
+if (code.match(lenPattern)) {
+    code = code.replace(lenPattern, "(promoPdcSelectingDay2 ? promoPdcFiltered2 : promoPdcFiltered).length");
+    console.log("length array updated");
+}
+
+const mapPattern = /promoPdcFiltered\.map\(slot => \{/g;
+if (code.match(mapPattern)) {
+    code = code.replace(mapPattern, "(promoPdcSelectingDay2 ? promoPdcFiltered2 : promoPdcFiltered).map(slot => {");
+    console.log("map array updated");
+}
+
+// Change the title
+const listTitlePattern = /<h3 className="text-lg font-black text-gray-900">PDC Time Slots (.*?) \{pdcTypeLabel\} <span className="text-sm font-bold text-gray-400">\(Day 1\)<\/span><\/h3>/;
+if (listTitlePattern.test(code)) {
+    code = code.replace(
+        listTitlePattern,
+        '<h3 className="text-lg font-black text-gray-900">PDC Time Slots \u2014 {pdcTypeLabel} <span className="text-sm font-bold text-gray-400">{promoPdcSelectingDay2 ? "(Day 2)" : "(Day 1)"}</span></h3>'
+    );
+    console.log("List Title updated");
+}
+
+const listDatePattern = /<p className="text-xs text-gray-500 mt-1">\{promoPdcDate\.toLocaleDateString\('en-US', \{ weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' \}\)\}<\/p>/;
+if (listDatePattern.test(code)) {
+    code = code.replace(
+        listDatePattern,
+        '<p className="text-xs text-gray-500 mt-1">{(promoPdcSelectingDay2 && promoPdcDate2 ? promoPdcDate2 : promoPdcDate).toLocaleDateString(\'en-US\', { weekday: \'long\', month: \'long\', day: \'numeric\', year: \'numeric\' })} {promoPdcSelectingDay2 && `· ${promoPdcSlot?.session} session only`}</p>'
+    );
+    console.log("List Date Subtitle updated");
+}
+
+// Mobile dots & Desktop Clicks fixes
+const isFullyBookedP = /const isFullyBooked = slot\.available_slots === 0\r?\n\s*const isSlotSel = promoPdcSlot\?\.id === slot\.id/g;
+if (code.match(isFullyBookedP)) {
+    code = code.replace(isFullyBookedP, `const isSlotMismatch = promoPdcSelectingDay2 && slot.session !== promoPdcSlot?.session;
+                                  const isFullyBooked = slot.available_slots === 0 || isSlotMismatch;
+                                  const isSlotSel = promoPdcSelectingDay2 ? (promoPdcSlot2?.id === slot.id) : (promoPdcSlot?.id === slot.id)`);
+    console.log("isSlotSel desktop dots updated");
+}
+
+const isFullyBookedMobileP = /const isFullyBooked = slot\.available_slots === 0;\r?\n\s*const isSlotSelected = promoPdcSlot\?\.id === slot\.id \|\| promoPdcSlot2\?\.id === slot\.id;/g;
+if (code.match(isFullyBookedMobileP)) {
+    code = code.replace(isFullyBookedMobileP, `const isSlotMismatch = promoPdcSelectingDay2 && slot.session !== promoPdcSlot?.session;
+                                  const isFullyBooked = slot.available_slots === 0 || isSlotMismatch;
+                                  const isSlotSelected = promoPdcSelectingDay2 ? (promoPdcSlot2?.id === slot.id) : (promoPdcSlot?.id === slot.id);`);
+    console.log("isSlotSelected mobile dots updated");
+}
+
+fs.writeFileSync('booking-system-frontend/src/pages/Schedule.jsx', code);

@@ -1603,3 +1603,172 @@
 [data-theme='dark'] .txn-empty-state span {
     color: var(--secondary-text);
 }
+
+.sale-mark-paid-modal {
+    max-width: 620px !important;
+    width: 95% !important;
+    max-height: 90vh;
+    padding: 0 !important;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.sale-mark-paid-head {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 20px 24px !important;
+    background: linear-gradient(135deg, #1a4fba 0%, #1d4ed8 100%) !important;
+    gap: 12px;
+}
+
+.sale-mark-paid-head h2 {
+    color: #fff;
+    font-size: 1.1rem;
+    margin: 0 0 2px;
+    font-weight: 800;
+}
+
+.sale-mark-paid-head p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.sale-mark-paid-chip {
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    background: rgba(14, 165, 233, 0.2);
+    color: #bae6fd;
+}
+
+.sale-mark-paid-head .close-modal {
+    width: 34px !important;
+    height: 34px !important;
+    border-radius: 10px !important;
+    background: rgba(255, 255, 255, 0.12) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    color: #fff !important;
+}
+
+.sale-mark-paid-body {
+    background: #f1f5f9;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+}
+
+.sale-mark-paid-card {
+    background: #fff;
+    border: 1px solid #dbe3ef;
+    border-radius: 14px;
+    padding: 14px 14px;
+}
+
+.sale-mark-paid-form {
+    border-left: 4px solid #2563eb;
+}
+
+.sale-mark-paid-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 0.9rem;
+    color: #475569;
+    margin-bottom: 6px;
+}
+
+.sale-mark-paid-row:last-child {
+    margin-bottom: 0;
+}
+
+.sale-mark-paid-row strong {
+    color: #0f172a;
+    font-weight: 800;
+    text-align: right;
+}
+
+.sale-mark-paid-highlight {
+    margin-top: 6px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    padding: 10px 12px;
+    color: #1e3a8a;
+}
+
+.sale-mark-paid-sub {
+    margin-top: 6px;
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+
+.sale-mark-paid-label {
+    display: block;
+    margin: 6px 0 8px;
+    font-size: 0.76rem;
+    font-weight: 800;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-align: center;
+}
+
+.sale-mark-paid-input {
+    width: 100%;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 11px 12px;
+    font-size: 0.95rem;
+    color: #0f172a;
+    background: #fff;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.sale-mark-paid-input:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.sale-mark-paid-footer {
+    justify-content: flex-end;
+    background: #fff;
+    border-top: 1px solid #e2e8f0;
+}
+
+.sale-mark-paid-footer .confirm-btn {
+    min-width: 170px;
+    background: linear-gradient(135deg, #16a34a, #15803d) !important;
+}
+
+@media (max-width: 640px) {
+    .sale-mark-paid-head {
+        padding: 16px 14px !important;
+        gap: 10px;
+    }
+
+    .sale-mark-paid-chip {
+        display: none;
+    }
+
+    .sale-mark-paid-body {
+        padding: 12px;
+    }
+
+    .sale-mark-paid-footer {
+        padding: 12px;
+    }
+}

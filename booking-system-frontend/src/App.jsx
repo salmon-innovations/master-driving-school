@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react'
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react'
 import AOS from 'aos'
 import 'aos/dist/aos.css'
 import { authAPI } from './services/api'
@@ -89,6 +89,49 @@ const getPageFromLocation = () => {
 }
 
 const getPathForPage = (page) => PAGE_TO_PATH[page] || '/'
+const LEGACY_CART_KEY = 'cart'
+const GUEST_CART_KEY = 'cart:guest'
+
+const parseCart = (raw) => {
+  if (!raw || raw === 'undefined') return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+const getCartStorageKey = () => {
+  try {
+    const token = localStorage.getItem('userToken')
+    const userStr = localStorage.getItem('user')
+    if (!token || !userStr) return GUEST_CART_KEY
+
+    const user = JSON.parse(userStr)
+    const userIdentity = user?.id || user?.email
+    if (!userIdentity) return GUEST_CART_KEY
+
+    return `cart:user:${String(userIdentity).toLowerCase()}`
+  } catch {
+    return GUEST_CART_KEY
+  }
+}
+
+const loadCartForKey = (key) => {
+  const scopedCart = parseCart(localStorage.getItem(key))
+  if (scopedCart.length > 0) return scopedCart
+
+  // One-time migration fallback from old single cart key.
+  const legacyCart = parseCart(localStorage.getItem(LEGACY_CART_KEY))
+  if (legacyCart.length > 0) {
+    localStorage.setItem(key, JSON.stringify(legacyCart))
+    localStorage.removeItem(LEGACY_CART_KEY)
+    return legacyCart
+  }
+
+  return scopedCart
+}
 
 // Read the stored user role from localStorage (set on login)
 const getStoredUserRole = () => {
@@ -105,6 +148,9 @@ const getStoredUserRole = () => {
 }
 
 function App() {
+  const activeCartKeyRef = useRef(getCartStorageKey())
+  const skipNextCartPersistRef = useRef(false)
+
   const [currentPage, setCurrentPage] = useState(() => {
     const pageFromUrl = getPageFromLocation()
     if (pageFromUrl) return pageFromUrl
@@ -115,8 +161,7 @@ function App() {
   })
   const [cart, setCart] = useState(() => {
     try {
-      const savedCart = localStorage.getItem('cart')
-      return savedCart && savedCart !== 'undefined' ? JSON.parse(savedCart) : []
+      return loadCartForKey(activeCartKeyRef.current)
     } catch { return [] }
   })
   const [showCart, setShowCart] = useState(false)
@@ -183,8 +228,21 @@ function App() {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem('cart', JSON.stringify(cart))
+    if (skipNextCartPersistRef.current) {
+      skipNextCartPersistRef.current = false
+      return
+    }
+    localStorage.setItem(activeCartKeyRef.current, JSON.stringify(cart))
   }, [cart])
+
+  useEffect(() => {
+    const nextCartKey = getCartStorageKey()
+    if (activeCartKeyRef.current === nextCartKey) return
+
+    activeCartKeyRef.current = nextCartKey
+    skipNextCartPersistRef.current = true
+    setCart(loadCartForKey(nextCartKey))
+  }, [isLoggedIn])
 
   useEffect(() => {
     if (preSelectedBranch) localStorage.setItem('preSelectedBranch', JSON.stringify(preSelectedBranch))
@@ -216,13 +274,11 @@ function App() {
       await authAPI.logout()
       setIsLoggedIn(false)
       handleNavigation('home')
-      setCart([])
     } catch (error) {
       localStorage.removeItem('userToken')
       localStorage.removeItem('user')
       setIsLoggedIn(false)
       handleNavigation('home')
-      setCart([])
     }
   }
 
@@ -233,7 +289,7 @@ function App() {
       case 'about': return <About />
       case 'contact': return <Contact />
       case 'branches': return <Branches setCurrentPage={handleNavigation} isLoggedIn={isLoggedIn} setPreSelectedBranch={setPreSelectedBranch} />
-      case 'schedule': return <Schedule onNavigate={handleNavigation} selectedCourse={selectedCourseForSchedule} preSelectedBranch={preSelectedBranch} setScheduleSelection={setScheduleSelection} cart={cart} setCart={setCart} isLoggedIn={isLoggedIn} />
+      case 'schedule': return <Schedule onNavigate={handleNavigation} selectedCourse={selectedCourseForSchedule} preSelectedBranch={preSelectedBranch} setScheduleSelection={setScheduleSelection} scheduleSelection={scheduleSelection} cart={cart} setCart={setCart} isLoggedIn={isLoggedIn} />
       case 'news': return <NewsAndEvents />
       case 'terms': return <TermsOfUse />
       case 'privacy': return <PrivacyPolicy />

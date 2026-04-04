@@ -4,6 +4,79 @@ import { authAPI, bookingsAPI, schedulesAPI, starpayAPI } from "../services/api"
 
 function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, scheduleSelection }) {
   const { showNotification } = useNotification()
+
+  const getPdcSelectionKey = (item) => `${item?.id || 'na'}::${(item?.name || '').toLowerCase()}::${(item?.type || '').toLowerCase()}`
+  const fmtDate = (value, opts = { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) => {
+    if (!value) return 'N/A'
+    const d = value instanceof Date ? value : new Date(value)
+    if (Number.isNaN(d.getTime())) return 'N/A'
+    return d.toLocaleDateString('en-US', opts)
+  }
+
+  const getPdcScheduleEntries = () => {
+    if (!scheduleSelection?.pdcSelections) {
+      if (scheduleSelection?.pdcDate) {
+        return [{
+          label: 'PDC Schedule',
+          date1: scheduleSelection.pdcDate,
+          date2: scheduleSelection.pdcDate2 || null,
+          time1: scheduleSelection.pdcSlotDetails?.time_range || scheduleSelection.pdcSlotDetails?.time || 'N/A',
+          time2: scheduleSelection.pdcSlotDetails2?.time_range || scheduleSelection.pdcSlotDetails2?.time || null,
+        }]
+      }
+      return []
+    }
+
+    const pdcCartItems = activeCart.filter(item => (item?.category || '').toLowerCase() === 'pdc' || (item?.name || '').toLowerCase().includes('pdc'))
+    const entries = pdcCartItems.map(item => {
+      const key = getPdcSelectionKey(item)
+      const sel = scheduleSelection.pdcSelections?.[key] || scheduleSelection.pdcSelections?.[item.id]
+      if (!sel) return null
+      return {
+        label: item.name || 'PDC Schedule',
+        date1: sel.pdcDate || sel.date || null,
+        date2: sel.pdcDate2 || sel.date2 || null,
+        time1: sel.pdcSlotDetails?.time || sel.pdcSlotDetails?.time_range || sel.slot?.time_range || 'N/A',
+        time2: sel.pdcSlotDetails2?.time || sel.pdcSlotDetails2?.time_range || sel.slot2?.time_range || null,
+      }
+    }).filter(Boolean)
+
+    return entries
+  }
+
+  const handleReleaseLocks = async () => {
+    // Release atomic slot locks before navigating away
+    const pendingLocks = [];
+    if (scheduleSelection?.slotDetails?.id) pendingLocks.push(scheduleSelection.slotDetails.id);
+    if (scheduleSelection?.slotDetails2?.id) pendingLocks.push(scheduleSelection.slotDetails2.id);
+    if (scheduleSelection?.pdcSlotDetails?.id) pendingLocks.push(scheduleSelection.pdcSlotDetails.id);
+    if (scheduleSelection?.pdcSlotDetails2?.id) pendingLocks.push(scheduleSelection.pdcSlotDetails2.id);
+    if (scheduleSelection?.pdcSelections) {
+      Object.values(scheduleSelection.pdcSelections).forEach((sel) => {
+        if (sel?.pdcSlotDetails?.id) pendingLocks.push(sel.pdcSlotDetails.id);
+        if (sel?.pdcSlotDetails2?.id) pendingLocks.push(sel.pdcSlotDetails2.id);
+        if (sel?.slot?.id) pendingLocks.push(sel.slot.id);
+        if (sel?.slot2?.id) pendingLocks.push(sel.slot2.id);
+      });
+    }
+
+    const uniqueLocks = [...new Set(pendingLocks.filter(Boolean))];
+
+    if (uniqueLocks.length > 0) {
+      try {
+        await schedulesAPI.releaseLocks(uniqueLocks);
+      } catch (err) {
+        console.error('Failed to release pending slot locks:', err);
+      }
+    }
+  }
+
+  const handleEditSchedule = async (target) => {
+    await handleReleaseLocks();
+    sessionStorage.setItem('editScheduleTarget', target)
+    onNavigate('schedule')
+  }
+
   const [paymentType, setPaymentType] = useState(null) // "full" or "downpayment"
   const [paymentMethod, setPaymentMethod] = useState(null)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -13,9 +86,15 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
   // StarPay QR state
   const [starpayQR, setStarpayQR] = useState(null) // { codeUrl, msgId, bookingId, amount }
   const [qrStatus, setQrStatus] = useState('pending') // pending|success|failed
+  const [qrExpiresAt, setQrExpiresAt] = useState(null)
+  const [qrNow, setQrNow] = useState(Date.now())
   const [showPaymentSuccess, setShowPaymentSuccess] = useState(false)
-  const [countdown, setCountdown] = useState(5)
+  const [showPaymentFailed, setShowPaymentFailed] = useState(false)
+  const [paymentFailReason, setPaymentFailReason] = useState('cancelled')
+  const [receiptCart, setReceiptCart] = useState([])
   const pollRef = useRef(null)
+
+  const activeCart = showPaymentSuccess ? receiptCart : cart;
 
   const isGuestCheckout = localStorage.getItem('isGuestCheckout') === 'true' && !isLoggedIn
 
@@ -78,7 +157,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     let discountTotal = 0;
     let subtotal = 0;
 
-    cart.forEach(item => {
+    activeCart.forEach(item => {
       const totals = calculateItemTotals(item);
       const qty = item.quantity;
       baseCoursePriceTotal += totals.calcBasePrice * qty;
@@ -90,11 +169,11 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       subtotal += totals.finalItemPrice * qty;
     });
     
-    const hasTDC = cart.some(item => (item.category === 'TDC' || (item.name || '').toLowerCase().includes('tdc') || (item.shortName || '').toLowerCase().includes('tdc')));
-    const hasPDC = cart.some(item => (item.category === 'PDC' || (item.name || '').toLowerCase().includes('pdc') || (item.shortName || '').toLowerCase().includes('pdc')));
+    const hasTDC = activeCart.some(item => (item.category === 'TDC' || (item.name || '').toLowerCase().includes('tdc') || (item.shortName || '').toLowerCase().includes('tdc')));
+    const hasPDC = activeCart.some(item => (item.category === 'PDC' || (item.name || '').toLowerCase().includes('pdc') || (item.shortName || '').toLowerCase().includes('pdc')));
     
     const hasBundleDiscount = hasTDC && hasPDC;
-    const promoBundleDiscountPercent = Math.max(0, parseFloat(cart.find(item => item?.addonsConfig?.promoBundleDiscountPercent != null)?.addonsConfig?.promoBundleDiscountPercent ?? 3) || 0);
+    const promoBundleDiscountPercent = Math.max(0, parseFloat(activeCart.find(item => item?.addonsConfig?.promoBundleDiscountPercent != null)?.addonsConfig?.promoBundleDiscountPercent ?? 3) || 0);
     const bundleDiscountValue = hasBundleDiscount ? subtotal * (promoBundleDiscountPercent / 100) : 0;
     const finalTotal = subtotal - bundleDiscountValue;
 
@@ -126,13 +205,15 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     const isGuest = localStorage.getItem('isGuestCheckout') === 'true'
     if (!isLoggedIn && !isGuest) {
       showNotification("Please sign in to proceed with payment", "error")
+      handleReleaseLocks()
       onNavigate("signin")
       return
     }
-    if (cart.length === 0 && !showPaymentSuccess) {
+    if (activeCart.length === 0 && !showPaymentSuccess) {
+      handleReleaseLocks()
       onNavigate("courses")
     }
-  }, [cart, onNavigate, isLoggedIn, showPaymentSuccess])
+  }, [activeCart, cart, onNavigate, isLoggedIn, showPaymentSuccess])
 
   // Auto-select StarPay — it's the only payment method
   /* useEffect(() => {
@@ -146,19 +227,6 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     }
   }, [showTermsModal]);
 
-  // Timer for auto-redirect after success
-  useEffect(() => {
-    let timer;
-    if (showPaymentSuccess && countdown > 0) {
-      timer = setInterval(() => {
-        setCountdown(prev => prev - 1);
-      }, 1000);
-    } else if (showPaymentSuccess && countdown === 0) {
-      onNavigate('home');
-    }
-    return () => clearInterval(timer);
-  }, [showPaymentSuccess, countdown, onNavigate]);
-
   // Ensure polling is always cleaned up when leaving the page
   useEffect(() => {
     return () => {
@@ -168,6 +236,65 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (starpayQR && qrStatus === 'pending') {
+      if (!qrExpiresAt) setQrExpiresAt(Date.now() + (20 * 60 * 1000))
+      const tick = setInterval(() => setQrNow(Date.now()), 1000)
+      return () => clearInterval(tick)
+    }
+
+    if (!starpayQR && qrExpiresAt) setQrExpiresAt(null)
+  }, [starpayQR, qrStatus, qrExpiresAt])
+
+  const qrSecondsLeft = qrExpiresAt ? Math.max(0, Math.floor((qrExpiresAt - qrNow) / 1000)) : null
+  const qrMinutesLeft = qrSecondsLeft != null ? Math.floor(qrSecondsLeft / 60) : null
+  const qrSecondsRem = qrSecondsLeft != null ? qrSecondsLeft % 60 : null
+
+  const handlePaymentSuccess = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+    setStarpayQR(null)
+    setQrStatus('pending')
+    setQrExpiresAt(null)
+    setIsProcessing(false)
+    localStorage.removeItem('isGuestCheckout')
+    localStorage.removeItem('guestEnrollmentData')
+    setReceiptCart([...cart])
+    setCart([])
+    setShowPaymentFailed(false)
+    setShowPaymentSuccess(true)
+    showNotification('Payment successful! Enrollment confirmed.', 'success')
+  }
+
+  const handlePaymentFailure = (reason = 'failed') => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+    setQrStatus('failed')
+    setStarpayQR(null)
+    setQrExpiresAt(null)
+    setIsProcessing(false)
+    setPaymentFailReason(reason)
+    setShowPaymentSuccess(false)
+    setShowPaymentFailed(true)
+    if (reason === 'expired') {
+      showNotification('Payment session expired. Please try again.', 'error')
+    } else if (reason === 'cancelled') {
+      showNotification('Payment cancelled.', 'error')
+    } else {
+      showNotification('Payment unsuccessful. Please try again.', 'error')
+    }
+  }
+
+  useEffect(() => {
+    if (starpayQR && qrStatus === 'pending' && qrSecondsLeft === 0) {
+      handlePaymentFailure('expired')
+    }
+  }, [starpayQR, qrStatus, qrSecondsLeft])
 
   const handleOpenTermsModal = () => {
     if (!paymentType || !paymentMethod) {
@@ -196,20 +323,6 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       return `${y}-${m}-${day}`;
     };
 
-    const handleSuccess = () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
-      setStarpayQR(null)
-      setQrStatus('pending')
-      setCart([]) 
-      setIsProcessing(false)
-      localStorage.removeItem('isGuestCheckout')
-      localStorage.removeItem('guestEnrollmentData')
-      setShowPaymentSuccess(true)
-    }
-
     const isGuest = localStorage.getItem('isGuestCheckout') === 'true'
     const guestDataStr = localStorage.getItem('guestEnrollmentData')
 
@@ -220,7 +333,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         return
       }
 
-      if (!scheduleSelection || cart.length === 0) {
+      if (!scheduleSelection || activeCart.length === 0) {
         showNotification('Session expired. Please restart the enrollment process.', 'error')
         setIsProcessing(false)
         return
@@ -228,37 +341,63 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
 
       let paymentResponse
       if (isLoggedIn) {
+        const courseList = activeCart.map((item) => ({
+          name: item?.name || 'N/A',
+          type: item?.type || 'standard',
+          category: item?.category || null,
+        }))
         paymentResponse = await starpayAPI.createPayment({
-          courseId: cart[0].id,
+          courseId: activeCart[0]?.id,
+          courseName: activeCart[0]?.name,
           branchId: preSelectedBranch?.id,
-          courseCategory: cart[0].category,
-          courseType: cart[0].type,
+          branchName: preSelectedBranch?.name,
+          branchAddress: preSelectedBranch?.address,
+          courseCategory: activeCart[0]?.category,
+          courseType: activeCart[0]?.type,
           amount: finalAmount,
           paymentType: paymentType === 'full' ? 'Full Payment' : 'Downpayment',
-          scheduleSlotId: scheduleSelection.slot,
-          scheduleSlotId2: scheduleSelection.slot2,
+          scheduleSlotId: scheduleSelection.slot || scheduleSelection.slotDetails?.id,
+          scheduleDate: formatDate(scheduleSelection.date || scheduleSelection.slotDetails?.date),
+          scheduleSession: scheduleSelection.slotDetails?.session || null,
+          scheduleTime: scheduleSelection.slotDetails?.time_range || scheduleSelection.slotDetails?.time || 'N/A',
+          scheduleSlotId2: scheduleSelection.slot2 || scheduleSelection.slotDetails2?.id,
+          scheduleDate2: formatDate(scheduleSelection.date2 || scheduleSelection.slotDetails2?.date),
+          scheduleSession2: scheduleSelection.slotDetails2?.session || null,
+          scheduleTime2: scheduleSelection.slotDetails2?.time_range || scheduleSelection.slotDetails2?.time || null,
+          pdcSelections: scheduleSelection.pdcSelections || {},
+          courseList,
           hasReviewer: totalsData.reviewerTotal > 0,
           hasVehicleTips: totalsData.vehicleTipsTotal > 0,
-          attach: `${cart[0].shortName || cart[0].name} | ${paymentType === 'full' ? 'Full' : 'Downpayment'}`,
         })
       } else if (isGuest && guestDataStr) {
         const guestData = JSON.parse(guestDataStr)
+        const courseList = activeCart.map((item) => ({
+          name: item?.name || 'N/A',
+          type: item?.type || 'standard',
+          category: item?.category || null,
+        }))
         paymentResponse = await starpayAPI.createGuestPayment({
           ...guestData,
-          courseId: cart[0].id,
+          courseId: activeCart[0].id,
+          courseName: activeCart[0].name,
           branchId: preSelectedBranch?.id || guestData.branchId,
-          courseCategory: cart[0].category,
-          courseType: cart[0].type,
-          scheduleSlotId: scheduleSelection.slot,
-          scheduleDate: formatDate(scheduleSelection.date),
-          scheduleSlotId2: scheduleSelection.slot2,
-          scheduleDate2: formatDate(scheduleSelection.date2),
-          scheduleTime: scheduleSelection.slotDetails?.time || 'N/A',
+          branchName: preSelectedBranch?.name || guestData.branchName,
+          courseCategory: activeCart[0].category,
+          courseType: activeCart[0].type,
+          scheduleSlotId: scheduleSelection.slot || scheduleSelection.slotDetails?.id,
+          scheduleDate: formatDate(scheduleSelection.date || scheduleSelection.slotDetails?.date),
+          scheduleSession: scheduleSelection.slotDetails?.session || null,
+          scheduleSlotId2: scheduleSelection.slot2 || scheduleSelection.slotDetails2?.id,
+          scheduleDate2: formatDate(scheduleSelection.date2 || scheduleSelection.slotDetails2?.date),
+          scheduleSession2: scheduleSelection.slotDetails2?.session || null,
+          scheduleTime: scheduleSelection.slotDetails?.time_range || scheduleSelection.slotDetails?.time || 'N/A',
+          scheduleTime2: scheduleSelection.slotDetails2?.time_range || scheduleSelection.slotDetails2?.time || null,
+          pdcSelections: scheduleSelection.pdcSelections || {},
+          courseList,
           amount: finalAmount,
           paymentType: paymentType === 'full' ? 'Full Payment' : 'Downpayment',
           hasReviewer: totalsData.reviewerTotal > 0,
           hasVehicleTips: totalsData.vehicleTipsTotal > 0,
-          attach: `${cart[0].shortName || cart[0].name} | Guest | ${paymentType === 'full' ? 'Full' : 'Downpayment'}`,
         })
       } else {
         showNotification('Guest profile is missing. Please complete guest enrollment first.', 'error')
@@ -294,7 +433,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
             pollRef.current = null
             setQrStatus('success')
             setTimeout(() => {
-              handleSuccess()
+              handlePaymentSuccess()
             }, 1200)
             return
           }
@@ -302,7 +441,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
           if (localStatus === 'cancelled' || ['FAIL', 'CLOSE', 'REVERSED', 'CANCEL'].includes(trxState)) {
             clearInterval(pollRef.current)
             pollRef.current = null
-            setQrStatus('failed')
+            handlePaymentFailure('gateway')
           }
         } catch (pollErr) {
           // Keep polling unless we get explicit paid/failed state.
@@ -313,6 +452,256 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       showNotification(error.message || 'Enrollment failed. Please try again.', 'error')
       setIsProcessing(false)
     }
+  }
+
+  if (showPaymentSuccess) {
+    return (
+      <div className="min-h-screen bg-slate-50 pt-[100px] pb-12 font-poppins text-gray-800 flex flex-col items-center justify-center">
+        <div className="bg-white rounded-3xl w-full max-w-2xl shadow-xl border border-slate-100 p-8 md:p-12 relative overflow-hidden" style={{ animation: 'bounce-in 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55)' }}>
+          <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-400 rounded-full mix-blend-multiply filter blur-3xl opacity-10 translate-x-1/2 -translate-y-1/2"></div>
+          <div className="absolute top-0 left-0 w-64 h-64 bg-teal-300 rounded-full mix-blend-multiply filter blur-3xl opacity-10 -translate-x-1/2 -translate-y-1/2"></div>
+          
+          <div className="relative z-10 flex flex-col items-center">
+            {/* Success Icon */}
+            <div className="relative mb-6">
+              <div className="absolute inset-0 bg-emerald-100 rounded-full animate-ping opacity-30"></div>
+              <div className="w-24 h-24 bg-gradient-to-tr from-[#10b981] to-[#34d399] rounded-full flex items-center justify-center shadow-xl shadow-emerald-500/20 relative z-10 ring-4 ring-emerald-50 text-white">
+                <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" style={{ strokeDasharray: 50, animation: 'checkmark 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards' }} />
+                </svg>
+              </div>
+            </div>
+
+            <h1 className="text-4xl font-extrabold text-slate-800 tracking-tight mb-3 text-center">Payment Successful!</h1>
+            <p className="text-slate-500 mb-8 text-center text-lg max-w-md">
+              Thank you for your enrollment. Your payment has been processed successfully. Here are your order details:
+            </p>
+
+            <div className="w-full mb-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800 text-sm font-medium">
+              <div className="flex items-start gap-2">
+                <span className="text-base">✅</span>
+                <div>
+                  <p className="font-bold">Payment Alert</p>
+                  <p>Your training schedule details were sent to your email. Please check your inbox (and Spam or Promotions folder).</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Order Summary */}
+            <div className="w-full bg-slate-50 rounded-2xl border border-slate-200 p-6 mb-8 text-left relative overflow-hidden">
+              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                </svg>
+                Enrollment Summary
+              </h3>
+              
+              <div className="space-y-4">
+                {activeCart.map((item, index) => {
+                  const totals = calculateItemTotals(item)
+                  return (
+                    <div key={index} className="flex flex-col pb-4 border-b border-slate-200 last:border-0 last:pb-0">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="font-semibold text-slate-800 text-[15px]">{item.name}</div>
+                          <div className="text-sm text-slate-500 mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                            {item.type && item.type !== 'standard' && <span className="bg-slate-200/60 px-2 py-0.5 rounded-md text-slate-700 capitalize">{item.type.replace('-', ' ')}</span>}
+                            {item.selectedBranch && <span><span className="text-slate-400">Branch:</span> {item.selectedBranch}</span>}
+                          </div>
+                        </div>
+                        <div className="font-bold text-slate-800 ml-4 whitespace-nowrap">
+                          ₱{(totals.calcBasePrice * (item.quantity || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+
+                      {/* Addons Breakdown (Per Item) */}
+                      {(totals.reviewerPrice > 0 || totals.vehicleTipsPrice > 0 || totals.customAddonsPriceTotal > 0 || totals.calcDiscountValue > 0) && (
+                        <div className="mt-2 ml-2 pl-3 border-l-2 border-slate-200 space-y-1">
+                          {totals.hasDiscount && totals.calcDiscountValue > 0 && (
+                            <div className="flex justify-between text-[11px] text-red-500">
+                              <span>Discount</span>
+                              <span>-₱{(totals.calcDiscountValue * (item.quantity || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            </div>
+                          )}
+                          {totals.reviewerPrice > 0 && (
+                            <div className="flex justify-between text-[11px] text-slate-600">
+                              <span>+ LTO Exam Reviewer</span>
+                              <span>₱{(totals.reviewerPrice * (item.quantity || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            </div>
+                          )}
+                          {totals.vehicleTipsPrice > 0 && (
+                            <div className="flex justify-between text-[11px] text-slate-600">
+                              <span>+ Vehicle Maintenance Tips</span>
+                              <span>₱{(totals.vehicleTipsPrice * (item.quantity || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            </div>
+                          )}
+                          {item.addonsConfig?.customAddons?.map(addon => {
+                            if (item.selectedAddons && item.selectedAddons[addon.id]) {
+                              return (
+                                <div key={addon.id} className="flex justify-between text-[11px] text-slate-600">
+                                  <span>+ {addon.name}</span>
+                                  <span>₱{(parseFloat(addon.price) * (item.quantity || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                </div>
+                              )
+                            }
+                            return null;
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Convenience Fees & Bundle Discount */}
+              {(totalsData.hasBundleDiscount || totalsData.convenienceTotal > 0) && (
+                <div className="mt-4 pt-4 border-t border-slate-200 space-y-2">
+                  {totalsData.convenienceTotal > 0 && (
+                    <div className="flex justify-between items-center text-sm text-slate-600">
+                      <span>Convenience Fee</span>
+                      <span className="font-semibold">₱{totalsData.convenienceTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  {totalsData.hasBundleDiscount && totalsData.bundleDiscountValue > 0 && (
+                    <div className="flex justify-between items-center text-sm text-red-500 font-semibold bg-red-50 p-2 rounded-lg -mx-2 px-2">
+                      <span>Promo Bundle (-{totalsData.promoBundleDiscountPercent}%)</span>
+                      <span>-₱{totalsData.bundleDiscountValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-5 pt-4 border-t border-slate-300 border-dashed space-y-3 bg-emerald-50/50 p-4 rounded-xl -mx-2">
+                <div className="flex justify-between items-center text-sm font-semibold text-slate-600">
+                  <span>Payment Method:</span>
+                  <span className="capitalize">{paymentMethod || 'Online'}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm font-semibold text-slate-600">
+                  <span>Payment Type:</span>
+                  <span className="capitalize">{paymentType === 'downpayment' ? 'Downpayment (50%)' : 'Full Payment'}</span>
+                </div>
+                {paymentType === 'downpayment' && (
+                  <div className="pt-2 mt-2 border-t border-emerald-200/60 space-y-2">
+                    <div className="flex justify-between items-center text-sm font-semibold text-slate-600">
+                      <span>Total Assessment Price:</span>
+                      <span className="text-slate-800">₱{subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm font-semibold text-red-500">
+                      <span>Remaining Balance (50%):</span>
+                      <span>-₱{downpaymentAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-2 mt-2 border-t border-emerald-200/60">
+                  <span className="font-bold text-slate-800 text-lg">Total Amount Paid</span>
+                  <span className="text-2xl font-black text-emerald-600">₱{finalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="w-full flex flex-col sm:flex-row gap-4">
+              <button
+                onClick={() => { setCart([]); onNavigate('profile'); }}
+                className="flex-1 bg-white border-2 border-slate-200 text-slate-700 font-bold py-3.5 px-6 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95 flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                View Profile
+              </button>
+
+              <button
+                onClick={() => { setCart([]); onNavigate('home'); }}
+                className="flex-1 bg-gradient-to-r from-[#2157da] to-[#1e4ebf] text-white font-bold py-3.5 px-6 rounded-xl hover:from-[#1e4ebf] hover:to-[#1a45ab] transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+                Return to Home
+              </button>
+            </div>
+          </div>
+        </div>
+        <style>{`
+          @keyframes bounce-in {
+            0% { transform: scale(0.9); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+          }
+          @keyframes checkmark {
+            0% { stroke-dashoffset: 50; }
+            100% { stroke-dashoffset: 0; }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  if (showPaymentFailed) {
+    const failTitle = paymentFailReason === 'expired'
+      ? 'Payment Session Expired'
+      : paymentFailReason === 'cancelled'
+        ? 'Payment Cancelled'
+        : 'Payment Unsuccessful'
+
+    const failMsg = paymentFailReason === 'expired'
+      ? 'Your QR payment window has expired. Please generate a new QR and try again.'
+      : paymentFailReason === 'cancelled'
+        ? 'You cancelled the QR payment process before completion.'
+        : 'We could not confirm your payment. Please try again.'
+
+    return (
+      <div className="min-h-screen bg-slate-50 pt-[100px] pb-12 font-poppins text-gray-800 flex flex-col items-center justify-center">
+        <div className="bg-white rounded-3xl w-full max-w-2xl shadow-xl border border-slate-100 p-8 md:p-12 relative overflow-hidden" style={{ animation: 'bounce-in 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55)' }}>
+          <div className="absolute top-0 right-0 w-64 h-64 bg-red-400 rounded-full mix-blend-multiply filter blur-3xl opacity-10 translate-x-1/2 -translate-y-1/2"></div>
+          <div className="absolute top-0 left-0 w-64 h-64 bg-amber-300 rounded-full mix-blend-multiply filter blur-3xl opacity-10 -translate-x-1/2 -translate-y-1/2"></div>
+
+          <div className="relative z-10 flex flex-col items-center">
+            <div className="relative mb-6">
+              <div className="absolute inset-0 bg-red-100 rounded-full animate-ping opacity-30"></div>
+              <div className="w-24 h-24 bg-gradient-to-tr from-[#ef4444] to-[#f97316] rounded-full flex items-center justify-center shadow-xl shadow-red-500/20 relative z-10 ring-4 ring-red-50 text-white">
+                <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+            </div>
+
+            <h1 className="text-4xl font-extrabold text-slate-800 tracking-tight mb-3 text-center">{failTitle}</h1>
+            <p className="text-slate-500 mb-8 text-center text-lg max-w-md">{failMsg}</p>
+
+            <div className="w-full mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-800 text-sm font-medium">
+              <div className="flex items-start gap-2">
+                <span className="text-base">⚠️</span>
+                <div>
+                  <p className="font-bold">Payment Alert</p>
+                  <p>No charges were confirmed from this session. You can safely retry your payment.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="w-full flex flex-col sm:flex-row gap-4">
+              <button
+                onClick={() => {
+                  setShowPaymentFailed(false)
+                  setPaymentFailReason('cancelled')
+                  setQrStatus('pending')
+                }}
+                className="flex-1 bg-gradient-to-r from-[#2157da] to-[#1e4ebf] text-white font-bold py-3.5 px-6 rounded-xl hover:from-[#1e4ebf] hover:to-[#1a45ab] transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
+              >
+                Try Payment Again
+              </button>
+
+              <button
+                onClick={() => onNavigate('home')}
+                className="flex-1 bg-white border-2 border-slate-200 text-slate-700 font-bold py-3.5 px-6 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95 flex items-center justify-center gap-2"
+              >
+                Return to Home
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -542,11 +931,18 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                   )}
                 </button>
                 {paymentType && paymentMethod && (
-                  <div className="flex items-center justify-center gap-1.5 mt-2.5 text-gray-400 text-xs">
-                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="font-semibold">256-bit SSL Encrypted · Secure Payment</span>
+                  <div className="mt-2.5 space-y-1.5">
+                    <div className="flex items-center justify-center gap-1.5 text-gray-400 text-xs">
+                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      <span className="font-semibold">256-bit SSL Encrypted · Secure Payment</span>
+                    </div>
+                    {paymentMethod === 'starpay' && (
+                      <p className="text-center text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 font-semibold">
+                        StarPay session expires in 20 minutes. Unpaid transactions are automatically cancelled.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -572,7 +968,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                     <h2 className="text-base sm:text-lg font-black tracking-tight">Order Summary</h2>
                   </div>
 
-                  <div className="p-4 sm:p-5 space-y-4">
+                  <div className="p-3 sm:p-4 space-y-3">
                     {/* Branch */}
                     {preSelectedBranch && (
                       <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-white/10">
@@ -586,68 +982,134 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
 
                     {/* Schedule */}
                     {scheduleSelection && (
-                      <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-base">📅</span>
-                            <p className="text-[10px] font-black text-green-400 uppercase tracking-widest">Schedule</p>
+                      <div className="space-y-2">
+                        {/* TDC Schedule Container */}
+                        <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <img src="/assets/calendar-icon.svg" className="w-4 h-4" alt="Calendar" onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<span class="text-base">📅</span>' }} />
+                              <p className="text-[10px] font-black text-green-400 uppercase tracking-widest">
+                                {scheduleSelection.pdcDate ? 'TDC Schedule' : 'Schedule'}
+                              </p>
+                            </div>
                           </div>
-                          <button onClick={() => onNavigate('schedule')} className="text-[10px] font-black text-blue-300 hover:text-white bg-blue-500/20 hover:bg-blue-500/40 px-2 py-1 rounded-lg transition-all uppercase tracking-wide">
-                            Change
-                          </button>
+
+                          {scheduleSelection.isMotorcyclePDC ? (
+                            <p className="text-[11px] font-bold text-white/80 text-left mt-1">Assigned by Admin after payment</p>
+                          ) : (
+                            <div className="mt-1 flex flex-col items-start text-left">
+                              {scheduleSelection.slotDetails?.type?.toLowerCase() === 'tdc' && scheduleSelection.slotDetails?.end_date && scheduleSelection.slotDetails.end_date !== scheduleSelection.slotDetails.date ? (
+                                <div className="w-full flex justify-between items-center">
+                                  <div>
+                                    <p className="text-[9px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Day 1 & Day 2</p>
+                                    <p className="text-[11px] font-semibold text-white/90">
+                                      {scheduleSelection.date && new Date(scheduleSelection.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} &amp; {new Date(scheduleSelection.slotDetails.end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                    </p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-[11px] text-white/70 flex items-center gap-1">
+                                      <span>🕒</span>{scheduleSelection.slotDetails?.time_range || scheduleSelection.slotDetails?.time}
+                                    </p>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="flex w-full justify-between items-center">
+                                    <div>
+                                      {scheduleSelection.date2 && <p className="text-[9px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Day 1</p>}
+                                      <p className="text-[11px] font-semibold text-white/90">
+                                        {scheduleSelection.date && new Date(scheduleSelection.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                                      </p>
+                                    </div>
+                                    <div className="text-right">
+                                      <p className="text-[11px] text-white/70 flex items-center gap-1">
+                                        <span>🕒</span>{scheduleSelection.slotDetails?.time_range || scheduleSelection.slotDetails?.time}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  {scheduleSelection.date2 && (
+                                    <div className="flex w-full justify-between items-center mt-1.5 pt-1.5 border-t border-white/5">
+                                      <div>
+                                        <p className="text-[9px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Day 2</p>
+                                        <p className="text-[11px] font-semibold text-white/90">
+                                          {scheduleSelection.date2 && new Date(scheduleSelection.date2).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                                        </p>
+                                      </div>
+                                      <div className="text-right">
+                                        <p className="text-[11px] text-white/70 flex items-center gap-1">
+                                          <span>🕒</span>{scheduleSelection.slotDetails2?.time_range || scheduleSelection.slotDetails2?.time}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          )}
                         </div>
 
-                        {scheduleSelection.isMotorcyclePDC ? (
-                          <p className="text-xs font-bold text-white/80 text-center mt-2">Assigned by Admin after payment</p>
-                        ) : (
-                          <div className="mt-2 space-y-1.5">
-                            {scheduleSelection.slotDetails?.type?.toLowerCase() === 'tdc' && scheduleSelection.slotDetails?.end_date && scheduleSelection.slotDetails.end_date !== scheduleSelection.slotDetails.date ? (
-                              <>
-                                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Day 1 & Day 2</p>
-                                <p className="text-xs font-semibold text-white/90">
-                                  {scheduleSelection.date && new Date(scheduleSelection.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} &amp; {new Date(scheduleSelection.slotDetails.end_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                </p>
-                              </>
-                            ) : (
-                              <>
-                                {scheduleSelection.date2 && <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Day 1</p>}
-                                <p className="text-xs font-semibold text-white/90">
-                                  {scheduleSelection.date && new Date(scheduleSelection.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-                                </p>
-                              </>
-                            )}
-                            <p className="text-xs text-white/70 flex items-center gap-1.5">
-                              <span>🕒</span>{scheduleSelection.slotDetails?.time_range || scheduleSelection.slotDetails?.time}
-                            </p>
-                            {scheduleSelection.date2 && (
-                              <div className="mt-2 pt-2 border-t border-white/10 space-y-1">
-                                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Day 2</p>
-                                <p className="text-xs font-semibold text-white/90">
-                                  {scheduleSelection.date2 && new Date(scheduleSelection.date2).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-                                </p>
-                                <p className="text-xs text-white/70 flex items-center gap-1.5">
-                                  <span>🕒</span>{scheduleSelection.slotDetails2?.time_range || scheduleSelection.slotDetails2?.time}
-                                </p>
+                        {/* PDC Schedule Container(s) */}
+                        {getPdcScheduleEntries().map((entry, idx) => (
+                          <div key={`${entry.label}-${idx}`} className="p-3 bg-white/5 rounded-xl border border-white/10">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">🚘</span>
+                                <p className="text-[10px] font-black text-green-400 uppercase tracking-widest">{entry.label}</p>
                               </div>
-                            )}
+                            </div>
+                            <div className="mt-1 flex flex-col items-start text-left">
+                              {entry.date2 ? (
+                                <div className="w-full flex justify-between items-center">
+                                  <div>
+                                    <p className="text-[9px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Day 1 & Day 2</p>
+                                    <p className="text-[11px] font-semibold text-white/90">
+                                      {fmtDate(entry.date1, { month: 'short', day: 'numeric' })} &amp; {fmtDate(entry.date2, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                    </p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-[11px] text-white/70 flex items-center justify-start gap-1">
+                                      <span>🕒</span>
+                                      {entry.time1 === entry.time2 ? entry.time1 : `${entry.time1} (D1) & ${entry.time2 || 'N/A'} (D2)`}
+                                    </p>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="w-full flex justify-between items-center">
+                                  <div>
+                                    <p className="text-[9px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Day 1</p>
+                                    <p className="text-[11px] font-semibold text-white/90">{fmtDate(entry.date1)}</p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-[11px] text-white/70 flex items-center gap-1">
+                                      <span>🕒</span>{entry.time1}
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        )}
+                        ))}
+
+                        {/* Single Change Button */}
+                        <button onClick={() => handleEditSchedule('all')} className="w-full py-2 bg-white/5 hover:bg-blue-600/20 border border-white/10 hover:border-blue-500/40 rounded-lg text-[9px] font-black text-white/50 hover:text-blue-300 transition-all uppercase tracking-widest flex items-center justify-center gap-1.5 mt-2">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                          Change Schedule
+                        </button>
                       </div>
                     )}
 
                     {/* Cart Items */}
-                    <div className="space-y-4">
-                      {cart.map((item, idx) => {
-                        const totals = calculateItemTotals(item);
+                    <div className="space-y-2">
+                      {activeCart.map((item, idx) => {
                         return (
-                          <div key={idx} className="pb-4 border-b border-white/10 last:border-0 last:pb-0">
-                            <div className="flex justify-between items-start gap-3 mb-2">
+                          <div key={idx} className="pb-2 border-b border-white/10 last:border-0 last:pb-0">
+                            <div className="flex justify-between items-center gap-2 mb-0.5">
                               <div className="flex-1 min-w-0">
-                                <p className="text-xs sm:text-sm font-bold text-white/95 mb-1 leading-snug">{item.name}</p>
+                                <p className="text-[11px] font-bold text-white/95 mb-0.5 leading-snug truncate">{item.name}</p>
                                 <div className="flex flex-wrap items-center gap-1.5">
-                                  <span className="text-[11px] text-white/40">{item.duration} × {item.quantity}</span>
+                                  <span className="text-[10px] text-white/40">{item.duration} × {item.quantity}</span>
                                   {item.type && item.type !== 'standard' && (
-                                    <span className="px-1.5 py-0.5 bg-blue-500/20 text-blue-300 rounded-full text-[10px] font-black uppercase border border-blue-400/20">
+                                    <span className="px-1 py-0.5 bg-blue-500/20 text-blue-300 rounded-full text-[9px] font-black uppercase border border-blue-400/20">
                                       {item.type === 'online' ? '💻 Online' : item.type === 'face-to-face' ? '👥 Face to Face' : item.type}
                                     </span>
                                   )}
@@ -910,6 +1372,13 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                     <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>
                     Waiting for payment...
                   </div>
+                  {qrSecondsLeft != null && (
+                    <p className={`mt-2 text-xs font-semibold ${qrSecondsLeft > 0 ? 'text-amber-700' : 'text-red-600'}`}>
+                      {qrSecondsLeft > 0
+                        ? `Session expires in ${qrMinutesLeft}:${String(qrSecondsRem).padStart(2, '0')}`
+                        : 'Session expired. This pending transaction will be cancelled.'}
+                    </p>
+                  )}
                 </>
               )}
               {qrStatus === 'success' && (
@@ -926,12 +1395,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                   <p className="text-sm text-gray-500 mt-2">Please try again or use a different payment method.</p>
                   <button
                     onClick={() => {
-                      if (pollRef.current) {
-                        clearInterval(pollRef.current)
-                        pollRef.current = null
-                      }
-                      setIsProcessing(false)
-                      setStarpayQR(null)
+                      handlePaymentFailure('failed')
                     }}
                     className="mt-4 px-6 py-2 bg-gray-100 rounded-xl font-bold text-sm text-gray-700 hover:bg-gray-200"
                   >
@@ -945,12 +1409,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
               <div className="px-6 pb-5">
                 <button
                   onClick={() => {
-                    if (pollRef.current) {
-                      clearInterval(pollRef.current)
-                      pollRef.current = null
-                    }
-                    setIsProcessing(false)
-                    setStarpayQR(null)
+                    handlePaymentFailure('cancelled')
                   }}
                   className="w-full py-2.5 rounded-xl border-2 border-gray-200 text-gray-500 font-bold text-sm hover:bg-gray-50"
                 >
@@ -959,83 +1418,6 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
               </div>
             )}
           </div>
-        </div>
-      )}
-      {/* ── Payment Success Modal ── */}
-      {showPaymentSuccess && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl relative overflow-hidden" style={{ animation: 'bounce-in 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55)' }}>
-            
-            {/* Subtle glow effects in background */}
-            <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20"></div>
-            <div className="absolute -top-24 -left-24 w-48 h-48 bg-teal-300 rounded-full mix-blend-multiply filter blur-3xl opacity-20"></div>
-
-            <div className="relative z-10 p-8 pt-10 flex flex-col items-center text-center">
-              
-              {/* Premium Animated Icon */}
-              <div className="relative mb-6">
-                <div className="absolute inset-0 bg-emerald-100 rounded-full animate-ping opacity-30"></div>
-                <div className="w-20 h-20 bg-gradient-to-tr from-[#10b981] to-[#34d399] rounded-full flex items-center justify-center shadow-xl shadow-emerald-500/20 relative z-10 ring-4 ring-emerald-50">
-                  <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" style={{ strokeDasharray: 50, animation: 'checkmark 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards' }} />
-                  </svg>
-                </div>
-              </div>
-
-              <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight mb-2">Payment Successful!</h2>
-              <p className="text-slate-500 mb-8 font-medium leading-relaxed">
-                Your enrollment has been successfully processed. You're all set to begin your journey with us.
-              </p>
-
-              {/* Action Buttons */}
-              <div className="w-full flex gap-3 mb-6">
-                <button
-                  onClick={() => onNavigate('profile')}
-                  className="flex-1 bg-white border border-slate-200 text-slate-700 font-semibold py-3.5 px-4 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm active:scale-95 flex items-center justify-center gap-2 text-sm"
-                >
-                  <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                  My Profile
-                </button>
-
-                <button
-                  onClick={() => onNavigate('home')}
-                  className="flex-1 bg-gradient-to-r from-[#2157da] to-[#1e4ebf] text-white font-semibold py-3.5 px-4 rounded-xl hover:from-[#1e4ebf] hover:to-[#1a45ab] transition-all shadow-md hover:shadow-lg active:scale-95 flex items-center justify-center gap-2 text-sm"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                  </svg>
-                  Go to Home
-                </button>
-              </div>
-
-              {/* Status Footer */}
-              <div className="w-full bg-slate-50 rounded-xl p-4 flex items-center justify-between border border-slate-100">
-                <div className="flex items-center gap-3">
-                  <span className="relative flex h-3 w-3">
-                    <span className="animate-ping bg-emerald-400 absolute inline-flex h-full w-full rounded-full opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                  </span>
-                  <span className="text-sm font-semibold text-slate-600">Redirecting...</span>
-                </div>
-                <div className="flex bg-blue-50 text-[#2157da] px-3 py-1 rounded-lg font-bold text-sm border border-blue-100 items-center justify-center w-12 text-center shadow-inner">
-                  {countdown}s
-                </div>
-              </div>
-
-            </div>
-          </div>
-          <style>{`
-            @keyframes bounce-in {
-              0% { transform: scale(0.9); opacity: 0; }
-              100% { transform: scale(1); opacity: 1; }
-            }
-            @keyframes checkmark {
-              0% { stroke-dashoffset: 50; }
-              100% { stroke-dashoffset: 0; }
-            }
-          `}</style>
         </div>
       )}
     </div>

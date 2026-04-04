@@ -58,7 +58,17 @@ const PERMISSION_LABEL_MAP = PERMISSION_GROUPS.reduce((acc, group) => {
 }, {});
 
 const ROLE_PERMISSION_PRESETS = {
-    admin: ALL_PERMISSION_KEYS,
+    admin: [
+        'operations.schedules.manage',
+        'operations.bookings.manage',
+        'operations.walk_in.manage',
+        'operations.sales.manage',
+        'operations.crm.manage',
+        'operations.analytics.view',
+        'operations.news.manage',
+        'accounts.courses.view',
+        'accounts.users.create'
+    ],
     staff: [
         'operations.schedules.manage',
         'operations.bookings.manage',
@@ -106,7 +116,7 @@ const getPermissionGroupsForDisplay = (permissions) => {
     }).filter((group) => group.items.length > 0);
 };
 
-const UserManagement = ({ currentUserPermissions = [] }) => {
+const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) => {
     const { showNotification } = useNotification();
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState('All');
@@ -438,9 +448,9 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
             return;
         }
 
-        // Only allow Admin or Staff creation (not editing)
-        if (!editingUser && userData.role.toLowerCase() !== 'admin' && userData.role.toLowerCase() !== 'staff') {
-            setSubmitError('Only Admin or Staff members can be added.');
+        // Only allow Admin or Staff creation (super_admin can create Super Admin)
+        if (!editingUser && userData.role.toLowerCase() !== 'admin' && userData.role.toLowerCase() !== 'staff' && userData.role.toLowerCase() !== 'super admin') {
+            setSubmitError('Only Admin, Staff or Super Admin members can be added.');
             return;
         }
 
@@ -555,6 +565,10 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
     const handleEditClick = (user) => {
         if (!canEditUsers) {
             showNotification('You do not have permission to edit users.', 'warning');
+            return;
+        }
+        if (user.role === 'Super Admin' && currentUserRole !== 'super_admin') {
+            showNotification('You do not have permission to edit a Super Admin.', 'warning');
             return;
         }
 
@@ -679,6 +693,12 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
             return;
         }
 
+        const userToToggle = users.find(u => u.id === id);
+        if (userToToggle && userToToggle.role === 'Super Admin' && currentUserRole !== 'super_admin') {
+            showNotification('You do not have permission to change a Super Admin status.', 'warning');
+            return;
+        }
+
         try {
             await adminAPI.toggleUserStatus(id);
             // Refresh users list
@@ -697,6 +717,10 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
     const handlePasswordReset = (user) => {
         if (!canResetPasswords) {
             showNotification('You do not have permission to reset passwords.', 'warning');
+            return;
+        }
+        if (user.role === 'Super Admin' && currentUserRole !== 'super_admin') {
+            showNotification('You do not have permission to reset a Super Admin password.', 'warning');
             return;
         }
 
@@ -841,12 +865,12 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                                                 <button className="action-btn view" title="View Details" onClick={() => handleViewUser(user)}>
                                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                                                 </button>
-                                                {canResetPasswords && (
+                                                {canResetPasswords && (user.role !== 'Super Admin' || currentUserRole === 'super_admin') && (
                                                     <button className="action-btn password" title="Reset Password" onClick={() => handlePasswordReset(user)}>
                                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
                                                     </button>
                                                 )}
-                                                {canToggleUserStatus && user.role !== 'Super Admin' && (
+                                                {canToggleUserStatus && (user.role !== 'Super Admin' || currentUserRole === 'super_admin') && (
                                                     <button
                                                         className={`action-btn toggle ${user.status === 'Active' ? 'deactivate' : 'activate'}`}
                                                         title={user.status === 'Active' ? 'Deactivate' : 'Activate'}
@@ -1490,6 +1514,9 @@ const UserManagement = ({ currentUserPermissions = [] }) => {
                                                             fontWeight: '600'
                                                         }}
                                                     >
+                                                        {currentUserRole === 'super_admin' && (
+                                                            <option value="Super Admin">Super Admin</option>
+                                                        )}
                                                         <option value="Admin">Admin</option>
                                                         <option value="Staff">Staff</option>
                                                     </select>

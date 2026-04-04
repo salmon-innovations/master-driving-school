@@ -125,15 +125,29 @@ const Dashboard = ({ onBack }) => {
         showNotification('Profile updated successfully!', 'success');
     };
 
-    const handleChangePassword = (e) => {
+    const handleChangePassword = async (e) => {
         e.preventDefault();
         if (passwordData.newPassword !== passwordData.confirmPassword) {
             showNotification('Passwords do not match!', 'error');
             return;
         }
-        setShowChangePasswordModal(false);
-        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
-        showNotification('Password changed successfully!', 'success');
+        if (passwordData.newPassword.length < 8) {
+            showNotification('New password must be at least 8 characters.', 'error');
+            return;
+        }
+
+        try {
+            await authAPI.changePassword({
+                currentPassword: passwordData.currentPassword,
+                newPassword: passwordData.newPassword,
+            });
+            setShowChangePasswordModal(false);
+            setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+            showNotification('Password changed successfully!', 'success');
+        } catch (error) {
+            const msg = error?.message || 'Failed to change password. Please try again.';
+            showNotification(msg, 'error');
+        }
     };
 
 

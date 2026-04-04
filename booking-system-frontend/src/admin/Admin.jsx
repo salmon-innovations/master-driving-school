@@ -78,6 +78,8 @@ const ADMIN_DEFAULT_PERMISSIONS_BY_ROLE = {
         'operations.news.manage',
         'operations.analytics.view',
         'accounts.users.view',
+        'accounts.users.create',
+        'accounts.courses.view',
     ],
     staff: [
         'operations.schedules.manage',
@@ -98,6 +100,7 @@ const ADMIN_TAB_PERMISSION_MAP = {
     analytics: 'operations.analytics.view',
     news: 'operations.news.manage',
     users: [
+        'accounts.users.view',
         'accounts.users.create',
         'accounts.users.edit',
         'accounts.users.status',
@@ -486,11 +489,11 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         return () => clearInterval(timer);
     }, []);
 
-    const handleLogout = (timedOut = false) => {
+    const handleLogout = (timedOut) => {
         localStorage.removeItem('token');
         localStorage.removeItem('userToken');
         localStorage.removeItem('user');
-        if (timedOut) {
+        if (timedOut === true) {
             setSessionTimedOut(true);
             return; // show the overlay; user clicks "Sign In Again" to navigate
         }
@@ -944,7 +947,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                                 Account Settings
                                             </button>
                                             <div className="dropdown-divider"></div>
-                                            <button className="dropdown-item logout" onClick={handleLogout}>
+                                            <button className="dropdown-item logout" onClick={() => handleLogout(false)}>
                                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
                                                 Logout
                                             </button>
@@ -1411,7 +1414,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                 ) : activeTab === 'settings' ? (
                     <Configuration initialTab="settings" />
                 ) : activeTab === 'users' ? (
-                    <UserManagement currentUserPermissions={effectiveAdminPermissions} />
+                    <UserManagement currentUserPermissions={effectiveAdminPermissions} currentUserRole={adminProfile.rawRole} />
                 ) : activeTab === 'courses' ? (
                     <CourseManagement />
                 ) : activeTab === 'branches' ? (

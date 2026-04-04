@@ -1,0 +1,209 @@
+
+                    </div>
+
+                    {/* Desktop: Slot pills — full labels */}
+                    <div className="hidden sm:flex flex-col gap-[3px] px-1.5 pb-2 flex-1">
+                      {daySlots.map(slot => {
+                        const isFullyBooked = slot.available_slots === 0;
+                        const isSlotSelected = selectedSlot?.id === slot.id || selectedSlot2?.id === slot.id;
+                        const isTdc = slot.type?.toLowerCase() === 'tdc';
+                        const sessionLabel = (() => {
+                          const sn = (slot.session || '').toLowerCase();
+                          if (sn.includes('morning')) return 'Morning Class';
+                          if (sn.includes('afternoon')) return 'Afternoon Class';
+                          if (sn.includes('whole')) return 'Whole Day';
+                          return slot.session || (isTdc ? 'TDC' : 'PDC');
+                        })();
+                        const countLabel = isFullyBooked ? 'FULL' : `${slot.available_slots} Slots`;
+
+                          const isSessionMismatch = selectingDay2 && selectedSlot && slot.session !== selectedSlot.session;
+                          return (
+                            <div
+                              key={slot.id}
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                if (isFullyBooked) return; 
+                                if (isSessionMismatch) {
+                                  showNotification(`For Day 2, please select the same session type: ${selectedSlot.session}`, 'warning');
+                                  return;
+                                }
+                                handleCalendarSlotClick(slot, day); 
+                              }} className={`w-full text-left rounded-[7px] border px-1.5 py-1 flex flex-col gap-[2px] ${!isFullyBooked && !isSessionMismatch ? 'cursor-pointer hover:shadow-md transition-all' : 'cursor-not-allowed'} ${
+                                isSlotSelected
+                                  ? 'border-[#2563eb] bg-[#2563eb] text-white shadow-sm'
+                                  : (isFullyBooked || isSessionMismatch)
+                                    ? 'border-red-200 bg-red-50 text-red-500 opacity-70'
+                                    : isTdc
+                                      ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                      : 'border-orange-200 bg-orange-50 text-orange-700'
+                              }`}
+                            >
+                            <div className="flex items-center justify-between gap-1 leading-none">
+                              <span className="text-[9px] sm:text-[10px] font-black truncate flex-1 min-w-0">{sessionLabel}</span>
+                              <span className={`text-[8px] font-bold flex-shrink-0 px-1 rounded leading-[1.5] ${
+                                isSlotSelected ? 'bg-white/25 text-white' :
+                                isFullyBooked ? 'bg-red-100 text-red-600' :
+                                isTdc ? 'bg-violet-100 text-violet-700' : 'bg-orange-100 text-orange-700'
+                              }`}>{countLabel}</span>
+                            </div>
+                            <div className="text-[7px] sm:text-[8px] font-medium opacity-75 truncate leading-none">
+                              {formatTimeRange(slot.time_range)}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Mobile Legend (compact) */}
+            <div className="flex sm:hidden flex-wrap justify-center gap-3 mt-4 pt-4 border-t border-gray-200">
+              <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-orange-400"></div><span className="text-[10px] font-semibold text-gray-500">Morning</span></div>
+              <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-yellow-400"></div><span className="text-[10px] font-semibold text-gray-500">Afternoon</span></div>
+              <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-blue-400"></div><span className="text-[10px] font-semibold text-gray-500">Whole Day</span></div>
+              <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-red-400"></div><span className="text-[10px] font-semibold text-gray-500">Full</span></div>
+              <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-[#2563eb]"></div><span className="text-[10px] font-semibold text-gray-500">Selected</span></div>
+            </div>
+
+            {/* Desktop Calendar Legend Guide */}
+            <div className="hidden sm:flex flex-wrap justify-center gap-4 sm:gap-6 mt-6 pt-5 border-t border-gray-200">
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 bg-orange-50 border border-orange-300/60 rounded-lg"></div>
+                <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500">Has Slots</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 bg-[#2563eb] rounded-lg"></div>
+                <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500">Selected</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 bg-blue-50 border border-[#2563eb] rounded-lg"></div>
+                <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500">Today</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 bg-red-50 border border-red-200/60 rounded-lg"></div>
+                <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500">Fully Booked</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 bg-orange-50 border border-orange-300 rounded-[5px]"></div>
+                <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500">PDC Slot</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 bg-violet-50 border border-violet-200 rounded-[5px]"></div>
+                <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500">TDC Slot</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Slot Selection Panel - ONLY FOR TDC since PDC renders them in calendar directly */}
+        {!isPromoCourse && (isTDCCourse || selectedDate) ? (
+          <div className={`bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-6 ${!isTDCCourse ? 'sm:hidden' : ''}`} data-aos="fade-up" data-aos-delay="200">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="text-lg font-black text-gray-900">
+                  {isTDCCourse 
+                    ? 'Available TDC Schedules' 
+                    : (selectingDay2 && selectedSlot) 
+                      ? `Available ${selectedSlot.session} Slots (Day 2)` 
+                      : 'Available Time Slots'
+                  }
+                </h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  {isTDCCourse 
+                    ? tdcViewMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                    : (selectingDay2 ? selectedDate2 : selectedDate)?.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+                  }
+                </p>
+              </div>
+              {!loadingSlots && (
+                <div className="px-3 py-1.5 bg-blue-50 rounded-lg">
+                  <span className="text-xs font-bold text-[#2157da]">
+                    {relevantSlots.length} {relevantSlots.length === 1 ? 'Slot' : 'Slots'}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* TDC Month Pagination */}
+            {isTDCCourse && (
+              <div className="mb-6">
+                <div className="flex items-center justify-center gap-4 mb-3">
+                  <button
+                    onClick={goToPrevTdcMonth}
+                    disabled={!hasPrevTdcMonth}
+                    className={`w-9 h-9 flex items-center justify-center rounded-xl border-2 transition-all ${hasPrevTdcMonth
+                      ? 'border-gray-200 hover:border-[#2157da] hover:bg-blue-50'
+                      : 'border-gray-100 opacity-30 cursor-not-allowed'
+                      }`}
+                  >
+                    <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <div className="text-center">
+                    <p className="text-base font-black text-gray-900">
+                      {tdcViewMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                    </p>
+                    {tdcMonthKeys.length > 1 && (
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        {tdcMonthKeys.length} months with schedules
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={goToNextTdcMonth}
+                    disabled={!hasNextTdcMonth}
+                    className={`w-9 h-9 flex items-center justify-center rounded-xl border-2 transition-all ${hasNextTdcMonth
+                      ? 'border-gray-200 hover:border-[#2157da] hover:bg-blue-50'
+                      : 'border-gray-100 opacity-30 cursor-not-allowed'
+                      }`}
+                  >
+                    <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+                {/* Month dot indicators */}
+                {tdcMonthKeys.length > 1 && (
+                  <div className="flex items-center justify-center gap-1.5">
+                    {tdcMonthKeys.map(key => (
+                      <button
+                        key={key}
+                        onClick={() => {
+                          const [y, m] = key.split('-').map(Number)
+                          setTdcViewMonth(new Date(y, m - 1, 1))
+                        }}
+                        title={new Date(key + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                        className="transition-all rounded-full"
+                        style={{
+                          width: key === tdcCurrentMonthKey ? '24px' : '8px',
+                          height: '8px',
+                          background: key === tdcCurrentMonthKey ? '#2157da' : '#d1d5db',
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {loadingSlots ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-4">
+                <div className="w-10 h-10 border-4 border-[#2157da] border-t-transparent rounded-full animate-spin"></div>
+                <p className="text-sm text-gray-500 font-medium">Loading available slots...</p>
+              </div>
+            ) : relevantSlots.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center">
+                  <span className="text-3xl">📭</span>
+                </div>
+                <p className="text-base font-black text-gray-700">No slots available</p>
+                <p className="text-sm text-gray-500 max-w-xs">
+                  There are no schedule slots set up for this month yet. Please choose another month or check back later.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                

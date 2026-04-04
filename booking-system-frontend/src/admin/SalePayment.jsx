@@ -16,6 +16,186 @@ import {
     Pie
 } from 'recharts';
 
+const parseNotesJson = (rawNotes) => {
+    if (!rawNotes || typeof rawNotes !== 'string' || !rawNotes.startsWith('{')) return null;
+    try {
+        return JSON.parse(rawNotes);
+    } catch {
+        return null;
+    }
+};
+
+const getCourseSummaryFromTransaction = (txn) => {
+    const notesJson = parseNotesJson(txn?.notes);
+    const list = Array.isArray(notesJson?.courseList) ? notesJson.courseList.filter(Boolean) : [];
+    if (list.length > 0) {
+        const names = [...new Set(list.map((c) => c?.name).filter(Boolean))];
+        const shortLabel = names.length > 1
+            ? `${names.length} courses: ${names.slice(0, 2).join(', ')}${names.length > 2 ? ` +${names.length - 2} more` : ''}`
+            : (names[0] || txn?.course_name || 'N/A');
+        return {
+            courseSummary: shortLabel,
+            courseSummaryFull: names.join(', '),
+            courseCount: names.length || 1,
+            courseNames: names,
+        };
+    }
+    return {
+        courseSummary: txn?.course_name || 'N/A',
+        courseSummaryFull: txn?.course_name || 'N/A',
+        courseCount: 1,
+        courseNames: [txn?.course_name || 'N/A'],
+    };
+};
+
+const getCourseSummaryFromBooking = (booking) => {
+    const notesJson = parseNotesJson(booking?.notes);
+    const list = Array.isArray(notesJson?.courseList) ? notesJson.courseList.filter(Boolean) : [];
+    if (list.length > 0) {
+        const labels = [...new Set(list.map((item) => toCompactCourseLabel(item)).filter(Boolean))];
+        return {
+            courseSummary: labels.join(', '),
+            courseCount: labels.length,
+        };
+    }
+
+    return {
+        courseSummary: booking?.course_name || 'N/A',
+        courseCount: 1,
+    };
+};
+
+const isRecordedPaymentStatus = (status) => {
+    const value = String(status || '').toLowerCase();
+    return value === 'success' || value === 'paid' || value === 'collectable';
+};
+
+const isCompletedPaymentStatus = (status) => {
+    const value = String(status || '').toLowerCase();
+    return value === 'success' || value === 'paid';
+};
+
+const getEffectiveBalanceDue = (booking = {}) => {
+    const rawDue = Number(parseFloat(booking?.balance_due || 0).toFixed(2));
+    if (rawDue > 0) return rawDue;
+
+    const paid = Number(parseFloat(booking?.total_amount || 0).toFixed(2));
+    const listedCoursePrice = Number(parseFloat(booking?.course_price || 0).toFixed(2));
+    const isDownpayment = String(booking?.payment_type || '').toLowerCase().includes('down');
+
+    const assessed = isDownpayment
+        ? Math.max(listedCoursePrice, paid * 2, paid)
+        : Math.max(listedCoursePrice, paid);
+
+    return Math.max(0, Number((assessed - paid).toFixed(2)));
+};
+
+const toCompactCourseLabel = (item = {}) => {
+    const source = `${item?.name || ''} ${item?.type || ''} ${item?.category || ''}`.toUpperCase();
+    const hasTdc = source.includes('TDC') || source.includes('THEORETICAL');
+    const hasPdc = source.includes('PDC') || source.includes('PRACTICAL');
+
+    if (hasTdc) {
+        if (source.includes('F2F') || source.includes('FACE TO FACE')) return 'TDC F2F';
+        if (source.includes('ONLINE')) return 'TDC Online';
+        return 'TDC';
+    }
+
+    if (hasPdc) {
+        let vehicle = '';
+        if (source.includes('MOTORCYCLE')) vehicle = 'Motorcycle';
+        else if (source.includes('CAR')) vehicle = 'Car';
+        else if (source.includes('A1') || source.includes('TRICYCLE') || source.includes('V1-TRICYCLE')) vehicle = 'A1 - Tricycle';
+        else if ((source.includes('B1') || source.includes('VAN')) && (source.includes('B2') || source.includes('L300'))) vehicle = 'B1 - VAN/B2 - L300';
+        else if (source.includes('B1') || source.includes('VAN')) vehicle = 'B1 - VAN';
+        else if (source.includes('B2') || source.includes('L300')) vehicle = 'B2 - L300';
+
+        let transmission = '';
+        if (source.includes('MANUAL')) transmission = 'Manual';
+        else if (source.includes('AUTOMATIC')) transmission = 'Automatic';
+
+        return ['PDC', vehicle, transmission].filter(Boolean).join(' ');
+    }
+
+    return item?.name || 'Course';
+};
+
+const computeReceiptBreakdown = (txn, coursesList = []) => {
+    const notesJson = parseNotesJson(txn?.notes || '');
+    const courseList = Array.isArray(notesJson?.courseList) && notesJson.courseList.length > 0
+        ? notesJson.courseList
+        : [{ name: txn?.courseFull || txn?.course || 'Course', type: '', category: '' }];
+
+    const byName = new Map((coursesList || []).map((c) => [String(c?.name || '').trim().toLowerCase(), Number(c?.price || 0)]));
+    const courseLines = courseList.map((item) => ({
+        label: toCompactCourseLabel(item),
+        amount: byName.get(String(item?.name || '').trim().toLowerCase()) || 0,
+        rawName: item?.name || 'Course',
+    }));
+
+    const courseSubtotal = courseLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    const hasReviewer = Boolean(notesJson?.hasReviewer);
+    const hasVehicleTips = Boolean(notesJson?.hasVehicleTips);
+    const reviewerEach = 30;
+    const vehicleTipsEach = 20;
+    const convenienceEach = 25;
+    const promoPct = 3;
+
+    const hasBundle = courseList.some((c) => String(c?.category || c?.name || '').toLowerCase().includes('tdc'))
+        && courseList.some((c) => String(c?.category || c?.name || '').toLowerCase().includes('pdc'));
+
+    const paidAmount = Number(txn?.rawAmount || 0);
+    const isDownpayment = String(txn?.paymentType || '').toLowerCase().includes('down');
+    const assessedTarget = isDownpayment ? paidAmount * 2 : paidAmount;
+    const promoFactor = hasBundle ? (1 - (promoPct / 100)) : 1;
+    const targetBaseBeforePromo = promoFactor > 0 ? (assessedTarget / promoFactor) : assessedTarget;
+
+    const addonUnit = (hasReviewer ? reviewerEach : 0) + (hasVehicleTips ? vehicleTipsEach : 0);
+    const convenienceCandidates = [
+        convenienceEach * Math.max(1, courseList.length),
+        convenienceEach,
+    ];
+
+    let addonMultiplier = (hasReviewer || hasVehicleTips) ? 1 : 0;
+    let convenienceFee = convenienceEach;
+    if (addonUnit > 0 && targetBaseBeforePromo > 0) {
+        const best = convenienceCandidates
+            .map((candidate) => {
+                const rawMultiplier = (targetBaseBeforePromo - courseSubtotal - candidate) / addonUnit;
+                const rounded = Math.max(0, Math.round(rawMultiplier));
+                const rebuilt = courseSubtotal + candidate + (rounded * addonUnit);
+                return { candidate, rounded, error: Math.abs(rebuilt - targetBaseBeforePromo) };
+            })
+            .sort((a, b) => a.error - b.error)[0];
+        addonMultiplier = Number(best?.rounded ?? addonMultiplier);
+        convenienceFee = Number(best?.candidate ?? convenienceFee);
+    }
+
+    const reviewerTotal = hasReviewer ? reviewerEach * addonMultiplier : 0;
+    const vehicleTipsTotal = hasVehicleTips ? vehicleTipsEach * addonMultiplier : 0;
+    const addonLines = [
+        ...(reviewerTotal > 0 ? [{ name: `LTO Exam Reviewer${addonMultiplier > 1 ? ` x${addonMultiplier}` : ''}`, price: reviewerTotal }] : []),
+        ...(vehicleTipsTotal > 0 ? [{ name: `Vehicle Maintenance Tips${addonMultiplier > 1 ? ` x${addonMultiplier}` : ''}`, price: vehicleTipsTotal }] : []),
+    ];
+
+    const subtotal = courseSubtotal + reviewerTotal + vehicleTipsTotal;
+    const promoDiscount = hasBundle ? Number((((subtotal + convenienceFee) * promoPct) / 100).toFixed(2)) : 0;
+    const netTotal = Number((subtotal + convenienceFee - promoDiscount).toFixed(2));
+    const remainingBalance = String(txn?.status || '').toLowerCase() === 'collectable'
+        ? Math.max(0, Number((netTotal - paidAmount).toFixed(2)))
+        : 0;
+
+    return {
+        courseLines,
+        addonLines,
+        subtotal,
+        convenienceFee,
+        promoDiscount,
+        netTotal,
+        remainingBalance,
+    };
+};
+
 const SalePayment = () => {
     const [period, setPeriod] = useState('All Time');
     const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -50,6 +230,8 @@ const SalePayment = () => {
     const [showMarkPaidModal, setShowMarkPaidModal] = useState(false);
     const [markPaidBooking, setMarkPaidBooking] = useState(null);
     const [markPaidMethod, setMarkPaidMethod] = useState('Cash');
+    const [markPaidTxnId, setMarkPaidTxnId] = useState('');
+    const [markPaidAmount, setMarkPaidAmount] = useState('');
     const [markPaidLoading, setMarkPaidLoading] = useState(false);
 
     // Email receipt state
@@ -69,23 +251,49 @@ const SalePayment = () => {
     const fetchTransactions = async () => {
         try {
             setLoading(true);
-            const response = await adminAPI.getAllTransactions(100);
+            const [response, bookingsResponse] = await Promise.all([
+                adminAPI.getAllTransactions(100),
+                adminAPI.getAllBookings(null, 300),
+            ]);
             let calculatedStats = { revenue: 0, completed: 0, collectable: 0, refunds: 0 };
+            const bookingsById = new Map(
+                (bookingsResponse?.success ? (bookingsResponse.bookings || []) : [])
+                    .map((b) => [Number(b.id), b])
+            );
 
             if (response.success) {
-                const mappedTransactions = (response.transactions || []).map(t => ({
-                    id: t.transaction_id || 'N/A',
-                    booking_id: t.booking_id,
-                    student: t.student_name || 'Unknown',
-                    course: t.course_name || 'N/A',
-                    rawDate: t.transaction_date,
-                    date: t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : 'N/A',
-                    amount: `P ${parseFloat(t.amount || 0).toLocaleString()}`,
-                    rawAmount: parseFloat(t.amount || 0),
-                    method: t.payment_method || 'N/A',
-                    status: t.status || 'Collectable',
-                    branch: t.branch_name || 'Unknown'
-                }));
+                const mappedTransactions = (response.transactions || []).map(t => {
+                    const linkedBooking = bookingsById.get(Number(t.booking_id));
+                    const { courseSummary, courseSummaryFull, courseCount, courseNames } = getCourseSummaryFromTransaction(t);
+                    return {
+                        id: t.transaction_id || 'N/A',
+                        booking_id: t.booking_id,
+                        student: t.student_name || 'Unknown',
+                        course: courseSummary,
+                        courseFull: courseSummaryFull,
+                        courseCount,
+                        courseNames,
+                        notes: t.notes || linkedBooking?.notes || null,
+                        paymentType: t.payment_type || linkedBooking?.payment_type || 'Full Payment',
+                        rawDate: t.transaction_date,
+                        date: t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : 'N/A',
+                        amount: `P ${parseFloat(t.amount || 0).toLocaleString()}`,
+                        rawAmount: parseFloat(t.amount || 0),
+                        method: t.payment_method || 'N/A',
+                        status: t.status || 'Collectable',
+                        branch: t.branch_name || 'Unknown',
+                        searchIndex: [
+                            t.transaction_id,
+                            t.booking_id,
+                            t.student_name,
+                            courseSummary,
+                            (courseNames || []).join(' '),
+                            t.payment_method,
+                            t.status,
+                            t.branch_name,
+                        ].filter(Boolean).join(' ').toLowerCase(),
+                    };
+                });
                 setTransactions(mappedTransactions.slice(0, 5));
                 setAllHistory(mappedTransactions);
 
@@ -93,8 +301,11 @@ const SalePayment = () => {
                     const amt = parseFloat(t.amount || 0) || 0;
                     const status = t.status ? t.status.toLowerCase() : '';
 
-                    if (status === 'success' || status === 'paid') {
+                    if (isRecordedPaymentStatus(status)) {
                         acc.revenue += amt;
+                    }
+
+                    if (isCompletedPaymentStatus(status)) {
                         acc.completed += 1;
                     } else if (status === 'failed' || status === 'cancelled') {
                         acc.refunds += amt;
@@ -106,8 +317,22 @@ const SalePayment = () => {
 
             const unpaidResponse = await adminAPI.getUnpaidBookings(200); // Fetch more to get accurate total
             if (unpaidResponse.success) {
-                setUnpaidBookings(unpaidResponse.bookings);
-                const totalCollectable = unpaidResponse.bookings.reduce((sum, booking) => sum + (booking.balance_due || 0), 0);
+                const mappedUnpaid = (unpaidResponse.bookings || []).map((booking) => {
+                    const linkedBooking = bookingsById.get(Number(booking.id));
+                    const merged = {
+                        ...booking,
+                        notes: booking?.notes || linkedBooking?.notes || null,
+                    };
+                    const { courseSummary, courseCount } = getCourseSummaryFromBooking(merged);
+                    return {
+                        ...merged,
+                        course_summary: courseSummary,
+                        course_count: courseCount,
+                    };
+                });
+
+                setUnpaidBookings(mappedUnpaid);
+                const totalCollectable = mappedUnpaid.reduce((sum, booking) => sum + (parseFloat(booking.balance_due || 0) || 0), 0);
                 calculatedStats.collectable = totalCollectable;
             }
 
@@ -202,21 +427,47 @@ const SalePayment = () => {
     };
 
     const openMarkPaidModal = (booking) => {
+        const remaining = getEffectiveBalanceDue(booking);
         setMarkPaidBooking(booking);
         setMarkPaidMethod(booking.payment_method || 'Cash');
+        setMarkPaidTxnId('');
+        setMarkPaidAmount(remaining > 0 ? String(remaining) : '0');
         setShowMarkPaidModal(true);
     };
 
     const handleMarkAsPaid = async () => {
         if (!markPaidBooking) return;
+        const remaining = getEffectiveBalanceDue(markPaidBooking);
+        const inputAmount = Number(markPaidAmount);
+        const collectAmount = Number.isFinite(inputAmount) && inputAmount > 0
+            ? Math.min(inputAmount, remaining)
+            : 0;
+
+        if (collectAmount <= 0 && remaining > 0) {
+            alert('Please enter a valid amount to collect.');
+            return;
+        }
+
+        if (markPaidMethod === 'Metrobank' && !String(markPaidTxnId || '').trim()) {
+            alert('Transaction ID is required for Metrobank payments.');
+            return;
+        }
+
         setMarkPaidLoading(true);
         try {
-            const response = await adminAPI.markAsPaid(markPaidBooking.id, markPaidMethod);
+            const response = await adminAPI.markAsPaid(
+                markPaidBooking.id,
+                markPaidMethod,
+                markPaidMethod === 'Metrobank' ? String(markPaidTxnId || '').trim() : null,
+                collectAmount
+            );
             if (response.success) {
                 setShowMarkPaidModal(false);
                 setMarkPaidBooking(null);
+                setMarkPaidTxnId('');
+                setMarkPaidAmount('');
                 fetchTransactions();
-                setReceiptToast({ msg: 'Marked as paid! Full payment receipt sent to student\'s email.', type: 'success' });
+                setReceiptToast({ msg: 'Payment saved successfully.', type: 'success' });
                 setTimeout(() => setReceiptToast(null), 4000);
             } else {
                 alert(response.error || 'Failed to mark as paid');
@@ -292,8 +543,11 @@ const SalePayment = () => {
     // ── Stats cards (react to branch + period filters) ───────────────────────
     const branchStats = pageFilteredHistory.reduce((acc, t) => {
         const status = (t.status || '').toLowerCase();
-        if (status === 'success') {
+        if (isRecordedPaymentStatus(status)) {
             acc.revenue += t.rawAmount || 0;
+        }
+
+        if (isCompletedPaymentStatus(status)) {
             acc.completed += 1;
         } else if (status === 'failed' || status === 'cancelled') {
             acc.refunds += t.rawAmount || 0;
@@ -301,12 +555,19 @@ const SalePayment = () => {
         return acc;
     }, { revenue: 0, completed: 0, refunds: 0 });
 
-    const branchCollectable = branchFilteredUnpaid.reduce((sum, b) => sum + (b.balance_due || 0), 0);
+    const branchCollectable = branchFilteredUnpaid.reduce((sum, b) => sum + getEffectiveBalanceDue(b), 0);
+    const collectableFromHistory = new Set(
+        pageFilteredHistory
+            .filter((t) => String(t.status || '').toLowerCase() === 'collectable')
+            .map((t) => String(t.booking_id || ''))
+            .filter(Boolean)
+    ).size;
+    const branchCollectableCount = Math.max(branchFilteredUnpaid.length, collectableFromHistory);
 
     const stats = [
         { label: 'Gross Revenue', value: `P ${branchStats.revenue.toLocaleString()}`, trend: '0%', color: 'blue' },
         { label: 'Completed Payments', value: branchStats.completed.toString(), trend: '0%', color: 'green' },
-        { label: 'Collectable', value: `P ${branchCollectable.toLocaleString()}`, trend: '0%', color: 'orange' },
+        { label: 'Collectable', value: branchCollectableCount.toString(), trend: `P ${branchCollectable.toLocaleString()}`, color: 'orange' },
         { label: 'Refunds / Cancelled', value: `P ${branchStats.refunds.toLocaleString()}`, trend: '0%', color: 'red' },
     ];
 
@@ -316,10 +577,10 @@ const SalePayment = () => {
         { name: 'Cash',    value: 0, color: '#64748b' },
     ];
 
-    const totalPayments = pageFilteredHistory.filter(t => t.status.toLowerCase() === 'success').length;
+    const totalPayments = pageFilteredHistory.filter(t => isCompletedPaymentStatus(t.status)).length;
     if (totalPayments > 0) {
         pageFilteredHistory.forEach(t => {
-            if (t.status.toLowerCase() !== 'success') return;
+            if (!isCompletedPaymentStatus(t.status)) return;
             const method = (t.method || '').trim();
             const found = paymentMethods.find(pm => pm.name.toLowerCase() === method.toLowerCase());
             if (found) found.value += 1;
@@ -341,7 +602,7 @@ const SalePayment = () => {
             { name: '6PM-12AM', amount: 0 }
         ];
         pageFilteredHistory.forEach(t => {
-            if (t.status.toLowerCase() !== 'success' || !t.rawDate) return;
+            if (!isRecordedPaymentStatus(t.status) || !t.rawDate) return;
             const hr = new Date(t.rawDate).getHours();
             const amt = t.rawAmount || 0;
             if (hr < 6) chartData[0].amount += amt;
@@ -354,7 +615,7 @@ const SalePayment = () => {
         const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         chartData = days.map(d => ({ name: d, amount: 0 }));
         pageFilteredHistory.forEach(t => {
-            if (t.status.toLowerCase() !== 'success' || !t.rawDate) return;
+            if (!isRecordedPaymentStatus(t.status) || !t.rawDate) return;
             const dayIdx = new Date(t.rawDate).getDay();
             chartData[dayIdx].amount += (t.rawAmount || 0);
         });
@@ -363,7 +624,7 @@ const SalePayment = () => {
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         chartData = months.map(m => ({ name: m, amount: 0 }));
         pageFilteredHistory.forEach(t => {
-            if (t.status.toLowerCase() !== 'success' || !t.rawDate) return;
+            if (!isRecordedPaymentStatus(t.status) || !t.rawDate) return;
             const monthIdx = new Date(t.rawDate).getMonth();
             chartData[monthIdx].amount += (t.rawAmount || 0);
         });
@@ -377,7 +638,7 @@ const SalePayment = () => {
             { name: 'Week 4', amount: 0 },
         ];
         pageFilteredHistory.forEach(t => {
-            if (t.status.toLowerCase() !== 'success' || !t.rawDate) return;
+            if (!isRecordedPaymentStatus(t.status) || !t.rawDate) return;
             const amt = t.rawAmount || 0;
             const day = new Date(t.rawDate).getDate();
             if (day <= 7) chartData[0].amount += amt;
@@ -395,15 +656,13 @@ const SalePayment = () => {
 
     const filteredHistory = pageFilteredHistory.filter(t => {
         const searchTermLower = (searchTerm || '').toLowerCase();
-        const matchesSearch = (t.student || '').toLowerCase().includes(searchTermLower) ||
-            (t.id || '').toLowerCase().includes(searchTermLower) ||
-            (t.course || '').toLowerCase().includes(searchTermLower) ||
-            (t.method && t.method.toLowerCase().includes(searchTermLower));
+        const matchesSearch = !searchTermLower || (t.searchIndex || '').includes(searchTermLower);
         const matchesStatus = statusFilter === 'All' || t.status === statusFilter;
 
         let matchesCourse = true;
         if (courseFilter !== 'All') {
-            matchesCourse = t.course && t.course.toLowerCase().includes(courseFilter.toLowerCase());
+            matchesCourse = (t.course || '').toLowerCase().includes(courseFilter.toLowerCase()) ||
+                (Array.isArray(t.courseNames) && t.courseNames.some((name) => (name || '').toLowerCase().includes(courseFilter.toLowerCase())));
         }
 
         let matchesPeriod = true;
@@ -439,7 +698,7 @@ const SalePayment = () => {
     });
 
     const filteredTotalSales = filteredHistory.reduce((sum, t) => {
-        if (t.status.toLowerCase() === 'success') {
+        if (isRecordedPaymentStatus(t.status)) {
             return sum + (t.rawAmount || 0);
         }
         return sum;
@@ -460,7 +719,7 @@ const SalePayment = () => {
         const timestamp = new Date().toLocaleString();
         const isUsers = title.includes('USERS');
         const totalAmount = isUsers
-            ? data.reduce((sum, t) => sum + (parseFloat(t.balance_due) || 0), 0)
+            ? data.reduce((sum, t) => sum + getEffectiveBalanceDue(t), 0)
             : data.reduce((sum, t) => {
                 const raw = (t.amount || '').toString().replace(/[^0-9.]/g, '');
                 return sum + (parseFloat(raw) || 0);
@@ -523,8 +782,8 @@ const SalePayment = () => {
                             <tr>
                                 <td>BK-${t.id}</td>
                                 <td>${t.student_name}</td>
-                                <td>${t.course_name}</td>
-                                <td class="amount">P ${parseFloat(t.balance_due).toLocaleString()}</td>
+                                <td>${t.course_summary || t.course_name}</td>
+                                <td class="amount">P ${getEffectiveBalanceDue(t).toLocaleString()}</td>
                                 <td class="status-collectable">${t.status.toUpperCase()}</td>
                                 <td>${t.student_contact || 'N/A'}</td>
                             </tr>
@@ -532,7 +791,7 @@ const SalePayment = () => {
                             <tr>
                                 <td>${t.id}</td>
                                 <td>${t.student}</td>
-                                <td>${t.course}</td>
+                                <td title="${t.courseFull || t.course}">${t.course}</td>
                                 <td>${t.date}</td>
                                 <td>${t.method}</td>
                                 <td class="amount">${t.amount}</td>
@@ -564,6 +823,13 @@ const SalePayment = () => {
     const handlePrintReceipt = (txn) => {
         const printWindow = window.open('', '_blank');
         const timestamp = new Date().toLocaleString();
+        const breakdown = computeReceiptBreakdown(txn, coursesList);
+        const isCollectable = String(txn?.status || '').toLowerCase() === 'collectable';
+        const unpaidRef = unpaidBookings.find((b) => Number(b.id) === Number(txn?.booking_id));
+        const remainingBalanceValue = isCollectable
+            ? (Number(unpaidRef?.balance_due || 0) > 0 ? Number(unpaidRef.balance_due) : breakdown.remainingBalance)
+            : 0;
+        const toPeso = (v) => `P ${Number(v || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
         const html = `
             <html>
@@ -586,6 +852,14 @@ const SalePayment = () => {
                     .status-tag { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 9pt; font-weight: bold; text-transform: uppercase; }
                     .status-success { background: #dcfce7; color: #16a34a; }
                     .status-collectable { background: #ffedd5; color: #ea580c; }
+                    .breakdown { margin-top: 18px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+                    .breakdown-head { background: #f8fafc; color: #64748b; text-align: center; padding: 8px; font-size: 9pt; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+                    .line { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; font-size: 10pt; border-top: 1px dashed #e2e8f0; }
+                    .line:first-of-type { border-top: none; }
+                    .line-strong { font-weight: 700; }
+                    .line-discount { color: #dc2626; background: #fef2f2; }
+                    .line-total { font-weight: 800; font-size: 11pt; }
+                    .line-remaining { color: #ea580c; font-weight: 800; }
                     .footer { text-align: center; margin-top: 30px; font-size: 8pt; color: #94a3b8; line-height: 1.4; }
                     @media print { body { border: none; } }
                 </style>
@@ -605,6 +879,10 @@ const SalePayment = () => {
                     <span class="info-value">${txn.id}</span>
                 </div>
                 <div class="info-row">
+                    <span class="info-label">Booking ID:</span>
+                    <span class="info-value">BK-${String(txn.booking_id || '').padStart(3, '0')}</span>
+                </div>
+                <div class="info-row">
                     <span class="info-label">Student Name:</span>
                     <span class="info-value">${txn.student}</span>
                 </div>
@@ -620,6 +898,33 @@ const SalePayment = () => {
                     <span class="info-label">Status:</span>
                     <span class="status-tag ${txn.status.toLowerCase() === 'success' ? 'status-success' : 'status-collectable'}">${txn.status}</span>
                 </div>
+                <div class="breakdown">
+                    <div class="breakdown-head">Payment Breakdown</div>
+                    <div class="breakdown-head" style="background:#fff;">Courses & Training</div>
+                    ${breakdown.courseLines.map((line) => `
+                        <div class="line"><span>${line.label}</span><span class="line-strong">${toPeso(line.amount)}</span></div>
+                    `).join('')}
+                    <div class="breakdown-head" style="background:#fff;">Custom Add-ons</div>
+                    ${breakdown.addonLines.length > 0
+                        ? breakdown.addonLines.map((line) => `
+                            <div class="line"><span>+ ${line.name}</span><span class="line-strong">${toPeso(line.price)}</span></div>
+                        `).join('')
+                        : `<div class="line"><span>No add-ons</span><span>${toPeso(0)}</span></div>`
+                    }
+                    <div class="breakdown-head" style="background:#fff;">Summary</div>
+                    <div class="line"><span>Subtotal</span><span class="line-strong">${toPeso(breakdown.subtotal)}</span></div>
+                    <div class="line"><span>Convenience Fee</span><span class="line-strong">${toPeso(breakdown.convenienceFee)}</span></div>
+                    ${breakdown.promoDiscount > 0
+                        ? `<div class="line line-discount"><span>Promo Discount (3%)</span><span class="line-strong">-${toPeso(breakdown.promoDiscount).replace('P ', '')}</span></div>`
+                        : ''
+                    }
+                    <div class="line line-total"><span>Net Total</span><span>${toPeso(breakdown.netTotal)}</span></div>
+                    ${isCollectable
+                        ? `<div class="line line-remaining"><span>Remaining Balance</span><span>${toPeso(remainingBalanceValue)}</span></div>`
+                        : ''
+                    }
+                </div>
+
                 <div class="amount-box">
                     <div class="amount-label">TOTAL AMOUNT PAID</div>
                     <div class="amount-value">${txn.amount}</div>
@@ -642,7 +947,7 @@ const SalePayment = () => {
         const timestamp = new Date().toLocaleString();
         const isUsers = title.includes('USERS');
         const totalAmount = isUsers
-            ? data.reduce((sum, t) => sum + (parseFloat(t.balance_due) || 0), 0)
+            ? data.reduce((sum, t) => sum + getEffectiveBalanceDue(t), 0)
             : data.reduce((sum, t) => {
                 const raw = (t.amount || '').toString().replace(/[^0-9.]/g, '');
                 return sum + (parseFloat(raw) || 0);
@@ -695,8 +1000,8 @@ const SalePayment = () => {
                         <tr class="row">
                             <td>BK-${t.id}</td>
                             <td>${t.student_name}</td>
-                            <td>${t.course_name}</td>
-                            <td>P ${parseFloat(t.balance_due).toLocaleString()}</td>
+                            <td>${t.course_summary || t.course_name}</td>
+                            <td>P ${getEffectiveBalanceDue(t).toLocaleString()}</td>
                             <td>${t.status}</td>
                             <td>${t.student_contact || 'N/A'}</td>
                         </tr>
@@ -704,7 +1009,7 @@ const SalePayment = () => {
                         <tr class="row">
                             <td>${t.id}</td>
                             <td>${t.student}</td>
-                            <td>${t.course}</td>
+                                <td title="${t.courseFull || t.course}">${t.course}</td>
                             <td>${t.date}</td>
                             <td>${t.method}</td>
                             <td>${t.amount}</td>
@@ -1104,13 +1409,22 @@ const SalePayment = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {pagedUnpaid.map(b => (
+                                {pagedUnpaid.map(b => {
+                                    const effectiveBalanceDue = getEffectiveBalanceDue(b);
+                                    return (
                                     <tr key={b.id}>
                                         <td className="txn-id">BK-{String(b.id).padStart(3, '0')}</td>
                                         <td className="st-name">{b.student_name}</td>
-                                        <td>{b.course_name}</td>
+                                        <td>
+                                            <div>{b.course_summary || b.course_name}</div>
+                                            {(Number(b.course_count || 1) > 1) && (
+                                                <div style={{ fontSize: '11px', color: 'var(--text-secondary, #64748b)', marginTop: '2px' }}>
+                                                    {b.course_count} courses availed
+                                                </div>
+                                            )}
+                                        </td>
                                         <td className="amount" style={{ color: '#16a34a' }}>P {parseFloat(b.total_amount || 0).toLocaleString()}</td>
-                                        <td className="amount" style={{ color: '#ea580c', fontWeight: 700 }}>P {parseFloat(b.balance_due).toLocaleString()}</td>
+                                        <td className="amount" style={{ color: '#ea580c', fontWeight: 700 }}>P {effectiveBalanceDue.toLocaleString()}</td>
                                         <td>{b.payment_type}</td>
                                         <td>
                                             <span className="status-pill collectable">Collectable</span>
@@ -1140,7 +1454,7 @@ const SalePayment = () => {
                                             </div>
                                         </td>
                                     </tr>
-                                ))}
+                                )})}
                             </tbody>
                         </table>
                         <Pagination
@@ -1158,65 +1472,109 @@ const SalePayment = () => {
             {/* Mark as Paid Confirmation Modal */}
             {showMarkPaidModal && markPaidBooking && (
                 <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !markPaidLoading && setShowMarkPaidModal(false)}>
-                    <div className="modal-container" style={{ maxWidth: '480px', padding: '0' }}>
+                    <div className="modal-container sale-mark-paid-modal">
+                        {(() => {
+                            const paid = Number(parseFloat(markPaidBooking?.total_amount || 0).toFixed(2));
+                            const remaining = getEffectiveBalanceDue(markPaidBooking);
+                            const assessed = Math.max(
+                                Number(parseFloat(markPaidBooking?.course_price || 0).toFixed(2)),
+                                Number((paid + remaining).toFixed(2))
+                            );
+                            const inputAmount = Number(markPaidAmount);
+                            const collectAmount = Number.isFinite(inputAmount) && inputAmount > 0
+                                ? Math.min(inputAmount, remaining)
+                                : 0;
+                            const remainingAfter = Math.max(0, Number((remaining - collectAmount).toFixed(2)));
+
+                            return (
+                                <>
                         {/* Header */}
-                        <div className="modal-header">
+                        <div className="modal-header sale-mark-paid-head">
                             <div className="modal-header-left">
-                                <div className="modal-header-icon" style={{ background: 'linear-gradient(135deg,#10b981,#059669)' }}>
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                <div className="modal-header-icon">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14.5a3.5 3.5 0 0 1 0 7H6" /></svg>
                                 </div>
                                 <div>
                                     <h2>Collect Remaining Balance</h2>
-                                    <p>Mark booking as fully paid</p>
+                                    <p>BK-{String(markPaidBooking.id || '').padStart(3, '0')}</p>
                                 </div>
                             </div>
+                            <div className="sale-mark-paid-chip">Collectable</div>
                             <button className="close-modal" onClick={() => !markPaidLoading && setShowMarkPaidModal(false)}>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                             </button>
                         </div>
 
                         {/* Body */}
-                        <div style={{ padding: '24px 28px' }}>
-                            {/* Student info summary */}
-                            <div style={{ background: 'var(--hover-bg, #f8fafc)', borderRadius: '12px', padding: '16px', marginBottom: '20px', border: '1px solid var(--border-color, #e2e8f0)' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                    <span style={{ color: 'var(--text-secondary, #64748b)', fontSize: '13px' }}>Student</span>
-                                    <span style={{ fontWeight: 600, color: 'var(--text-color, #1e293b)', fontSize: '13px' }}>{markPaidBooking.student_name}</span>
+                        <div className="sale-mark-paid-body">
+                            <div className="sale-mark-paid-card">
+                                <div className="sale-mark-paid-row">
+                                    <span>Student</span>
+                                    <strong>{markPaidBooking.student_name}</strong>
                                 </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                    <span style={{ color: 'var(--text-secondary, #64748b)', fontSize: '13px' }}>Course</span>
-                                    <span style={{ fontWeight: 600, color: 'var(--text-color, #1e293b)', fontSize: '13px' }}>{markPaidBooking.course_name}</span>
+                                <div className="sale-mark-paid-row">
+                                    <span>Course</span>
+                                    <strong>{markPaidBooking.course_summary || markPaidBooking.course_name}</strong>
                                 </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                    <span style={{ color: 'var(--text-secondary, #64748b)', fontSize: '13px' }}>Full Course Price</span>
-                                    <span style={{ fontWeight: 600, color: 'var(--text-color, #1e293b)', fontSize: '13px' }}>P {parseFloat(markPaidBooking.course_price || 0).toLocaleString()}</span>
+                                <div className="sale-mark-paid-row">
+                                    <span>Total Assessment</span>
+                                    <strong>P {assessed.toLocaleString()}</strong>
                                 </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                    <span style={{ color: 'var(--text-secondary, #64748b)', fontSize: '13px' }}>Already Paid (Downpayment)</span>
-                                    <span style={{ fontWeight: 600, color: '#16a34a', fontSize: '13px' }}>P {parseFloat(markPaidBooking.total_amount || 0).toLocaleString()}</span>
+                                <div className="sale-mark-paid-row">
+                                    <span>Already Paid</span>
+                                    <strong>P {paid.toLocaleString()}</strong>
                                 </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '10px', borderTop: '1px solid var(--border-color, #e2e8f0)', marginTop: '4px' }}>
-                                    <span style={{ color: '#ea580c', fontWeight: 700, fontSize: '14px' }}>Balance to Collect</span>
-                                    <span style={{ fontWeight: 800, color: '#ea580c', fontSize: '16px' }}>P {parseFloat(markPaidBooking.balance_due).toLocaleString()}</span>
+                                <div className="sale-mark-paid-row sale-mark-paid-highlight">
+                                    <span>Current Remaining</span>
+                                    <strong>P {remaining.toLocaleString()}</strong>
                                 </div>
                             </div>
 
-                            {/* Payment method */}
-                            <div style={{ marginBottom: '8px' }}>
-                                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary, #64748b)', marginBottom: '8px' }}>Payment Method</label>
+                            <div className="sale-mark-paid-card sale-mark-paid-form">
+                                <label className="sale-mark-paid-label">Amount to Collect</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    className="sale-mark-paid-input"
+                                    value={markPaidAmount}
+                                    onChange={(e) => setMarkPaidAmount(e.target.value)}
+                                    disabled={markPaidLoading}
+                                />
+                                <div className="sale-mark-paid-row sale-mark-paid-sub">
+                                    <span>Remaining After Payment</span>
+                                    <strong>P {remainingAfter.toLocaleString()}</strong>
+                                </div>
+
+                                <label className="sale-mark-paid-label">Payment Method</label>
                                 <select
                                     value={markPaidMethod}
                                     onChange={(e) => setMarkPaidMethod(e.target.value)}
-                                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color, #e2e8f0)', background: 'var(--card-bg, #fff)', color: 'var(--text-color, #1e293b)', fontSize: '14px', outline: 'none' }}
+                                    className="sale-mark-paid-input"
+                                    disabled={markPaidLoading}
                                 >
                                     <option value="Cash">Cash</option>
-                                    <option value="StarPay">StarPay</option>
+                                    <option value="Metrobank">Metrobank</option>
                                 </select>
+
+                                {markPaidMethod === 'Metrobank' && (
+                                    <>
+                                        <label className="sale-mark-paid-label">Transaction ID</label>
+                                        <input
+                                            type="text"
+                                            className="sale-mark-paid-input"
+                                            value={markPaidTxnId}
+                                            onChange={(e) => setMarkPaidTxnId(e.target.value)}
+                                            placeholder="Enter Metrobank transaction ID"
+                                            disabled={markPaidLoading}
+                                        />
+                                    </>
+                                )}
                             </div>
                         </div>
 
                         {/* Footer */}
-                        <div className="modal-footer">
+                        <div className="modal-footer sale-mark-paid-footer">
                             <button
                                 className="export-btn-secondary"
                                 onClick={() => !markPaidLoading && setShowMarkPaidModal(false)}
@@ -1228,11 +1586,13 @@ const SalePayment = () => {
                                 className="confirm-btn"
                                 onClick={handleMarkAsPaid}
                                 disabled={markPaidLoading}
-                                style={{ background: 'linear-gradient(135deg,#10b981,#059669)', minWidth: '150px' }}
                             >
-                                {markPaidLoading ? 'Processing…' : `Confirm — P ${parseFloat(markPaidBooking.balance_due).toLocaleString()}`}
+                                {markPaidLoading ? 'Processing…' : 'Confirm Payment'}
                             </button>
                         </div>
+                                </>
+                            );
+                        })()}
                     </div>
                 </div>
             )}
@@ -1277,7 +1637,7 @@ const SalePayment = () => {
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                                         <input
                                             type="text"
-                                            placeholder="Search by student, ID, course, or method…"
+                                            placeholder="Search by student, txn ID, booking ID, course, method, branch..."
                                             value={searchTerm}
                                             onChange={(e) => setSearchTerm(e.target.value)}
                                         />
@@ -1383,7 +1743,14 @@ const SalePayment = () => {
                                             <tr key={txn.id} className={idx % 2 === 1 ? 'row-alt' : ''}>
                                                 <td className="txn-id">{txn.id}</td>
                                                 <td className="st-name">{txn.student}</td>
-                                                <td className="course-name">{txn.course}</td>
+                                                <td className="course-name" title={txn.courseFull || txn.course}>
+                                                    <div>{txn.course}</div>
+                                                    {txn.courseCount > 1 && (
+                                                        <div style={{ fontSize: '11px', color: 'var(--text-secondary, #64748b)', marginTop: '2px' }}>
+                                                            Multi-course booking
+                                                        </div>
+                                                    )}
+                                                </td>
                                                 <td style={{ fontSize: '12px', color: 'var(--text-secondary, #64748b)' }}>{txn.branch || '—'}</td>
                                                 <td className="date">{txn.date}</td>
                                                 <td>

@@ -126,7 +126,11 @@ const Schedule = ({ onNavigate }) => {
 
     const filteredSlots = (() => {
         if (isSelectedSunday()) return [];
-        const base = slots.length > 0 ? slots : [];
+        const base = slots.length > 0 ? slots.filter(s => {
+            const sStart = s.date;
+            const sEnd = s.end_date || s.date;
+            return selectedDate >= sStart && selectedDate <= sEnd;
+        }) : [];
         if (!slotSearch.trim()) return base;
         const q = slotSearch.trim().toLowerCase();
         return base.filter(s =>
@@ -142,7 +146,7 @@ const Schedule = ({ onNavigate }) => {
     // Load slots from database
     useEffect(() => {
         loadSlots();
-    }, [selectedDate, selectedBranch]);
+    }, [viewDate, selectedBranch]);
 
     const [userRole, setUserRole] = useState(null);
 
@@ -197,8 +201,15 @@ const Schedule = ({ onNavigate }) => {
         try {
             setLoading(true);
             setError(null);
-            console.log('Loading slots for date:', selectedDate, 'branch:', selectedBranch);
-            const response = await schedulesAPI.getSlotsByDate(selectedDate, selectedBranch || null);
+            
+            const startOfMonth = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
+            const endOfMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0);
+            
+            const startDate = `${startOfMonth.getFullYear()}-${String(startOfMonth.getMonth() + 1).padStart(2, '0')}-01`;
+            const endDate = `${endOfMonth.getFullYear()}-${String(endOfMonth.getMonth() + 1).padStart(2, '0')}-${String(endOfMonth.getDate()).padStart(2, '0')}`;
+
+            console.log('Loading slots for month:', startDate, 'to', endDate, 'branch:', selectedBranch);
+            const response = await schedulesAPI.getSlotsByDate(null, selectedBranch || null, null, startDate, endDate);
             console.log('API Response:', response);
 
             // Transform database data to match component structure
@@ -457,6 +468,10 @@ const Schedule = ({ onNavigate }) => {
             if (!editingId) {
                 // Duplicate check: same date, branch, type, course_type, session, and (for PDC) transmission
                 const duplicate = slots.find(s => {
+                    const sStart = s.date;
+                    const sEnd = s.end_date || s.date;
+                    const isSameDate = selectedDate >= sStart && selectedDate <= sEnd;
+                    if (!isSameDate) return false;
                     if (s.type !== formData.type) return false;
                     if ((s.course_type || '') !== (formData.course_type || '')) return false;
                     if (s.session !== formData.session) return false;
@@ -739,8 +754,9 @@ const Schedule = ({ onNavigate }) => {
         }
     };
 
-    const openFeePayModal = (enrollmentId, context) => {
-        setFeePayModal({ isOpen: true, enrollmentId, amount: '1000', paymentMethod: 'Cash', transactionNumber: '', context });
+    const openFeePayModal = (enrollmentId, context, slotType) => {
+        const amount = (slotType || '').toLowerCase() === 'tdc' ? '300' : '1000';
+        setFeePayModal({ isOpen: true, enrollmentId, amount, paymentMethod: 'Cash', transactionNumber: '', context });
     };
 
     const confirmFeePayment = async () => {
@@ -783,7 +799,7 @@ const Schedule = ({ onNavigate }) => {
         }
     };
 
-    const handleMarkFeePaid = (enrollmentId) => openFeePayModal(enrollmentId, 'manage');
+    const handleMarkFeePaid = (enrollmentId) => openFeePayModal(enrollmentId, 'manage', selectedSlot?.type);
 
     // ── Summary modal action handlers ──
     const handleSummaryAttendance = async (enrollmentId, currentStatus) => {
@@ -865,7 +881,7 @@ const Schedule = ({ onNavigate }) => {
         }
     };
 
-    const handleSummaryMarkFeePaid = (enrollmentId) => openFeePayModal(enrollmentId, 'summary');
+    const handleSummaryMarkFeePaid = (enrollmentId) => openFeePayModal(enrollmentId, 'summary', summaryStudentModal.scheduleInfo?.type);
 
     // Calculate day offset for display (e.g. Day 2 of 2)
     // Calculate day offset for display (e.g. Day 2 of 2)
@@ -1105,7 +1121,7 @@ const Schedule = ({ onNavigate }) => {
                                                     {!s.reschedule_fee_paid && (
                                                         <button
                                                             className="noshow-btn noshow-btn-fee"
-                                                            onClick={() => openFeePayModal(s.enrollment_id, 'noshow')}
+                                                            onClick={() => openFeePayModal(s.enrollment_id, 'noshow', s.type)}
                                                         >
                                                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
                                                             Mark Fee Paid
@@ -1679,8 +1695,13 @@ const Schedule = ({ onNavigate }) => {
                                 }
                             });
                         });
+                        const dateSlots = slots.length > 0 ? slots.filter(s => {
+                            const sStart = s.date;
+                            const sEnd = s.end_date || s.date;
+                            return selectedDate >= sStart && selectedDate <= sEnd;
+                        }) : [];
                         const missing = expected.filter(exp =>
-                            !slots.some(s =>
+                            !dateSlots.some(s =>
                                 s.type === exp.type &&
                                 (s.course_type || '') === (exp.course_type || '') &&
                                 s.session === exp.session &&
@@ -2070,7 +2091,7 @@ const Schedule = ({ onNavigate }) => {
                                                                 {!student.reschedule_fee_paid && (
                                                                     <button
                                                                         onClick={() => handleMarkFeePaid(student.id)}
-                                                                        title="Confirm ₱1,000 no-show fee has been collected"
+                                                                        title={`Confirm ₱${selectedSlot?.type?.toLowerCase() === 'tdc' ? '300' : '1,000'} no-show fee has been collected`}
                                                                         style={{
                                                                             display: 'inline-flex', alignItems: 'center', gap: '5px',
                                                                             padding: '6px 12px', borderRadius: '8px', border: 'none',
@@ -2079,13 +2100,13 @@ const Schedule = ({ onNavigate }) => {
                                                                         }}
                                                                     >
                                                                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z" fill="currentColor" stroke="none"/></svg>
-                                                                        Mark Fee Paid (₱1,000)
+                                                                        Mark Fee Paid (₱{selectedSlot?.type?.toLowerCase() === 'tdc' ? '300' : '1,000'})
                                                                     </button>
                                                                 )}
                                                                 <button
                                                                     onClick={() => student.reschedule_fee_paid ? openReschedulePanel(student.id, student.name) : null}
                                                                     disabled={!student.reschedule_fee_paid}
-                                                                    title={student.reschedule_fee_paid ? 'Reschedule Student' : 'Student must pay the ₱1,000 no-show fee first'}
+                                                                    title={student.reschedule_fee_paid ? 'Reschedule Student' : `Student must pay the ₱${selectedSlot?.type?.toLowerCase() === 'tdc' ? '300' : '1,000'} no-show fee first`}
                                                                     style={{
                                                                         display: 'inline-flex', alignItems: 'center', gap: '5px',
                                                                         padding: '6px 12px', borderRadius: '8px', border: 'none',
@@ -2465,7 +2486,7 @@ const Schedule = ({ onNavigate }) => {
                                 </p>
                                 <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px', fontSize: '0.85rem', color: '#991b1b', lineHeight: '1.5' }}>
                                     <li>Remove them from the current slot.</li>
-                                    <li>Require a <strong>₱1,000 fee</strong> for rescheduling.</li>
+                                    <li>Require a <strong>₱{selectedSlot?.type?.toLowerCase() === 'tdc' ? '300' : '1,000'} fee</strong> for rescheduling.</li>
                                     <li>Send them an email notification automatically.</li>
                                 </ul>
                             </div>
@@ -2719,7 +2740,7 @@ const Schedule = ({ onNavigate }) => {
                                         {isNoShow && !feePaid && (
                                             <button
                                                 onClick={() => handleSummaryMarkFeePaid(si?.enrollment_id)}
-                                                title="Confirm ₱1,000 no-show fee has been collected"
+                                                title={`Confirm ₱${si?.type?.toLowerCase() === 'tdc' ? '300' : '1,000'} no-show fee has been collected`}
                                                 style={{
                                                     display: 'inline-flex', alignItems: 'center', gap: '6px',
                                                     padding: '7px 16px', borderRadius: '8px', border: 'none',
@@ -2728,13 +2749,13 @@ const Schedule = ({ onNavigate }) => {
                                                 }}
                                             >
                                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
-                                                Mark Fee Paid (₱1,000)
+                                                Mark Fee Paid (₱{si?.type?.toLowerCase() === 'tdc' ? '300' : '1,000'})
                                             </button>
                                         )}
                                         <button
                                             onClick={() => canReschedule ? openSummaryReschedulePanel(si?.enrollment_id, summaryStudentModal.student ? [summaryStudentModal.student.first_name, summaryStudentModal.student.last_name].join(' ') : si?.name, si?.slot_id, si?.type, si?.branch_id, si?.course_type, si?.transmission) : null}
                                             disabled={!canReschedule}
-                                            title={!isNoShow ? 'Student must be marked No-Show first' : !feePaid ? 'Student must pay the ₱1,000 no-show fee first' : 'Reschedule Student'}
+                                            title={!isNoShow ? 'Student must be marked No-Show first' : !feePaid ? `Student must pay the ₱${si?.type?.toLowerCase() === 'tdc' ? '300' : '1,000'} no-show fee first` : 'Reschedule Student'}
                                             style={{
                                                 display: 'inline-flex', alignItems: 'center', gap: '6px',
                                                 padding: '7px 16px', borderRadius: '8px', border: 'none',
@@ -3044,7 +3065,7 @@ const Schedule = ({ onNavigate }) => {
                                 </div>
                                 <div>
                                     <div style={{ color: '#fff', fontWeight: 800, fontSize: '1.05rem' }}>Record Fee Payment</div>
-                                    <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.78rem' }}>Walk-in ₱1,000 No-Show Reschedule Fee</div>
+                                    <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.78rem' }}>Walk-in ₱{feePayModal?.amount || '1,000'} No-Show Reschedule Fee</div>
                                 </div>
                             </div>
                         </div>
@@ -3053,11 +3074,10 @@ const Schedule = ({ onNavigate }) => {
                             <div style={{ marginBottom: '18px' }}>
                                 <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#475569', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Amount Collected (₱)</label>
                                 <input
-                                    type="number"
-                                    min="0"
+                                    type="text"
+                                    readOnly
                                     value={feePayModal.amount}
-                                    onChange={e => setFeePayModal(prev => ({ ...prev, amount: e.target.value }))}
-                                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1.5px solid #e2e8f0', fontSize: '1.05rem', fontWeight: 700, color: '#1e293b', outline: 'none', boxSizing: 'border-box' }}
+                                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1.5px solid #e2e8f0', background: '#f8fafc', fontSize: '1.05rem', fontWeight: 700, color: '#64748b', outline: 'none', boxSizing: 'border-box', cursor: 'not-allowed' }}
                                 />
                             </div>
                             <div style={{ marginBottom: '18px' }}>

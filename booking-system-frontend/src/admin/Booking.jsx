@@ -1,11 +1,178 @@
 import React, { useState, useEffect } from 'react';
 import './css/booking.css';
-import { adminAPI, branchesAPI, authAPI } from '../services/api';
+import { adminAPI, branchesAPI, authAPI, coursesAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import Pagination from './components/Pagination';
 
 const BK_PAGE_SIZE = 10;
 const logo = '/images/logo.png';
+
+const stripBranchPrefix = (value = '') => String(value)
+    .replace('Master Driving School ', '')
+    .replace('Master Prime Driving School ', '')
+    .replace('Masters Prime Holdings Corp. ', '')
+    .replace('Master Prime Holdings Corp. ', '')
+    .trim();
+
+const parseNotesJson = (rawNotes) => {
+    if (!rawNotes || typeof rawNotes !== 'string' || !rawNotes.startsWith('{')) return null;
+    try {
+        return JSON.parse(rawNotes);
+    } catch {
+        return null;
+    }
+};
+
+const normalizeCourseItems = (booking, notesJson) => {
+    const list = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
+    if (list.length > 0) {
+        const cleaned = list.map((item) => ({
+            name: item?.name || 'Course',
+            type: item?.type || '',
+            category: item?.category || '',
+        }));
+        const unique = [];
+        const seen = new Set();
+        cleaned.forEach((item) => {
+            const key = `${String(item.name).toLowerCase()}::${String(item.type).toLowerCase()}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                unique.push(item);
+            }
+        });
+        return unique;
+    }
+
+    return [{
+        name: booking.course_name || 'Course',
+        type: booking.course_type || '',
+        category: booking.course_category || '',
+    }];
+};
+
+const toTitle = (value = '') => String(value)
+    .toLowerCase()
+    .replace(/\b\w/g, (m) => m.toUpperCase())
+    .trim();
+
+const toCompactCourseLabel = (item = {}) => {
+    const name = String(item.name || '');
+    const type = String(item.type || '');
+    const category = String(item.category || '');
+    const source = `${name} ${type} ${category}`.toUpperCase();
+
+    const hasTdc = source.includes('TDC') || source.includes('THEORETICAL');
+    const hasPdc = source.includes('PDC') || source.includes('PRACTICAL');
+
+    if (hasTdc) {
+        if (source.includes('F2F') || source.includes('FACE TO FACE')) return 'TDC F2F';
+        if (source.includes('ONLINE')) return 'TDC Online';
+        return 'TDC';
+    }
+
+    if (hasPdc) {
+        let vehicle = '';
+        if (source.includes('MOTORCYCLE')) vehicle = 'Motorcycle';
+        else if (source.includes('CAR')) vehicle = 'Car';
+        else if (source.includes('A1') || source.includes('TRICYCLE') || source.includes('V1-TRICYCLE')) vehicle = 'A1 - Tricycle';
+        else if ((source.includes('B1') || source.includes('VAN')) && (source.includes('B2') || source.includes('L300'))) vehicle = 'B1 - VAN/B2 - L300';
+        else if (source.includes('B1') || source.includes('VAN')) vehicle = 'B1 - VAN';
+        else if (source.includes('B2') || source.includes('L300')) vehicle = 'B2 - L300';
+        else if (source.includes('B1') || source.includes('B2')) vehicle = 'B1/B2';
+
+        let transmission = '';
+        if (source.includes('MANUAL')) transmission = 'Manual';
+        else if (source.includes('AUTOMATIC')) transmission = 'Automatic';
+
+        return ['PDC', vehicle, transmission].filter(Boolean).join(' ');
+    }
+
+    return toTitle(name) || 'Course';
+};
+
+const toMoney = (value = 0) => `₱${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const buildCoursePaymentLines = (booking) => {
+    const notesJson = parseNotesJson(booking?.rawNotes || '');
+    const sourceCourseItems = Array.isArray(booking?.courseItems) && booking.courseItems.length > 0
+        ? booking.courseItems
+        : normalizeCourseItems({
+            course_name: booking?.fullCourseName || booking?.typeCategory || 'Course',
+            course_type: booking?.courseTypeTdc || '',
+            course_category: booking?.typeCategory || '',
+        }, notesJson);
+
+    const noteList = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
+    const noteLines = noteList
+        .map((item) => ({
+            label: toCompactCourseLabel(item),
+            amount: Number(item?.price ?? item?.amount ?? item?.coursePrice ?? 0),
+        }))
+        .filter((line) => line.amount > 0);
+
+    if (noteLines.length > 0) return noteLines;
+
+    const explicitCourseLines = sourceCourseItems
+        .map((item) => ({
+            label: toCompactCourseLabel(item),
+            amount: Number(item?.price ?? item?.coursePrice ?? 0),
+        }))
+        .filter((line) => line.amount > 0);
+    if (explicitCourseLines.length > 0) return explicitCourseLines;
+
+    const baseTotal = Math.max(0, Number(booking?.coursePrice || 0));
+    if (!sourceCourseItems.length) return [];
+    if (sourceCourseItems.length === 1) {
+        return [{ label: toCompactCourseLabel(sourceCourseItems[0]), amount: baseTotal }];
+    }
+
+    const labelsUpper = sourceCourseItems.map((item) => toCompactCourseLabel(item).toUpperCase());
+    const tdcIdx = labelsUpper.findIndex((label) => label.startsWith('TDC'));
+    const pdcIdx = labelsUpper.findIndex((label) => label.startsWith('PDC'));
+    if (sourceCourseItems.length === 2 && tdcIdx !== -1 && pdcIdx !== -1 && baseTotal > 0) {
+        const tdcAmount = Math.min(700, baseTotal);
+        const pdcAmount = Math.max(0, baseTotal - tdcAmount);
+        return sourceCourseItems.map((item, idx) => ({
+            label: toCompactCourseLabel(item),
+            amount: idx === tdcIdx ? tdcAmount : (idx === pdcIdx ? pdcAmount : 0),
+        }));
+    }
+
+    const equal = Math.floor((baseTotal / sourceCourseItems.length) * 100) / 100;
+    let running = 0;
+    return sourceCourseItems.map((item, idx) => {
+        const isLast = idx === sourceCourseItems.length - 1;
+        const amount = isLast ? Math.max(0, Number((baseTotal - running).toFixed(2))) : equal;
+        running += equal;
+        return { label: toCompactCourseLabel(item), amount };
+    });
+};
+
+const buildPaymentBreakdown = (booking) => {
+    const courseLines = buildCoursePaymentLines(booking);
+    const addonLines = (Array.isArray(booking?.addonsDetailed) ? booking.addonsDetailed : [])
+        .map((addon) => ({
+            name: addon?.name || 'Add-on',
+            price: Math.max(0, Number(addon?.price || 0)),
+        }))
+        .filter((addon) => addon.price > 0);
+
+    const courseSubtotal = courseLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    const addonsSubtotal = addonLines.reduce((sum, line) => sum + Number(line.price || 0), 0);
+    const subtotal = courseSubtotal + addonsSubtotal;
+    const convenienceFee = Math.max(0, Number(booking?.convenienceFee || 0));
+    const promoDiscount = Math.max(0, Number(booking?.promoDiscount || 0));
+    const grandTotal = Math.max(0, subtotal + convenienceFee - promoDiscount);
+
+    return {
+        courseLines,
+        addonLines,
+        subtotal,
+        convenienceFee,
+        promoDiscount,
+        grandTotal,
+    };
+};
 
 const Booking = () => {
     const { showNotification } = useNotification();
@@ -20,6 +187,28 @@ const Booking = () => {
     const [branches, setBranches] = useState([]);
     const [selectedBranch, setSelectedBranch] = useState('');
     const [userRole, setUserRole] = useState(null);
+    const [showMarkPaidModal, setShowMarkPaidModal] = useState(false);
+    const [markPaidBooking, setMarkPaidBooking] = useState(null);
+    const [markPaidMethod, setMarkPaidMethod] = useState('Cash');
+    const [markPaidTxnId, setMarkPaidTxnId] = useState('');
+    const [markPaidAmount, setMarkPaidAmount] = useState('');
+    const [markPaidLoading, setMarkPaidLoading] = useState(false);
+    const modalCourseItems = Array.isArray(selectedBooking?.courseItems) && selectedBooking.courseItems.length > 0
+        ? selectedBooking.courseItems
+        : [{
+            name: selectedBooking?.fullCourseName || selectedBooking?.typeCategory || 'Course',
+            type: selectedBooking?.courseTypeTdc || '',
+            category: selectedBooking?.typeCategory || '',
+        }];
+    const tdcCourseItem = modalCourseItems.find((item) => {
+        const src = `${item?.name || ''} ${item?.type || ''} ${item?.category || ''}`.toUpperCase();
+        return src.includes('TDC') || src.includes('THEORETICAL');
+    }) || {
+        name: selectedBooking?.fullCourseName || 'Theoretical Driving Course (TDC)',
+        type: selectedBooking?.courseTypeTdc || '',
+        category: 'TDC',
+    };
+    const paymentBreakdown = selectedBooking ? buildPaymentBreakdown(selectedBooking) : null;
 
     // Fetch branches and user role on mount
     useEffect(() => {
@@ -78,13 +267,7 @@ const Booking = () => {
                     // Shorten branch name (remove "Master Driving School" only, keep "Branch")
                     let branchName = booking.branch_name || 'N/A';
                     if (branchName !== 'N/A') {
-                        branchName = branchName
-                            .replace('Master Driving School ', '')
-                            .replace('Master Prime Driving School ', '')
-                            .replace('Masters Prime Holdings Corp. ', '')
-                            .replace('Master Prime Holdings Corp. ', '')
-                            .trim()
-                            .toUpperCase();
+                        branchName = stripBranchPrefix(branchName).toUpperCase();
                     }
 
                     // Build schedule date display (supports multi-day courses)
@@ -150,6 +333,15 @@ const Booking = () => {
                     const courseNameFromNotes = (booking.notes?.startsWith('Walk-In Enrollment:') 
                         ? booking.notes.replace('Walk-In Enrollment:', '').trim() 
                         : booking.course_name) || 'N/A';
+                    const notesJson = parseNotesJson(booking.notes);
+                    const courseItems = normalizeCourseItems(booking, notesJson);
+                    const courseCount = courseItems.length;
+                    const courseNames = courseItems.map((c) => c.name).filter(Boolean);
+                    const compactCourseLabels = courseItems.map((c) => toCompactCourseLabel(c)).filter(Boolean);
+                    const courseSummary = courseCount > 1
+                        ? `${compactCourseLabels.slice(0, 2).join(', ')}${courseCount > 2 ? ` +${courseCount - 2} more` : ''}`
+                        : (compactCourseLabels[0] || courseItems[0]?.name || courseNameFromNotes);
+                    const courseSummaryFull = courseNames.join(', ');
 
                     let category = 'Course';
                     const hasTdcSlot = booking.schedule_details?.some(s => (s.type || '').toLowerCase() === 'tdc');
@@ -180,6 +372,10 @@ const Booking = () => {
                         typeCategory: category,
                         type: displayType,
                         fullCourseName: courseNameFromNotes,
+                        courseItems,
+                        courseCount,
+                        courseSummary,
+                        courseSummaryFull,
                         branch: branchName,
                         date: scheduleDateDisplay,
                         dateLabel: scheduleDateLabel,
@@ -194,6 +390,7 @@ const Booking = () => {
                         // Detailed multi-day fields
                         tdcDay1: null, tdcDay2: null,
                         pdcDay1: null, pdcDay2: null,
+                        pdcSchedulesDetailed: [],
                         ...((() => {
                             const details = booking.schedule_details || [];
                             const tdcArr = details.filter(d => (d.type || '').toLowerCase() === 'tdc');
@@ -223,7 +420,19 @@ const Booking = () => {
                         contact: booking.student_contact || 'N/A',
                         email: booking.student_email || 'N/A',
                         courseTypeTdc: booking.course_type, // initial guess
-                        courseTypePdc: '' // to be parsed
+                        courseTypePdc: '', // to be parsed
+                        searchIndex: [
+                            `BK-${String(booking.id).padStart(3, '0')}`,
+                            booking.student_name,
+                            booking.student_email,
+                            booking.student_contact,
+                            courseSummary,
+                            (courseItems || []).map((c) => c.name).join(' '),
+                            branchName,
+                            booking.payment_method,
+                            booking.payment_type,
+                            status,
+                        ].filter(Boolean).join(' ').toLowerCase(),
                     };
                 });
                 // After transformation, refine notes-based fields
@@ -236,7 +445,7 @@ const Booking = () => {
                                 fullCourseName: n.combinedCourseNames || b.fullCourseName,
                                 addonNames: n.addonNames || '',
                                 courseTypePdc: n.courseTypePdc || '',
-                                courseTypeTdc: n.courseTypeTdc || b.courseTypeTdc
+                                courseTypeTdc: n.courseTypeTdc || b.courseTypeTdc,
                             }
                         } catch(e) { return b; }
                     }
@@ -256,8 +465,8 @@ const Booking = () => {
     const handleSearch = (e) => setSearchTerm(e.target.value);
 
     const filteredBookings = bookings.filter(booking => {
-        const matchesSearch = booking.student.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            booking.id.toLowerCase().includes(searchTerm.toLowerCase());
+        const term = searchTerm.toLowerCase();
+        const matchesSearch = !term || (booking.searchIndex || '').includes(term);
         const matchesStatus = statusFilter === 'All' || booking.status === statusFilter;
         return matchesSearch && matchesStatus;
     });
@@ -283,27 +492,162 @@ const Booking = () => {
         }
     };
 
+    const openMarkPaidModal = (booking) => {
+        if (booking.status !== 'Collectable') return;
+        const paid = Number(booking?.amountPaid || 0);
+        const downpaymentFactor = String(booking?.paymentType || '').toLowerCase().includes('down') ? 2 : 1;
+        const assessed = Math.max(Number(booking?.coursePrice || 0), paid * downpaymentFactor, paid);
+        const remaining = Math.max(0, assessed - paid);
+        setMarkPaidBooking(booking);
+        setMarkPaidMethod('Cash');
+        setMarkPaidTxnId('');
+        setMarkPaidAmount(remaining > 0 ? remaining.toFixed(2) : '');
+        setShowMarkPaidModal(true);
+    };
+
+    const handleConfirmMarkPaid = async () => {
+        if (!markPaidBooking) return;
+        const paid = Number(markPaidBooking?.amountPaid || 0);
+        const downpaymentFactor = String(markPaidBooking?.paymentType || '').toLowerCase().includes('down') ? 2 : 1;
+        const assessed = Math.max(Number(markPaidBooking?.coursePrice || 0), paid * downpaymentFactor, paid);
+        const remaining = Math.max(0, Number((assessed - paid).toFixed(2)));
+        const collectAmount = Number(markPaidAmount);
+
+        if (!Number.isFinite(collectAmount) || collectAmount <= 0) {
+            showNotification('Please enter a valid amount to collect.', 'error');
+            return;
+        }
+        if (collectAmount > remaining + 0.001) {
+            showNotification('Amount to collect cannot be greater than remaining balance.', 'error');
+            return;
+        }
+        if (markPaidMethod === 'Metrobank' && !markPaidTxnId.trim()) {
+            showNotification('Transaction ID is required for Metrobank payments.', 'error');
+            return;
+        }
+
+        try {
+            setMarkPaidLoading(true);
+            const dbId = markPaidBooking?.rawId || markPaidBooking?.id;
+            await adminAPI.markAsPaid(
+                dbId,
+                markPaidMethod,
+                markPaidMethod === 'Metrobank' ? markPaidTxnId.trim() : null,
+                Number(collectAmount.toFixed(2))
+            );
+            await loadBookings();
+            setShowMarkPaidModal(false);
+            setMarkPaidBooking(null);
+            showNotification('Payment recorded successfully.', 'success');
+        } catch (err) {
+            console.error('Error marking booking as paid:', err);
+            showNotification('Failed to mark booking as paid. Please try again.', 'error');
+        } finally {
+            setMarkPaidLoading(false);
+        }
+    };
+
     const handleViewClick = async (booking) => {
         setSelectedBooking(booking);
         setShowViewModal(true);
         // Re-fetch in background so payment fields are always fresh
         try {
-            const response = await adminAPI.getAllBookings(null, 100);
+            const [response, coursesRes, addonsRes] = await Promise.all([
+                adminAPI.getAllBookings(null, 100),
+                coursesAPI.getAll().catch(() => ({ success: false, courses: [] })),
+                coursesAPI.getAddonsConfig().catch(() => ({ success: false, config: {} })),
+            ]);
             if (response.success) {
                 const fresh = response.bookings.find(b => b.id === booking.rawId);
                 if (fresh) {
-                    const formatLong = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+                    const formatLong = (d) => {
+                        if (!d) return null;
+                        const dt = new Date(d);
+                        if (Number.isNaN(dt.getTime())) return null;
+                        return dt.toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            timeZone: 'Asia/Manila',
+                        });
+                    };
                     
                     // 1. Map Schedule Details
                     const sDetails = fresh.schedule_details || [];
                     const tdcArr = sDetails.filter(d => (d.type || '').toLowerCase() === 'tdc');
                     const pdcArr = sDetails.filter(d => (d.type || '').toLowerCase() === 'pdc');
                     
+                    let tdcDay1 = formatLong(tdcArr[0]?.date);
+                    let tdcDay2 = tdcArr[0]?.end_date && tdcArr[0].end_date !== tdcArr[0].date
+                        ? formatLong(tdcArr[0].end_date)
+                        : formatLong(tdcArr[1]?.date);
+                    let pdcDay1 = formatLong(pdcArr[0]?.date);
+                    let pdcDay2 = pdcArr[0]?.end_date && pdcArr[0].end_date !== pdcArr[0].date
+                        ? formatLong(pdcArr[0].end_date)
+                        : formatLong(pdcArr[1]?.date);
+                    let tdcTime1 = tdcArr[0]?.time_range || null;
+                    let tdcTime2 = tdcArr[1]?.time_range || null;
+
+                    const notesJson = parseNotesJson(fresh.notes || '') || {};
+                    const noteTdcDay1 = formatLong(notesJson?.scheduleDate);
+                    const noteTdcDay2 = formatLong(notesJson?.scheduleDate2);
+                    const noteTdcSession1 = notesJson?.scheduleSession || null;
+                    const noteTdcSession2 = notesJson?.scheduleSession2 || null;
+                    const noteTdcTime1 = notesJson?.scheduleTime || null;
+                    const noteTdcTime2 = notesJson?.scheduleTime2 || null;
+
+                    if (!tdcDay1 && noteTdcDay1) tdcDay1 = noteTdcDay1;
+                    if ((!tdcDay2 || tdcDay2 === tdcDay1) && noteTdcDay2 && noteTdcDay2 !== tdcDay1) {
+                        tdcDay2 = noteTdcDay2;
+                    }
+                    if (!tdcTime1 && noteTdcTime1) tdcTime1 = noteTdcTime1;
+                    if (!tdcTime2 && noteTdcTime2) tdcTime2 = noteTdcTime2;
+
+                    const notePdcRawDates = Object.values(notesJson?.pdcSelections || {})
+                        .flatMap((sel) => [sel?.pdcDate || sel?.date, sel?.pdcDate2 || sel?.date2])
+                        .filter(Boolean);
+                    const uniquePdcLabels = [...new Set(notePdcRawDates.map((d) => formatLong(d)).filter(Boolean))];
+
+                    if (!pdcDay1 && uniquePdcLabels.length > 0) pdcDay1 = uniquePdcLabels[0];
+                    if ((!pdcDay2 || pdcDay2 === pdcDay1) && uniquePdcLabels.length > 1) {
+                        pdcDay2 = uniquePdcLabels[uniquePdcLabels.length - 1];
+                    }
+
+                    const pdcSchedulesDetailed = Object.values(notesJson?.pdcSelections || {})
+                        .map((sel, idx) => {
+                            const day1 = formatLong(sel?.pdcDate || sel?.date);
+                            const day2 = formatLong(sel?.pdcDate2 || sel?.date2);
+                            const time1 = sel?.pdcSlotDetails?.time_range || sel?.pdcSlotDetails?.time || sel?.slot?.time_range || null;
+                            const time2 = sel?.pdcSlotDetails2?.time_range || sel?.pdcSlotDetails2?.time || sel?.slot2?.time_range || null;
+                            const session1 = sel?.pdcSlotDetails?.session || sel?.slot?.session || null;
+                            const session2 = sel?.pdcSlotDetails2?.session || sel?.slot2?.session || null;
+                            const merged1 = [session1, time1].filter(Boolean).join(' · ');
+                            const merged2 = [session2, time2].filter(Boolean).join(' · ');
+                            const isSameTimeBothDays = Boolean(day2) && merged1 && merged1 === merged2;
+                            return {
+                                id: `${sel?.courseId || idx}`,
+                                label: sel?.courseName || `PDC Course ${idx + 1}`,
+                                courseType: sel?.courseType || '',
+                                day1,
+                                day2,
+                                time1,
+                                time2,
+                                session1,
+                                session2,
+                                sharedTime: isSameTimeBothDays ? merged1 : null,
+                            };
+                        })
+                        .filter((entry) => entry.day1 || entry.day2);
+
                     const sched = {
-                        tdcDay1: formatLong(tdcArr[0]?.date),
-                        tdcDay2: tdcArr[0]?.end_date && tdcArr[0].end_date !== tdcArr[0].date ? formatLong(tdcArr[0].end_date) : formatLong(tdcArr[1]?.date),
-                        pdcDay1: formatLong(pdcArr[0]?.date),
-                        pdcDay2: pdcArr[0]?.end_date && pdcArr[0].end_date !== pdcArr[0].date ? formatLong(pdcArr[0].end_date) : formatLong(pdcArr[1]?.date)
+                        tdcDay1,
+                        tdcDay2,
+                        pdcDay1,
+                        pdcDay2,
+                        tdcTime1,
+                        tdcTime2,
+                        tdcSession1: noteTdcSession1,
+                        tdcSession2: noteTdcSession2,
                     };
 
                     // 2. Map Financials (JSON notes or Legacy Estimator)
@@ -353,11 +697,121 @@ const Booking = () => {
                         };
                     }
 
+                    const baseCourseItems = normalizeCourseItems(fresh, notesJson);
+                    const courseCatalog = Array.isArray(coursesRes?.courses) ? coursesRes.courses : [];
+                    const byName = new Map(courseCatalog.map((c) => [String(c?.name || '').trim().toLowerCase(), c]));
+                    const pdcSelections = Object.values(notesJson?.pdcSelections || {});
+
+                    const pricedCourseItems = baseCourseItems.map((item) => {
+                        const itemNameKey = String(item?.name || '').trim().toLowerCase();
+                        const selectionMatch = pdcSelections.find((sel) =>
+                            String(sel?.courseName || '').trim().toLowerCase() === itemNameKey
+                        );
+                        const byId = selectionMatch?.courseId
+                            ? courseCatalog.find((c) => Number(c?.id) === Number(selectionMatch.courseId))
+                            : null;
+                        const byExactName = byName.get(itemNameKey);
+                        const fallbackByType = courseCatalog.find((c) => {
+                            const cat = String(c?.category || '').toLowerCase();
+                            const itemCat = String(item?.category || '').toLowerCase();
+                            const itemType = String(item?.type || '').toLowerCase();
+                            return cat === itemCat && (!itemType || String(c?.name || '').toLowerCase().includes(itemType));
+                        });
+                        const matchedCourse = byId || byExactName || fallbackByType;
+                        return {
+                            ...item,
+                            courseId: matchedCourse?.id || selectionMatch?.courseId || null,
+                            price: Number(matchedCourse?.price || 0),
+                        };
+                    });
+
+                    const addonsConfig = {
+                        reviewer: 30,
+                        vehicleTips: 20,
+                        convenienceFee: 25,
+                        promoBundleDiscountPercent: 3,
+                        ...(addonsRes?.config || {}),
+                    };
+                    const reviewerEach = Number(addonsConfig.reviewer || 30);
+                    const vehicleTipsEach = Number(addonsConfig.vehicleTips || 20);
+                    const convenienceEach = Number(addonsConfig.convenienceFee || 25);
+                    const promoPct = Number(addonsConfig.promoBundleDiscountPercent || 3);
+                    const hasReviewer = Boolean(notesJson?.hasReviewer);
+                    const hasVehicleTips = Boolean(notesJson?.hasVehicleTips);
+                    const courseCount = Math.max(1, pricedCourseItems.length || baseCourseItems.length || 1);
+                    const courseSubtotal = pricedCourseItems.reduce((sum, c) => sum + Number(c?.price || 0), 0);
+                    const hasBundle = pricedCourseItems.some((c) => String(c?.category || '').toLowerCase().includes('tdc'))
+                        && pricedCourseItems.some((c) => String(c?.category || '').toLowerCase().includes('pdc'));
+
+                    const paymentTypeNorm = String(fresh.payment_type || notesJson?.paymentType || '').toLowerCase();
+                    const paidAmount = Number(fresh.total_amount || 0);
+                    const assessedTarget = paymentTypeNorm.includes('down') ? paidAmount * 2 : paidAmount;
+                    const promoFactor = hasBundle ? (1 - (promoPct / 100)) : 1;
+                    const targetBaseBeforePromo = promoFactor > 0 ? (assessedTarget / promoFactor) : assessedTarget;
+
+                    const convenienceCandidates = [
+                        Number(fin.convenienceFee || 0),
+                        convenienceEach * courseCount,
+                        convenienceEach,
+                    ].filter((v, i, arr) => Number(v) > 0 && arr.indexOf(v) === i);
+
+                    const addonUnit = (hasReviewer ? reviewerEach : 0) + (hasVehicleTips ? vehicleTipsEach : 0);
+                    let computedConvenienceFee = convenienceEach * courseCount;
+                    let addonMultiplier = (hasReviewer || hasVehicleTips) ? 1 : 0;
+
+                    if (addonUnit > 0 && targetBaseBeforePromo > 0 && convenienceCandidates.length > 0) {
+                        const best = convenienceCandidates
+                            .map((candidate) => {
+                                const rawMultiplier = (targetBaseBeforePromo - courseSubtotal - candidate) / addonUnit;
+                                const roundedMultiplier = Math.max(0, Math.round(rawMultiplier));
+                                const rebuiltBase = courseSubtotal + candidate + (roundedMultiplier * addonUnit);
+                                const error = Math.abs(rebuiltBase - targetBaseBeforePromo);
+                                const rangePenalty = roundedMultiplier <= courseCount ? 0 : 1000;
+                                return {
+                                    candidate,
+                                    roundedMultiplier,
+                                    score: error + rangePenalty,
+                                };
+                            })
+                            .sort((a, b) => a.score - b.score)[0];
+
+                        computedConvenienceFee = Number(best?.candidate || computedConvenienceFee);
+                        addonMultiplier = Math.max(0, Number(best?.roundedMultiplier || addonMultiplier));
+                    }
+
+                    const reviewerTotal = hasReviewer ? reviewerEach * addonMultiplier : 0;
+                    const vehicleTipsTotal = hasVehicleTips ? vehicleTipsEach * addonMultiplier : 0;
+                    const baseForPromo = courseSubtotal + reviewerTotal + vehicleTipsTotal + computedConvenienceFee;
+                    const computedPromoDiscount = hasBundle ? Number(((baseForPromo * promoPct) / 100).toFixed(2)) : 0;
+
+                    const normalizedAddonsDetailed = Array.isArray(fin.addonsDetailed) && fin.addonsDetailed.length > 0
+                        ? fin.addonsDetailed
+                        : [
+                            ...(reviewerTotal > 0 ? [{ name: `LTO Exam Reviewer${addonMultiplier > 1 ? ` x${addonMultiplier}` : ''}`, price: reviewerTotal }] : []),
+                            ...(vehicleTipsTotal > 0 ? [{ name: `Vehicle Maintenance Tips${addonMultiplier > 1 ? ` x${addonMultiplier}` : ''}`, price: vehicleTipsTotal }] : []),
+                        ];
+
+                    const normalizedConvenienceFee = Number(fin.convenienceFee || 0) > 0
+                        ? Number(fin.convenienceFee || 0)
+                        : computedConvenienceFee;
+                    const normalizedPromoDiscount = Number(fin.promoDiscount || 0) > 0
+                        ? Number(fin.promoDiscount || 0)
+                        : computedPromoDiscount;
+
+                    const refreshedCourseItems = pricedCourseItems.length > 0 ? pricedCourseItems : baseCourseItems;
+
                     setSelectedBooking(prev => ({
                         ...prev,
                         ...sched,
                         ...fin,
-                        coursePrice: prev.typeCategory === 'TDC + PDC' ? 2850 : (fin.legacyBasePrice || Number(fresh.course_price || 0)),
+                        addonsDetailed: normalizedAddonsDetailed,
+                        convenienceFee: normalizedConvenienceFee,
+                        promoDiscount: normalizedPromoDiscount,
+                        pdcSchedulesDetailed,
+                        courseItems: refreshedCourseItems,
+                        coursePrice: courseSubtotal > 0
+                            ? courseSubtotal
+                            : (prev.typeCategory === 'TDC + PDC' ? 2850 : (fin.legacyBasePrice || Number(fresh.course_price || 0))),
                         fullCourseName: fin.legacyBaseName || prev.fullCourseName,
                         amountPaid: total,
                         paymentDate: fresh.created_at,
@@ -503,7 +957,7 @@ const Booking = () => {
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                         <input
                             type="text"
-                            placeholder="Search student or ID..."
+                            placeholder="Search by student, booking ID, course, branch, method..."
                             value={searchTerm}
                             onChange={handleSearch}
                         />
@@ -566,22 +1020,18 @@ const Booking = () => {
 
                             {/* Course + Branch row */}
                             <div className="bkv2-row-2">
-                                <div className="bkv2-info-card">
-                                    <div className="bkv2-card-label">
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-                                        Course
-                                    </div>
-                                    <div className="bkv2-card-title">{selectedBooking.type}</div>
-                                    {selectedBooking.fullCourseName && (
-                                        <div className="bkv2-card-sub">{selectedBooking.fullCourseName}</div>
-                                    )}
-                                    {selectedBooking.addonNames && (
-                                        <div className="bkv2-addon-chip">
-                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                            {selectedBooking.addonNames}
+                                {modalCourseItems.map((course, idx) => (
+                                    <div className="bkv2-info-card" key={`course-card-${idx}`}>
+                                        <div className="bkv2-card-label">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                                            Course{modalCourseItems.length > 1 ? ` ${idx + 1}` : ''}
                                         </div>
-                                    )}
-                                </div>
+                                        <div className="bkv2-card-title">{toCompactCourseLabel(course)}</div>
+                                        {course?.name && (
+                                            <div className="bkv2-card-sub">{course.name}</div>
+                                        )}
+                                    </div>
+                                ))}
                                 <div className="bkv2-info-card">
                                     <div className="bkv2-card-label">
                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -591,6 +1041,12 @@ const Booking = () => {
                                     <div className="bkv2-card-sub" style={{ marginTop: 'auto', paddingTop: '8px' }}>
                                         {selectedBooking.paymentMethod}
                                     </div>
+                                    {selectedBooking.addonNames && (
+                                        <div className="bkv2-addon-chip" style={{ marginTop: '6px' }}>
+                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                            {selectedBooking.addonNames}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -609,66 +1065,60 @@ const Booking = () => {
                                 <div className="bkv2-receipt-body">
                                     {/* --- Section: Courses --- */}
                                     <div className="bkv2-section-mini">Courses & Training</div>
-                                    {selectedBooking.typeCategory === 'TDC + PDC' ? (
-                                        <>
-                                            <div className="bkv2-line-item">
-                                                <span>TDC Course{selectedBooking.courseTypeTdc ? ` (${selectedBooking.courseTypeTdc.toUpperCase()})` : ''}</span>
-                                                <span>₱700.00</span>
-                                            </div>
-                                            <div className="bkv2-line-item">
-                                                <span>PDC Course{selectedBooking.courseTypePdc ? ` (${selectedBooking.courseTypePdc})` : ''}</span>
-                                                <span>₱2,150.00</span>
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <div className="bkv2-line-item">
-                                            <span>{selectedBooking.typeCategory} Course</span>
-                                            <span>₱{selectedBooking.coursePrice.toLocaleString()}.00</span>
+                                    {(paymentBreakdown?.courseLines || []).map((line, idx) => (
+                                        <div className="bkv2-line-item" key={`course-line-${idx}`}>
+                                            <span>{line.label}</span>
+                                            <span>{toMoney(line.amount)}</span>
                                         </div>
-                                    )}
+                                    ))}
 
                                     {/* --- Section: Add-ons --- */}
-                                    {(selectedBooking.addonsDetailed || []).filter(addon => 
-                                        !(selectedBooking.typeCategory === 'TDC + PDC' && Number(addon.price) === 2150)
-                                    ).length > 0 && (
+                                    {(paymentBreakdown?.addonLines || []).length > 0 && (
                                         <>
                                             <div className="bkv2-section-mini">Custom Add-ons</div>
-                                            {(selectedBooking.addonsDetailed || [])
-                                                .filter(addon => !(selectedBooking.typeCategory === 'TDC + PDC' && Number(addon.price) === 2150))
+                                            {(paymentBreakdown?.addonLines || [])
                                                 .map((addon, idx) => (
                                                 <div className="bkv2-line-item addon" key={idx}>
                                                     <span>
                                                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                                         {addon.name}
                                                     </span>
-                                                    <span>₱{Number(addon.price).toLocaleString()}.00</span>
+                                                    <span>{toMoney(addon.price)}</span>
                                                 </div>
                                             ))}
                                         </>
                                     )}
 
                                     {/* --- Section: Fees & Discounts --- */}
-                                    {(selectedBooking.convenienceFee > 0 || selectedBooking.promoDiscount > 0) && (
+                                    {(paymentBreakdown && (paymentBreakdown.subtotal > 0 || paymentBreakdown.convenienceFee > 0 || paymentBreakdown.promoDiscount > 0)) && (
                                         <>
-                                            <div className="bkv2-section-mini">Adjustments & Fees</div>
-                                            {selectedBooking.convenienceFee > 0 && (
+                                            <div className="bkv2-section-mini">Summary</div>
+                                            <div className="bkv2-line-item addon">
+                                                <span>Subtotal</span>
+                                                <span>{toMoney(paymentBreakdown.subtotal)}</span>
+                                            </div>
+                                            {paymentBreakdown.convenienceFee > 0 && (
                                                 <div className="bkv2-line-item addon">
                                                     <span>
                                                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                                                         Convenience Fee
                                                     </span>
-                                                    <span>₱{selectedBooking.convenienceFee.toLocaleString()}.00</span>
+                                                    <span>{toMoney(paymentBreakdown.convenienceFee)}</span>
                                                 </div>
                                             )}
-                                            {selectedBooking.promoDiscount > 0 && (
+                                            {paymentBreakdown.promoDiscount > 0 && (
                                                 <div className="bkv2-line-item discount">
                                                     <span>
                                                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
                                                         Promo Discount (3%)
                                                     </span>
-                                                    <span>−₱{selectedBooking.promoDiscount.toLocaleString()}</span>
+                                                    <span>−{toMoney(paymentBreakdown.promoDiscount)}</span>
                                                 </div>
                                             )}
+                                            <div className="bkv2-line-item">
+                                                <span>Net Total</span>
+                                                <span>{toMoney(paymentBreakdown.grandTotal)}</span>
+                                            </div>
                                         </>
                                     )}
                                 </div>
@@ -693,21 +1143,51 @@ const Booking = () => {
                                         {selectedBooking.tdcDay1 && (
                                             <div className="bkv2-sched-card tdc">
                                                 <div className="bkv2-sched-badge">TDC</div>
+                                                <p className="bkv2-sched-title">
+                                                    {toCompactCourseLabel(tdcCourseItem)}
+                                                </p>
+                                                <p className="bkv2-sched-sub">
+                                                    {tdcCourseItem?.name || 'Theoretical Driving Course (TDC)'}
+                                                </p>
                                                 <div className="bkv2-sched-days">
+                                                    {(() => {
+                                                        const tdcLine1 = [selectedBooking.tdcSession1, selectedBooking.tdcTime1].filter(Boolean).join(' · ');
+                                                        const tdcLine2 = [selectedBooking.tdcSession2, selectedBooking.tdcTime2].filter(Boolean).join(' · ');
+                                                        const tdcSharedTime = tdcLine1 && tdcLine2 && tdcLine1 === tdcLine2 ? tdcLine1 : '';
+                                                        return (
+                                                            <>
                                                     <div className="bkv2-sched-day">
                                                         <span className="bkv2-day-label">Day 1</span>
                                                         <span className="bkv2-day-val">{selectedBooking.tdcDay1}</span>
+                                                        {!tdcSharedTime && tdcLine1 && (
+                                                            <span className="bkv2-time-line tdc">
+                                                                {tdcLine1}
+                                                            </span>
+                                                        )}
                                                     </div>
                                                     {selectedBooking.tdcDay2 && (
                                                         <div className="bkv2-sched-day">
                                                             <span className="bkv2-day-label">Day 2</span>
                                                             <span className="bkv2-day-val">{selectedBooking.tdcDay2}</span>
+                                                            {!tdcSharedTime && (tdcLine2 || tdcLine1) && (
+                                                                <span className="bkv2-time-line tdc">
+                                                                    {tdcLine2 || tdcLine1}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     )}
+                                                    {tdcSharedTime && (
+                                                        <span className="bkv2-time-line tdc shared">
+                                                            {tdcSharedTime} · Both Days
+                                                        </span>
+                                                    )}
+                                                            </>
+                                                        );
+                                                    })()}
                                                 </div>
                                             </div>
                                         )}
-                                        {selectedBooking.pdcDay1 && (
+                                        {selectedBooking.pdcDay1 && !(Array.isArray(selectedBooking.pdcSchedulesDetailed) && selectedBooking.pdcSchedulesDetailed.length > 0) && (
                                             <div className="bkv2-sched-card pdc">
                                                 <div className="bkv2-sched-badge">PDC</div>
                                                 <div className="bkv2-sched-days">
@@ -725,6 +1205,49 @@ const Booking = () => {
                                             </div>
                                         )}
                                     </div>
+
+                                    {Array.isArray(selectedBooking.pdcSchedulesDetailed) && selectedBooking.pdcSchedulesDetailed.length > 0 && (
+                                        <div className="bkv2-sched-grid" style={{ marginTop: '12px' }}>
+                                            {selectedBooking.pdcSchedulesDetailed.map((entry, idx) => (
+                                                <div className="bkv2-sched-card pdc" key={`pdc-detail-${entry.id}-${idx}`}>
+                                                    <div className="bkv2-sched-badge">PDC</div>
+                                                    <p className="bkv2-sched-title">
+                                                        {toCompactCourseLabel({ name: entry.label, type: entry.courseType, category: 'PDC' })}
+                                                    </p>
+                                                    <p className="bkv2-sched-sub">{entry.label}</p>
+                                                    <div className="bkv2-sched-days">
+                                                        {entry.day1 && (
+                                                            <div className="bkv2-sched-day">
+                                                                <span className="bkv2-day-label">Day 1</span>
+                                                                <span className="bkv2-day-val">{entry.day1}</span>
+                                                                {!entry.sharedTime && (
+                                                                    <span className="bkv2-time-line pdc">
+                                                                        {[entry.session1, entry.time1].filter(Boolean).join(' · ') || 'Time TBA'}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                        {entry.day2 && (
+                                                            <div className="bkv2-sched-day">
+                                                                <span className="bkv2-day-label">Day 2</span>
+                                                                <span className="bkv2-day-val">{entry.day2}</span>
+                                                                {!entry.sharedTime && (
+                                                                    <span className="bkv2-time-line pdc">
+                                                                        {[entry.session2, entry.time2].filter(Boolean).join(' · ') || [entry.session1, entry.time1].filter(Boolean).join(' · ') || 'Time TBA'}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                        {entry.sharedTime && (
+                                                            <span className="bkv2-time-line pdc shared">
+                                                                {entry.sharedTime} · Both Days
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -733,6 +1256,111 @@ const Booking = () => {
                         <div className="bkv2-footer">
                             <button className="bkv2-close-btn" onClick={() => setShowViewModal(false)}>Close</button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {showMarkPaidModal && markPaidBooking && (
+                <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !markPaidLoading && setShowMarkPaidModal(false)}>
+                    <div className="bk-mark-paid-modal">
+                        {(() => {
+                            const paid = Number(markPaidBooking?.amountPaid || 0);
+                            const downpaymentFactor = String(markPaidBooking?.paymentType || '').toLowerCase().includes('down') ? 2 : 1;
+                            const assessed = Math.max(Number(markPaidBooking?.coursePrice || 0), paid * downpaymentFactor, paid);
+                            const remaining = Math.max(0, Number((assessed - paid).toFixed(2)));
+                            const collectInput = Number(markPaidAmount);
+                            const collectAmount = Number.isFinite(collectInput) && collectInput > 0
+                                ? Math.min(collectInput, remaining)
+                                : 0;
+                            const remainingAfter = Math.max(0, Number((remaining - collectAmount).toFixed(2)));
+
+                            return (
+                                <>
+                                        <div className="bk-mark-paid-head bkv2-header">
+                                            <div className="bkv2-header-icon">
+                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                                                    <path d="M12 1v22" />
+                                                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14.5a3.5 3.5 0 0 1 0 7H6" />
+                                                </svg>
+                                            </div>
+                                            <div className="bkv2-header-text">
+                                                <h2>Collect Remaining Balance</h2>
+                                                <span>{markPaidBooking.id}</span>
+                                            </div>
+                                            <div className="bkv2-status-chip collectable">Collectable</div>
+                                            <button className="bk-mark-paid-close bkv2-close" onClick={() => !markPaidLoading && setShowMarkPaidModal(false)}>
+                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                                            </button>
+                                        </div>
+                
+                                        <div className="bk-mark-paid-body">
+                                            <div className="bk-mark-paid-panel bk-modal-card">
+                                                <div className="bk-mark-paid-row"><span>Student</span><strong>{markPaidBooking.student}</strong></div>
+                                                <div className="bk-mark-paid-row"><span>Course</span><strong>{markPaidBooking.courseSummary || markPaidBooking.type}</strong></div>
+                                                <div className="bk-mark-paid-row"><span>Total Assessment</span><strong>{toMoney(assessed)}</strong></div>
+                                                <div className="bk-mark-paid-row"><span>Already Paid</span><strong>{toMoney(paid)}</strong></div>
+                                                <div className="bk-mark-paid-row highlight"><span>Current Remaining</span><strong>{toMoney(remaining)}</strong></div>
+                                            </div>
+
+                                            <div className="bk-mark-paid-panel bk-modal-card bk-mark-paid-form-card">
+                                                <label className="bk-mark-paid-label">Amount to Collect</label>
+                                                <input
+                                                    className="bk-mark-paid-input"
+                                                    type="number"
+                                                    min="0"
+                                                    step="0.01"
+                                                    value={markPaidAmount}
+                                                    onChange={(e) => setMarkPaidAmount(e.target.value)}
+                                                    disabled={markPaidLoading}
+                                                />
+                                                <div className="bk-mark-paid-row sub"><span>Remaining After Payment</span><strong>{toMoney(remainingAfter)}</strong></div>
+
+                                                <label className="bk-mark-paid-label">Payment Method</label>
+                                                <select
+                                                    className="bk-mark-paid-input"
+                                                    value={markPaidMethod}
+                                                    onChange={(e) => setMarkPaidMethod(e.target.value)}
+                                                    disabled={markPaidLoading}
+                                                >
+                                                    <option value="Cash">Cash</option>
+                                                    <option value="Metrobank">Metrobank</option>
+                                                </select>
+
+                                                {markPaidMethod === 'Metrobank' && (
+                                                    <div className="bk-mark-paid-metrobank-box">
+                                                        <label className="bk-mark-paid-label">Transaction ID</label>
+                                                        <input
+                                                            className="bk-mark-paid-input"
+                                                            type="text"
+                                                            value={markPaidTxnId}
+                                                            onChange={(e) => setMarkPaidTxnId(e.target.value)}
+                                                            placeholder="Enter Metrobank transaction ID"
+                                                            disabled={markPaidLoading}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div className="bk-mark-paid-actions">
+                                            <button
+                                                className="bk-mark-paid-cancel"
+                                                onClick={() => !markPaidLoading && setShowMarkPaidModal(false)}
+                                                disabled={markPaidLoading}
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                className="bk-mark-paid-confirm"
+                                                onClick={handleConfirmMarkPaid}
+                                                disabled={markPaidLoading}
+                                            >
+                                                {markPaidLoading ? 'Processing...' : 'Confirm Payment'}
+                                            </button>
+                                        </div>
+                                </>
+                            );
+                        })()}
                     </div>
                 </div>
             )}
@@ -807,7 +1435,7 @@ const Booking = () => {
 
                 <div className="booking-table-wrapper">
                     <table className="booking-table">
-                        <thead><tr><th>ID</th><th>Student</th><th>Course</th><th>Branch</th><th>Schedule</th><th>Payment</th><th>Status</th><th>Action</th></tr></thead>
+                        <thead><tr><th>ID</th><th>Student</th><th>Branch</th><th>Payment</th><th>Status</th><th>Action</th></tr></thead>
                         <tbody>
                             {loading ? (
                                 Array.from({ length: 5 }).map((_, i) => (
@@ -819,9 +1447,7 @@ const Booking = () => {
                                                 <div className="bk-skeleton-cell" style={{ width: '120px' }}></div>
                                             </div>
                                         </td>
-                                        <td><div className="bk-skeleton-cell" style={{ width: '50px' }}></div></td>
                                         <td><div className="bk-skeleton-cell" style={{ width: '90px' }}></div></td>
-                                        <td><div className="bk-skeleton-cell" style={{ width: '100px' }}></div></td>
                                         <td><div className="bk-skeleton-cell" style={{ width: '80px' }}></div></td>
                                         <td><div className="bk-skeleton-cell" style={{ width: '70px', borderRadius: '20px' }}></div></td>
                                         <td><div className="bk-skeleton-cell" style={{ width: '80px' }}></div></td>
@@ -829,7 +1455,7 @@ const Booking = () => {
                                 ))
                             ) : filteredBookings.length === 0 ? (
                                 <tr>
-                                    <td colSpan="8" className="no-data">
+                                    <td colSpan="6" className="no-data">
                                         <div className="bk-empty-state">
                                             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -842,7 +1468,19 @@ const Booking = () => {
                                     </td>
                                 </tr>
                             ) : pagedBookings.map(booking => (
-                                <tr key={booking.id} className="bk-table-row">
+                                <tr
+                                    key={booking.id}
+                                    className="bk-table-row bk-clickable-row"
+                                    onClick={() => handleViewClick(booking)}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            handleViewClick(booking);
+                                        }
+                                    }}
+                                >
                                     <td className="bk-id">{booking.id}</td>
                                     <td>
                                         <div className="bk-table-student">
@@ -854,30 +1492,7 @@ const Booking = () => {
                                             </div>
                                         </div>
                                     </td>
-                                    <td>
-                                        <div className="bk-course-display">
-                                            <span className={`type-badge bundle`}>
-                                                <strong>{booking.type}</strong>
-                                            </span>
-                                        </div>
-                                    </td>
                                     <td className="bk-branch">{booking.branch}</td>
-                                    <td>
-                                        <div className="schedule-info-v2">
-                                            {booking.date && (
-                                                <div className="sched-tag tdc">
-                                                    <span className="label">TDC</span>
-                                                    <span className="val">{booking.date}</span>
-                                                </div>
-                                            )}
-                                            {booking.date2 && (
-                                                <div className="sched-tag pdc">
-                                                    <span className="label">PDC</span>
-                                                    <span className="val">{booking.date2}</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </td>
                                     <td className="bk-payment">
                                         <div className="payment-info-v2">
                                             <span className="amount font-bold">{booking.amount}</span>
@@ -893,15 +1508,15 @@ const Booking = () => {
                                         <div className="table-actions">
                                             {booking.status === 'Collectable' && (
                                                 <>
-                                                    <button className="approve-action-btn" title="Mark as Paid" onClick={() => updateStatus(booking.id, 'Paid')}>
+                                                    <button className="approve-action-btn" title="Mark as Paid" onClick={(e) => { e.stopPropagation(); openMarkPaidModal(booking); }}>
                                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                                                     </button>
-                                                    <button className="reject-action-btn" title="Cancel" onClick={() => updateStatus(booking.id, 'Cancelled')}>
+                                                    <button className="reject-action-btn" title="Cancel" onClick={(e) => { e.stopPropagation(); updateStatus(booking.id, 'Cancelled'); }}>
                                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                                                     </button>
                                                 </>
                                             )}
-                                            <button className="view-action-btn" title="View Details" onClick={() => handleViewClick(booking)}>
+                                            <button className="view-action-btn" title="View Details" onClick={(e) => { e.stopPropagation(); handleViewClick(booking); }}>
                                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                                             </button>
                                         </div>
