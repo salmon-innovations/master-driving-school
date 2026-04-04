@@ -383,9 +383,9 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
                                                              END,
                 total_amount = $1,
                                         updated_at = CURRENT_TIMESTAMP
-          WHERE transaction_id = $3 AND status = 'pending'
+          WHERE transaction_id = $2 AND status = 'pending'
                     RETURNING id, user_id, notes, status`,
-                                [amountPhp, orderNo, originalMsgId]
+                                [amountPhp, originalMsgId]
     );
 
     if (!rows.length) return null;

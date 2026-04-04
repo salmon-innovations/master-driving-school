@@ -1,6 +1,7 @@
 {
   "reviewer": 30,
   "vehicleTips": 20,
-  "convenienceFee": "25",
-  "promoBundleDiscountPercent": 3
+  "convenienceFee": "0",
+  "promoBundleDiscountPercent": 3,
+  "customAddons": []
 }

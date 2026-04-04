@@ -1,7 +1,7 @@
 const pool = require('./config/db');
 
 async function cleanupUser() {
-    const email = 'marcjeffgabasa@gmail.com';
+    const email = 'gabasamarcjeff03@gmail.com';
     try {
         console.log(`🧹 Starting data cleanup for: ${email} (Account will be kept)`);
 
