@@ -202,6 +202,9 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
   const finalAmount = paymentType === "downpayment" ? downpaymentAmount : subtotal;
 
   useEffect(() => {
+    // Do not enforce auth/cart guards while showing final result screens.
+    if (showPaymentSuccess || showPaymentFailed) return
+
     const isGuest = localStorage.getItem('isGuestCheckout') === 'true'
     if (!isLoggedIn && !isGuest) {
       showNotification("Please sign in to proceed with payment", "error")
@@ -213,7 +216,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       handleReleaseLocks()
       onNavigate("courses")
     }
-  }, [activeCart, cart, onNavigate, isLoggedIn, showPaymentSuccess])
+  }, [activeCart, cart, onNavigate, isLoggedIn, showPaymentSuccess, showPaymentFailed])
 
   // Auto-select StarPay — it's the only payment method
   /* useEffect(() => {
@@ -260,8 +263,6 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     setQrStatus('pending')
     setQrExpiresAt(null)
     setIsProcessing(false)
-    localStorage.removeItem('isGuestCheckout')
-    localStorage.removeItem('guestEnrollmentData')
     setReceiptCart([...cart])
     setCart([])
     setShowPaymentFailed(false)
@@ -438,7 +439,21 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
             return
           }
 
-          if (localStatus === 'cancelled' || ['FAIL', 'CLOSE', 'REVERSED', 'CANCEL'].includes(trxState)) {
+          if (localStatus === 'cancelled') {
+            clearInterval(pollRef.current)
+            pollRef.current = null
+            handlePaymentFailure('cancelled')
+            return
+          }
+
+          if (['CLOSE'].includes(trxState)) {
+            clearInterval(pollRef.current)
+            pollRef.current = null
+            handlePaymentFailure('expired')
+            return
+          }
+
+          if (['FAIL', 'REVERSED', 'CANCEL'].includes(trxState)) {
             clearInterval(pollRef.current)
             pollRef.current = null
             handlePaymentFailure('gateway')
@@ -602,7 +617,12 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
             {/* Action Buttons */}
             <div className="w-full flex flex-col sm:flex-row gap-4">
               <button
-                onClick={() => { setCart([]); onNavigate('profile'); }}
+                onClick={() => {
+                  localStorage.removeItem('isGuestCheckout')
+                  localStorage.removeItem('guestEnrollmentData')
+                  setCart([])
+                  onNavigate('profile')
+                }}
                 className="flex-1 bg-white border-2 border-slate-200 text-slate-700 font-bold py-3.5 px-6 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95 flex items-center justify-center gap-2"
               >
                 <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -612,7 +632,12 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
               </button>
 
               <button
-                onClick={() => { setCart([]); onNavigate('home'); }}
+                onClick={() => {
+                  localStorage.removeItem('isGuestCheckout')
+                  localStorage.removeItem('guestEnrollmentData')
+                  setCart([])
+                  onNavigate('home')
+                }}
                 className="flex-1 bg-gradient-to-r from-[#2157da] to-[#1e4ebf] text-white font-bold py-3.5 px-6 rounded-xl hover:from-[#1e4ebf] hover:to-[#1a45ab] transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
               >
                 <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
