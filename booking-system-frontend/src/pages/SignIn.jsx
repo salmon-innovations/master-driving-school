@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { authAPI, setAuthToken } from '../services/api'
 import { useNotification } from '../context/NotificationContext'
+import TurnstileWidget from '../components/TurnstileWidget'
 
 function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLockedAccountEmail }) {
   const { showNotification } = useNotification()
@@ -13,6 +14,7 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
   const [showTermsModal, setShowTermsModal] = useState(false)
+  const [turnstileToken, setTurnstileToken] = useState('')
 
   useEffect(() => {
     const userToken = localStorage.getItem('userToken')
@@ -24,7 +26,7 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
         if (role === 'admin' || role === 'super_admin') {
           onNavigate('admin')
         } else if (role === 'staff') {
-          onNavigate('staff-dashboard')
+          onNavigate('admin')
         } else {
           onNavigate('home')
         }
@@ -68,6 +70,10 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
       newErrors.terms = 'You must accept the Terms & Conditions'
     }
 
+    if (!turnstileToken) {
+      newErrors.turnstile = 'Please complete human verification'
+    }
+
     return newErrors
   }
 
@@ -83,6 +89,7 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
           email: formData.email,
           password: btoa(unescape(encodeURIComponent(formData.password))),
           isEncoded: true,
+          turnstileToken,
         })
 
         // Handle expected unverified state without treating it as a failed login error.
@@ -119,7 +126,7 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
         if (role === 'admin' || role === 'super_admin') {
           onNavigate('admin')
         } else if (role === 'staff') {
-          onNavigate('staff-dashboard')
+          onNavigate('admin')
         } else {
           onNavigate('home')
         }
@@ -284,10 +291,29 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
               <p className="text-xs text-red-500">{errors.terms}</p>
             )}
 
+            <div className="space-y-2">
+              <TurnstileWidget
+                onVerify={(token) => {
+                  setTurnstileToken(token)
+                  if (errors.turnstile) {
+                    setErrors(prev => ({ ...prev, turnstile: '' }))
+                  }
+                }}
+                onExpire={() => {
+                  setTurnstileToken('')
+                }}
+                onError={() => {
+                  setTurnstileToken('')
+                  setErrors(prev => ({ ...prev, turnstile: 'Verification failed. Please retry.' }))
+                }}
+              />
+              {errors.turnstile && <p className="text-xs text-red-500">{errors.turnstile}</p>}
+            </div>
+
             {/* Login Button */}
             <button
               type="submit"
-              disabled={loading || !acceptedTerms}
+              disabled={loading || !acceptedTerms || !turnstileToken}
               className="w-full bg-[#1e3a8a] text-white py-3.5 rounded-lg font-bold hover:bg-[#172554] transition-all disabled:bg-[#93c5fd] disabled:text-white disabled:cursor-not-allowed uppercase tracking-wide hover:shadow-lg transform hover:-translate-y-0.5 shadow-md"
             >
               {loading ? 'LOGGING IN...' : 'LOGIN'}

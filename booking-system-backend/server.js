@@ -1,10 +1,15 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 const hpp = require('hpp');
 const compression = require('compression');
 require('dotenv').config();
+const {
+  apiLimiter,
+  authLoginLimiter,
+  authRegisterLimiter,
+  authRecoveryLimiter,
+} = require('./middleware/rateLimiters');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -26,6 +31,18 @@ pool.query('SELECT NOW()', (err, res) => {
     pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT')
       .then(() => console.log('✅ avatar column ready'))
       .catch(e => console.warn('⚠️  avatar migration skipped:', e.message));
+
+    pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0')
+      .then(() => console.log('✅ failed_login_attempts column ready'))
+      .catch(e => console.warn('⚠️  failed_login_attempts migration skipped:', e.message));
+
+    pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_failed_login_at TIMESTAMP')
+      .then(() => console.log('✅ last_failed_login_at column ready'))
+      .catch(e => console.warn('⚠️  last_failed_login_at migration skipped:', e.message));
+
+    pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS login_lock_until TIMESTAMP')
+      .then(() => console.log('✅ login_lock_until column ready'))
+      .catch(e => console.warn('⚠️  login_lock_until migration skipped:', e.message));
 
     // Expand the role CHECK constraint to include 'super_admin', then promote admin@gmail.com
     pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`)
@@ -80,27 +97,15 @@ app.use(helmet({
 app.use(compression());
 app.use(hpp());
 
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 500,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests. Please try again later.' },
-});
-
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 40,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many authentication attempts. Please wait and try again.' },
-});
-
 app.use('/api', apiLimiter);
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/resend-code', authLimiter);
-app.use('/api/auth/forgot-password', authLimiter);
-app.use('/api/auth/verify-email', authLimiter);
+app.use('/api/auth/login', authLoginLimiter);
+app.use('/api/auth/register', authRegisterLimiter);
+app.use('/api/auth/guest-checkout', authRegisterLimiter);
+app.use('/api/auth/resend-code', authRecoveryLimiter);
+app.use('/api/auth/forgot-password', authRecoveryLimiter);
+app.use('/api/auth/verify-email', authRecoveryLimiter);
+app.use('/api/auth/verify-reset-otp', authRecoveryLimiter);
+app.use('/api/auth/reset-password', authRecoveryLimiter);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));

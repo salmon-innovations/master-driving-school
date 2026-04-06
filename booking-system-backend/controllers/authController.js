@@ -1,9 +1,45 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const axios = require('axios');
 const pool = require('../config/db');
 const path = require('path');
 const fs = require('fs');
 const { generateVerificationCode, sendVerificationEmail, sendGuestEnrollmentEmail } = require('../utils/emailService');
+
+const MAX_FAILED_LOGIN_ATTEMPTS = parseInt(process.env.MAX_FAILED_LOGIN_ATTEMPTS || '5', 10);
+const LOGIN_LOCK_MINUTES = parseInt(process.env.LOGIN_LOCK_MINUTES || '15', 10);
+const TURNSTILE_ENABLED = process.env.TURNSTILE_ENABLED === 'true' || process.env.NODE_ENV === 'production';
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '';
+
+const verifyTurnstileToken = async (token, remoteIp) => {
+  if (!TURNSTILE_ENABLED) return true;
+  if (!TURNSTILE_SECRET_KEY) {
+    console.error('Turnstile enabled but TURNSTILE_SECRET_KEY is missing');
+    return false;
+  }
+  if (!token) return false;
+
+  try {
+    const params = new URLSearchParams();
+    params.append('secret', TURNSTILE_SECRET_KEY);
+    params.append('response', token);
+    if (remoteIp) params.append('remoteip', remoteIp);
+
+    const verifyResponse = await axios.post(
+      'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+      params.toString(),
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 5000,
+      }
+    );
+
+    return Boolean(verifyResponse.data && verifyResponse.data.success === true);
+  } catch (error) {
+    console.error('Turnstile verification error:', error.message);
+    return false;
+  }
+};
 
 // Generate JWT token
 const generateToken = (userId, role = 'student', branchId = null) => {
@@ -32,7 +68,13 @@ const register = async (req, res) => {
       zipCode,
       emergencyContactPerson,
       emergencyContactNumber,
+      turnstileToken,
     } = req.body;
+
+    const turnstileOk = await verifyTurnstileToken(turnstileToken, req.ip);
+    if (!turnstileOk) {
+      return res.status(400).json({ error: 'Human verification failed. Please try again.' });
+    }
 
     // Validate required fields
     if (!firstName || !lastName || !email || !password) {
@@ -316,11 +358,16 @@ const guestCheckout = async (req, res) => {
 // Login user
 const login = async (req, res) => {
   try {
-    const { email, password: encodedPassword, isEncoded } = req.body;
+    const { email, password: encodedPassword, isEncoded, turnstileToken } = req.body;
 
     // Validate input
     if (!email || !encodedPassword) {
       return res.status(400).json({ error: 'Please provide email and password' });
+    }
+
+    const turnstileOk = await verifyTurnstileToken(turnstileToken, req.ip);
+    if (!turnstileOk) {
+      return res.status(400).json({ error: 'Human verification failed. Please try again.' });
     }
 
     let password = encodedPassword;
@@ -343,6 +390,16 @@ const login = async (req, res) => {
 
     const user = result.rows[0];
 
+    const activeLockUntil = user.login_lock_until ? new Date(user.login_lock_until) : null;
+    if (activeLockUntil && activeLockUntil > new Date()) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((activeLockUntil.getTime() - Date.now()) / 1000));
+      return res.status(423).json({
+        error: 'Too many failed login attempts. Please try again later.',
+        accountLocked: true,
+        retryAfterSeconds,
+      });
+    }
+
     // Debug: Log user status from database
     console.log('🔍 Login attempt for:', user.email);
     console.log('🔍 User status from DB:', user.status);
@@ -351,7 +408,43 @@ const login = async (req, res) => {
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
+      const nextFailedAttempts = Number(user.failed_login_attempts || 0) + 1;
+      const shouldLockAccount = nextFailedAttempts >= MAX_FAILED_LOGIN_ATTEMPTS;
+      const lockUntil = shouldLockAccount
+        ? new Date(Date.now() + LOGIN_LOCK_MINUTES * 60 * 1000)
+        : null;
+
+      await pool.query(
+        `UPDATE users
+         SET failed_login_attempts = $1,
+             last_failed_login_at = CURRENT_TIMESTAMP,
+             login_lock_until = $2,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3`,
+        [nextFailedAttempts, lockUntil, user.id]
+      );
+
+      if (shouldLockAccount) {
+        return res.status(423).json({
+          error: 'Too many failed login attempts. Please try again later.',
+          accountLocked: true,
+          retryAfterSeconds: LOGIN_LOCK_MINUTES * 60,
+        });
+      }
+
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    if (Number(user.failed_login_attempts || 0) > 0 || user.login_lock_until || user.last_failed_login_at) {
+      await pool.query(
+        `UPDATE users
+         SET failed_login_attempts = 0,
+             last_failed_login_at = NULL,
+             login_lock_until = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [user.id]
+      );
     }
 
     // Check if account is inactive (check before email verification)

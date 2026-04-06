@@ -6,7 +6,18 @@ import Pagination from './components/Pagination';
 
 const COURSE_PAGE_SIZE = 10;
 
-const CourseManagement = () => {
+const COURSE_TAB_PERMISSION_MAP = {
+    courses: ['accounts.courses.view', 'accounts.courses.tab.courses'],
+    discounts: ['accounts.courses.view', 'accounts.courses.tab.discounts'],
+    config: ['accounts.courses.view', 'accounts.courses.tab.config'],
+};
+
+const normalizePermissionList = (permissions) => {
+    if (!Array.isArray(permissions)) return [];
+    return permissions.filter((permission) => typeof permission === 'string' && permission.trim().length > 0);
+};
+
+const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', currentUserBranchId = null }) => {
     const { showNotification } = useNotification();
     const [searchTerm, setSearchTerm] = useState('');
     const [courses, setCourses] = useState([]);
@@ -39,17 +50,38 @@ const CourseManagement = () => {
     const [addonsConfig, setAddonsConfig] = useState({ reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 3, customAddons: [] });
     const [addonsLoading, setAddonsLoading] = useState(false);
 
+    const normalizedRole = String(currentUserRole || '').toLowerCase();
+    const isSuperAdmin = normalizedRole === 'super_admin';
+    const isBranchScopedUser = (normalizedRole === 'staff' || normalizedRole === 'admin') && !!currentUserBranchId;
+    const permissionSet = new Set(normalizePermissionList(currentUserPermissions));
+    const canAccessCourseTab = (tabKey) => {
+        if (isSuperAdmin) return true;
+        const requiredPermissions = COURSE_TAB_PERMISSION_MAP[tabKey] || [];
+        // If no explicit permission payload is provided, keep legacy behavior by allowing tabs.
+        if (permissionSet.size === 0) return true;
+        return requiredPermissions.some((permission) => permissionSet.has(permission));
+    };
+    const allowedCourseTabs = ['courses', 'discounts', 'config'].filter((tabKey) => canAccessCourseTab(tabKey));
+
     // Fetch courses from database
     useEffect(() => {
         fetchCourses();
         coursesAPI.getConfig().then(r => { if (r.success) setCourseConfig(r.config); }).catch(() => {});
-        branchesAPI.getAll().then(r => { if (r.success) setBranches(r.branches || []); }).catch(() => {});
+        branchesAPI.getAll().then(r => {
+            if (!r.success) return;
+            let loadedBranches = r.branches || [];
+            if (isBranchScopedUser) {
+                loadedBranches = loadedBranches.filter((branch) => String(branch.id) === String(currentUserBranchId));
+                setViewingBranchId(String(currentUserBranchId));
+            }
+            setBranches(loadedBranches);
+        }).catch(() => {});
         adminAPI.getAddonsConfig().then(r => { 
             if (r.success) {
                 setAddonsConfig({ reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 3, ...r.config, customAddons: r.config.customAddons || [] });
             }
         }).catch(() => {});
-    }, []);
+    }, [isBranchScopedUser, currentUserBranchId]);
 
     const fetchCourses = async () => {
         setLoading(true);
@@ -397,6 +429,24 @@ const CourseManagement = () => {
     // Reset to page 1 when search changes
     useEffect(() => { setCoursePage(1); }, [searchTerm]);
 
+    useEffect(() => {
+        if (allowedCourseTabs.length === 0) return;
+        if (!allowedCourseTabs.includes(activeTab)) {
+            setActiveTab(allowedCourseTabs[0]);
+        }
+    }, [activeTab, allowedCourseTabs]);
+
+    useEffect(() => {
+        if (isBranchScopedUser && currentUserBranchId) {
+            setViewingBranchId(String(currentUserBranchId));
+            return;
+        }
+
+        if (viewingBranchId && !branches.some((branch) => String(branch.id) === String(viewingBranchId))) {
+            setViewingBranchId(null);
+        }
+    }, [isBranchScopedUser, currentUserBranchId, branches, viewingBranchId]);
+
     const courseTotalPages = Math.ceil(filteredCourses.length / COURSE_PAGE_SIZE);
     const pagedCourses = filteredCourses.slice((coursePage - 1) * COURSE_PAGE_SIZE, coursePage * COURSE_PAGE_SIZE);
     const viewingBranch = branches.find(b => String(b.id) === String(viewingBranchId)) || null;
@@ -502,49 +552,70 @@ const CourseManagement = () => {
         <div className="user-management-container">
             {/* Tabs */}
             <div className="cfg-tabs-header" style={{ display: 'flex', gap: '8px', borderBottom: '2px solid var(--border-color)', marginBottom: '24px', overflow: 'hidden', background: 'var(--card-bg)', padding: '0 20px', borderRadius: '12px' }}>
-                <button
-                    className={`cfg-tab-btn${activeTab === 'courses' ? ' active' : ''}`}
-                    onClick={() => setActiveTab('courses')}
-                    style={{ marginBottom: '-2px' }}
-                >
-                    <span className="cfg-tab-icon">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
-                    </span>
-                    <span className="tab-label">Courses</span>
-                </button>
-                <button
-                    className={`cfg-tab-btn${activeTab === 'discounts' ? ' active' : ''}`}
-                    onClick={() => {
-                        setActiveTab('discounts');
-                        const initForm = {};
-                        courses.forEach(c => { 
-                            initForm[c.id] = c.discount || 0; 
-                            if (c.pricing_data) {
-                                c.pricing_data.forEach(v => {
-                                    initForm[`${c.id}_${v.type}`] = v.discount || 0;
-                                });
-                            }
-                        });
-                        setDiscountForm(initForm);
-                    }}
-                    style={{ marginBottom: '-2px' }}
-                >
-                    <span className="cfg-tab-icon">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 0 2.83 2.83L23.41 16.24v-2.83l-2.82-2.82z"></path><line x1="7" y1="7" x2="7" y2="7"></line></svg>
-                    </span>
-                    <span className="tab-label">Discounts</span>
-                </button>
-                <button
-                    className={`cfg-tab-btn${activeTab === 'config' ? ' active' : ''}`}
-                    onClick={() => setActiveTab('config')}
-                    style={{ marginBottom: '-2px' }}
-                >
-                    <span className="cfg-tab-icon">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-                    </span>
-                    <span className="tab-label">Config</span>
-                </button>
+                {canAccessCourseTab('courses') && (
+                    <button
+                        className={`cfg-tab-btn${activeTab === 'courses' ? ' active' : ''}`}
+                        onClick={() => setActiveTab('courses')}
+                        style={{ marginBottom: '-2px' }}
+                    >
+                        <span className="cfg-tab-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+                        </span>
+                        <span className="tab-label">Courses</span>
+                    </button>
+                )}
+                {canAccessCourseTab('discounts') && (
+                    <button
+                        className={`cfg-tab-btn${activeTab === 'discounts' ? ' active' : ''}`}
+                        onClick={() => {
+                            setActiveTab('discounts');
+                            const initForm = {};
+                            courses.forEach(c => {
+                                initForm[c.id] = c.discount || 0;
+                                if (c.pricing_data) {
+                                    c.pricing_data.forEach(v => {
+                                        initForm[`${c.id}_${v.type}`] = v.discount || 0;
+                                    });
+                                }
+                            });
+                            setDiscountForm(initForm);
+                        }}
+                        style={{ marginBottom: '-2px' }}
+                    >
+                        <span className="cfg-tab-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 0 2.83 2.83L23.41 16.24v-2.83l-2.82-2.82z"></path><line x1="7" y1="7" x2="7" y2="7"></line></svg>
+                        </span>
+                        <span className="tab-label">Discounts</span>
+                    </button>
+                )}
+                {canAccessCourseTab('config') && (
+                    <button
+                        className={`cfg-tab-btn${activeTab === 'config' ? ' active' : ''}`}
+                        onClick={() => setActiveTab('config')}
+                        style={{ marginBottom: '-2px' }}
+                    >
+                        <span className="cfg-tab-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                        </span>
+                        <span className="tab-label">Config</span>
+                    </button>
+                )}
             </div>
+
+            {allowedCourseTabs.length === 0 && (
+                <div style={{
+                    marginBottom: '20px',
+                    border: '1px solid #fecaca',
+                    background: '#fef2f2',
+                    color: '#991b1b',
+                    borderRadius: '10px',
+                    padding: '12px 14px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600
+                }}>
+                    No Course Management tabs are enabled for this account.
+                </div>
+            )}
 
             {/* Viewing Branch Bar */}
             <div style={{
@@ -577,11 +648,12 @@ const CourseManagement = () => {
                         background: 'var(--primary-light)', color: 'var(--primary-color)',
                         fontSize: '0.82rem', fontWeight: '700'
                     }}>
-                        {branches.length} Branch{branches.length !== 1 ? 'es' : ''}
+                        {isBranchScopedUser ? 'Assigned Branch' : `${branches.length} Branch${branches.length !== 1 ? 'es' : ''}`}
                     </span>
                     <select
                         value={viewingBranchId ?? ''}
                         onChange={e => setViewingBranchId(e.target.value || null)}
+                        disabled={isBranchScopedUser}
                         style={{
                             padding: '8px 36px 8px 14px',
                             border: '1.5px solid var(--border-color)',
@@ -590,15 +662,16 @@ const CourseManagement = () => {
                             fontWeight: '600',
                             background: 'var(--card-bg)',
                             color: 'var(--text-color)',
-                            cursor: 'pointer',
                             appearance: 'none',
                             backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
                             backgroundRepeat: 'no-repeat',
                             backgroundPosition: 'right 10px center',
-                            minWidth: '220px'
+                            minWidth: '220px',
+                            opacity: isBranchScopedUser ? 0.85 : 1,
+                            cursor: isBranchScopedUser ? 'not-allowed' : 'pointer'
                         }}
                     >
-                        <option value="">All Branches / Default View</option>
+                        {!isBranchScopedUser && <option value="">All Branches / Default View</option>}
                         {branches.map(b => (
                             <option key={b.id} value={b.id}>{shortBranchName(b.name)}</option>
                         ))}

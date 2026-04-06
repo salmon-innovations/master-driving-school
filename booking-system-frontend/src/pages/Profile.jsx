@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { authAPI, schedulesAPI, starpayAPI, testimonialsAPI, MEDIA_BASE_URL } from '../services/api'
 import { useNotification } from '../context/NotificationContext'
 import { resolveAvatar } from '../utils/avatarUtils'
+import NationalitySelect from '../components/NationalitySelect'
 
 // Helper component for detail items
 const DetailItem = ({ label, value }) => {
@@ -1611,7 +1612,14 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                   <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Gender</label><select className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.gender} onChange={e => setProfileForm({...profileForm, gender: e.target.value})}><option value="">Select Gender</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></div>
                   <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Birthday</label><input type="date" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.birthday} onChange={e => setProfileForm({...profileForm, birthday: e.target.value})} /></div>
                   <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Birth Place</label><input type="text" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.birthPlace} onChange={e => setProfileForm({...profileForm, birthPlace: e.target.value})} /></div>
-                  <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Nationality</label><input type="text" className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.nationality} onChange={e => setProfileForm({...profileForm, nationality: e.target.value})} /></div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Nationality</label>
+                    <NationalitySelect
+                      value={profileForm.nationality}
+                      onChange={e => setProfileForm({...profileForm, nationality: e.target.value})}
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white pr-10"
+                    />
+                  </div>
                   <div><label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Marital Status</label><select className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2157da] focus:border-transparent outline-none transition-all text-gray-800 bg-gray-50/50 focus:bg-white" value={profileForm.maritalStatus} onChange={e => setProfileForm({...profileForm, maritalStatus: e.target.value})}><option value="">Select</option><option value="single">Single</option><option value="married">Married</option><option value="widowed">Widowed</option></select></div>
                 </div>
               </section>

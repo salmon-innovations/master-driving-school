@@ -5,6 +5,8 @@ import { useNotification } from '../context/NotificationContext';
 import Pagination from './components/Pagination';
 import { getZipFromAddress } from '../utils/philippineZipCodes';
 import { resolveAvatar } from '../utils/avatarUtils';
+import NationalitySelect from '../components/NationalitySelect';
+import SmartAddress from '../components/SmartAddress';
 
 const USER_PAGE_SIZE = 10;
 
@@ -19,6 +21,7 @@ const PERMISSION_GROUPS = [
             { key: 'operations.sales.manage', label: 'Sales & Payments' },
             { key: 'operations.crm.manage', label: 'CRM' },
             { key: 'operations.analytics.view', label: 'Analytics' },
+            { key: 'operations.best_selling_courses.view', label: 'Best Selling Courses' },
             { key: 'operations.news.manage', label: 'News & Events' },
         ],
     },
@@ -28,6 +31,36 @@ const PERMISSION_GROUPS = [
         permissions: [
             { key: 'accounts.courses.view', label: 'Course Management' },
             { key: 'accounts.config.view', label: 'Config Management' },
+        ],
+    },
+    {
+        id: 'course_management_tabs',
+        label: 'Course Management Tabs',
+        permissions: [
+            { key: 'accounts.courses.tab.courses', label: 'Courses Tab' },
+            { key: 'accounts.courses.tab.discounts', label: 'Discounts Tab' },
+            { key: 'accounts.courses.tab.config', label: 'Config Tab' },
+        ],
+    },
+    {
+        id: 'config_management_tabs',
+        label: 'Config Management Tabs',
+        permissions: [
+            { key: 'accounts.config.tab.branches', label: 'Branches Tab' },
+            { key: 'accounts.config.tab.roles', label: 'User Roles Tab' },
+            { key: 'accounts.config.tab.coursetypes', label: 'Course Types Tab' },
+            { key: 'accounts.config.tab.emailcontent', label: 'Email Content Tab' },
+            { key: 'accounts.config.tab.settings', label: 'System Settings Tab' },
+            { key: 'accounts.config.tab.backup', label: 'Backup & Data Tab' },
+        ],
+    },
+    {
+        id: 'schedule_page_tabs',
+        label: 'Schedule Page Tabs',
+        permissions: [
+            { key: 'operations.schedules.tab.schedule', label: 'Schedule Tab' },
+            { key: 'operations.schedules.tab.summary', label: 'Student Summary Tab' },
+            { key: 'operations.schedules.tab.noshow', label: 'No-Show Students Tab' },
         ],
     },
     {
@@ -45,6 +78,9 @@ const PERMISSION_GROUPS = [
 const PERMISSION_GROUP_HINTS = {
     main_menu: 'Overview is always available and does not need a permission.',
     management_menu: 'Choose which admin management pages this account can open.',
+    course_management_tabs: 'Control which tabs are visible inside Course Management.',
+    config_management_tabs: 'Control which tabs are visible inside Config Management.',
+    schedule_page_tabs: 'Control which tabs are visible inside the Schedule page.',
     account_actions: 'Account Management access is action-based: choose allowed actions here.',
 };
 
@@ -60,24 +96,44 @@ const PERMISSION_LABEL_MAP = PERMISSION_GROUPS.reduce((acc, group) => {
 const ROLE_PERMISSION_PRESETS = {
     admin: [
         'operations.schedules.manage',
+        'operations.schedules.tab.schedule',
+        'operations.schedules.tab.summary',
+        'operations.schedules.tab.noshow',
         'operations.bookings.manage',
         'operations.walk_in.manage',
         'operations.sales.manage',
         'operations.crm.manage',
         'operations.analytics.view',
+        'operations.best_selling_courses.view',
         'operations.news.manage',
         'accounts.courses.view',
-        'accounts.users.create'
+        'accounts.courses.tab.courses',
+        'accounts.courses.tab.discounts',
+        'accounts.courses.tab.config',
+        'accounts.config.view',
+        'accounts.config.tab.branches',
+        'accounts.config.tab.coursetypes',
+        'accounts.config.tab.emailcontent',
+        'accounts.config.tab.settings',
+        'accounts.users.create',
+        'accounts.users.edit',
+        'accounts.users.reset_password',
     ],
     staff: [
         'operations.schedules.manage',
+        'operations.schedules.tab.schedule',
+        'operations.schedules.tab.summary',
+        'operations.schedules.tab.noshow',
         'operations.bookings.manage',
         'operations.walk_in.manage',
         'operations.sales.manage',
         'operations.crm.manage',
+        'operations.best_selling_courses.view',
         'operations.news.manage',
     ],
 };
+
+const STAFF_PERMISSION_KEYS = new Set(ROLE_PERMISSION_PRESETS.staff || []);
 
 const normalizeRoleValue = (role) => String(role || '').toLowerCase();
 
@@ -148,7 +204,14 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
         gender: '',
         age: '',
         birthday: '',
+        nationality: '',
         address: '',
+        houseNumber: '',
+        streetName: '',
+        village: '',
+        barangay: '',
+        city: '',
+        province: '',
         zipCode: '',
         contactNumber: '',
         email: '',
@@ -161,6 +224,21 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
     const [originalEmail, setOriginalEmail] = useState('');
 
     const currentPermissionSet = new Set(normalizePermissionList(currentUserPermissions));
+    const normalizedCurrentUserRole = normalizeRoleValue(currentUserRole);
+    const isCurrentUserAdmin = normalizedCurrentUserRole === 'admin';
+    const isAddMode = !editingUser;
+    const isAdminAddingUser = isCurrentUserAdmin && isAddMode;
+    const isStaffTargetRole = normalizeRoleValue(userData.role) === 'staff';
+    const limitPermissionPickerToStaff = isAdminAddingUser || isStaffTargetRole;
+    const visiblePermissionGroups = limitPermissionPickerToStaff
+        ? PERMISSION_GROUPS.map((group) => ({
+            ...group,
+            permissions: group.permissions.filter((permission) => STAFF_PERMISSION_KEYS.has(permission.key)),
+        })).filter((group) => group.permissions.length > 0)
+        : PERMISSION_GROUPS;
+    const visiblePermissionKeys = visiblePermissionGroups.flatMap((group) => group.permissions.map((permission) => permission.key));
+    const visiblePermissionKeySet = new Set(visiblePermissionKeys);
+
     const canCreateUsers = currentPermissionSet.has('accounts.users.create');
     const canEditUsers = currentPermissionSet.has('accounts.users.edit');
     const canToggleUserStatus = currentPermissionSet.has('accounts.users.status');
@@ -335,28 +413,46 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
         }
 
         if (name === 'role') {
+            if (isAdminAddingUser && normalizeRoleValue(formattedValue) !== 'staff') {
+                return;
+            }
             const permissions = getDefaultPermissionsForRole(value);
-            setUserData({ ...userData, [name]: formattedValue, permissions });
+            setUserData((prev) => {
+                const nextRole = normalizeRoleValue(formattedValue);
+                const nextBranch = nextRole === 'staff' && prev.branch === 'all' ? '' : prev.branch;
+                return { ...prev, [name]: formattedValue, branch: nextBranch, permissions };
+            });
             if (errors.permissions) {
                 setErrors({ ...errors, permissions: '' });
             }
             return;
         }
 
-        const nextUserData = { ...userData, [name]: formattedValue };
+        setUserData((prev) => {
+            const nextUserData = { ...prev, [name]: formattedValue };
 
-        if (name === 'birthday') {
-            nextUserData.age = calculateAge(formattedValue);
-        }
-
-        if (name === 'address') {
-            const suggestedZip = getZipFromAddress(formattedValue);
-            if (suggestedZip) {
-                nextUserData.zipCode = suggestedZip;
+            if (name === 'birthday') {
+                nextUserData.age = calculateAge(formattedValue);
             }
-        }
 
-        setUserData(nextUserData);
+            const addressPartsFields = ['houseNumber', 'streetName', 'village', 'barangay', 'city', 'province'];
+            if (addressPartsFields.includes(name)) {
+                const parts = [
+                    nextUserData.houseNumber,
+                    nextUserData.streetName,
+                    nextUserData.village,
+                    nextUserData.barangay,
+                    nextUserData.city,
+                    nextUserData.province
+                ].filter(Boolean);
+                nextUserData.address = parts.join(', ');
+
+                const locationStr = [nextUserData.barangay, nextUserData.city, nextUserData.province].filter(Boolean).join(', ');
+                nextUserData.zipCode = getZipFromAddress(locationStr) || nextUserData.zipCode; // Auto-fill zip
+            }
+
+            return nextUserData;
+        });
 
         // Clear error for this field when user starts typing
         if (errors[name]) {
@@ -416,8 +512,14 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
 
         // Branch validation (not required for non-Admin/non-Staff when editing)
         const isStudentEdit = editingUser && !['Admin', 'Staff'].includes(editingUser.role);
-        if (!userData.branch && !isStudentEdit) {
-            newErrors.branch = 'Branch selection is required';
+        const normalizedRole = normalizeRoleValue(userData.role);
+        if (!isStudentEdit) {
+            if (normalizedRole === 'staff' && !userData.branch) {
+                newErrors.branch = 'Branch selection is required for staff';
+            }
+            if (normalizedRole === 'admin' && !userData.branch) {
+                newErrors.branch = 'Select a branch or All Branches for admin';
+            }
         }
 
         if (isStaffOrAdminRole(userData.role) && normalizePermissionList(userData.permissions).length === 0) {
@@ -448,9 +550,14 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
             return;
         }
 
-        // Only allow Admin or Staff creation (super_admin can create Super Admin)
-        if (!editingUser && userData.role.toLowerCase() !== 'admin' && userData.role.toLowerCase() !== 'staff' && userData.role.toLowerCase() !== 'super admin') {
-            setSubmitError('Only Admin, Staff or Super Admin members can be added.');
+        if (isAdminAddingUser && normalizeRoleValue(userData.role) !== 'staff') {
+            setSubmitError('Admins can only add Staff accounts.');
+            return;
+        }
+
+        // Only allow Admin or Staff creation
+        if (!editingUser && userData.role.toLowerCase() !== 'admin' && userData.role.toLowerCase() !== 'staff') {
+            setSubmitError('Only Admin or Staff members can be added.');
             return;
         }
 
@@ -467,6 +574,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                     gender: userData.gender,
                     age: userData.age,
                     birthday: userData.birthday,
+                    nationality: userData.nationality,
                     address: userData.address,
                     zipCode: userData.zipCode,
                     contactNumber: userData.contactNumber,
@@ -493,6 +601,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                     gender: userData.gender,
                     age: userData.age,
                     birthday: userData.birthday,
+                    nationality: userData.nationality,
                     address: userData.address,
                     zipCode: userData.zipCode,
                     contactNumber: userData.contactNumber,
@@ -581,12 +690,13 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
             gender: user.gender || '',
             age: user.age || '',
             birthday: user.birthday || '',
+            nationality: user.nationality || '',
             address: user.address || '',
             zipCode: user.zipCode || '',
             contactNumber: user.contactNumber || '',
             email: user.email,
             role: user.role,
-            branch: user.branchId || '',
+            branch: user.role === 'Admin' && !user.branchId ? 'all' : (user.branchId ? String(user.branchId) : ''),
             status: user.status,
             avatar: user.avatar && !user.avatar.includes('pravatar.cc') ? user.avatar : '',
             permissions: normalizePermissionList(user.permissions).length > 0
@@ -624,6 +734,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
     const isPermissionEnabled = (permissionKey) => userData.permissions.includes(permissionKey);
 
     const togglePermission = (permissionKey) => {
+        if (!visiblePermissionKeySet.has(permissionKey)) return;
         const hasPermission = userData.permissions.includes(permissionKey);
         const updatedPermissions = hasPermission
             ? userData.permissions.filter(permission => permission !== permissionKey)
@@ -657,7 +768,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
     };
 
     const selectAllPermissions = () => {
-        setUserData({ ...userData, permissions: [...ALL_PERMISSION_KEYS] });
+        setUserData({ ...userData, permissions: [...visiblePermissionKeys] });
         if (errors.permissions) {
             setErrors({ ...errors, permissions: '' });
         }
@@ -668,11 +779,38 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
     };
 
     const applyRolePermissionPreset = () => {
-        setUserData({ ...userData, permissions: getDefaultPermissionsForRole(userData.role) });
+        const rolePresetPermissions = getDefaultPermissionsForRole(userData.role);
+        const nextPermissions = isAdminAddingUser
+            ? rolePresetPermissions.filter((permission) => STAFF_PERMISSION_KEYS.has(permission))
+            : rolePresetPermissions;
+        setUserData({ ...userData, permissions: nextPermissions });
         if (errors.permissions) {
             setErrors({ ...errors, permissions: '' });
         }
     };
+
+    useEffect(() => {
+        if (!isAdminAddingUser && !limitPermissionPickerToStaff) return;
+
+        if (isAdminAddingUser && normalizeRoleValue(userData.role) !== 'staff') {
+            setUserData((prev) => ({
+                ...prev,
+                role: 'Staff',
+                branch: prev.branch === 'all' ? '' : prev.branch,
+                permissions: getDefaultPermissionsForRole('staff'),
+            }));
+            return;
+        }
+
+        const currentPermissions = normalizePermissionList(userData.permissions);
+        const filteredPermissions = currentPermissions.filter((permission) => STAFF_PERMISSION_KEYS.has(permission));
+        if (filteredPermissions.length !== currentPermissions.length) {
+            setUserData((prev) => ({
+                ...prev,
+                permissions: filteredPermissions,
+            }));
+        }
+    }, [isAdminAddingUser, limitPermissionPickerToStaff, userData.role, userData.permissions]);
 
     const filteredUsers = users.filter(user => {
         const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -911,7 +1049,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                     </div>
                                     <div>
                                         <h2 style={{ color: 'white' }}>{editingUser ? 'Edit Account' : 'Add New User Account'}</h2>
-                                        <p style={{ color: 'rgba(255,255,255,0.8)' }}>{editingUser ? 'Update account information and permissions' : 'Fill in the details to add a new admin or staff member'}</p>
+                                        <p style={{ color: 'rgba(255,255,255,0.8)' }}>{editingUser ? 'Update account information and permissions' : (isAdminAddingUser ? 'Fill in the details to add a new staff member' : 'Fill in the details to add a new admin or staff member')}</p>
                                     </div>
                                 </div>
                                 <div className="modal-header-right">
@@ -1237,6 +1375,31 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                                     </span>
                                                 )}
                                             </div>
+                                            <div className="form-group" style={{ flex: 1 }}>
+                                                <label style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
+                                                    color: 'var(--text-color)',
+                                                    marginBottom: '6px',
+                                                    display: 'block'
+                                                }}>
+                                                    Nationality
+                                                </label>
+                                                <NationalitySelect 
+                                                    value={userData.nationality} 
+                                                    onChange={handleInputChange}
+                                                    required={false}
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '11px 14px',
+                                                        borderRadius: '10px',
+                                                        border: '1.5px solid var(--border-color)',
+                                                        background: 'var(--card-bg)',
+                                                        fontSize: '0.9rem',
+                                                        color: 'var(--text-color)'
+                                                    }}
+                                                />
+                                            </div>
                                         </div>
                                     </div>
 
@@ -1280,36 +1443,8 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                             </div>
                                         </div>
 
-                                        <div className="form-group" style={{ marginBottom: '15px' }}>
-                                            <label style={{
-                                                fontSize: '0.8rem',
-                                                fontWeight: '600',
-                                                color: 'var(--text-color)',
-                                                marginBottom: '6px',
-                                                display: 'block'
-                                            }}>
-                                                Complete Address <span style={{ color: '#ef4444' }}>*</span>
-                                            </label>
-                                            <textarea
-                                                name="address"
-                                                placeholder="e.g. 123 Street Name, Barangay, City, Province"
-                                                value={userData.address}
-                                                onChange={handleInputChange}
-                                                rows="2"
-                                                required
-                                                style={{
-                                                    width: '100%',
-                                                    padding: '11px 14px',
-                                                    borderRadius: '10px',
-                                                    border: '1.5px solid var(--border-color)',
-                                                    background: 'var(--card-bg)',
-                                                    fontSize: '0.9rem',
-                                                    color: 'var(--text-color)',
-                                                    resize: 'vertical',
-                                                    fontFamily: 'inherit',
-                                                    minHeight: '60px'
-                                                }}
-                                            />
+                                        <div style={{ marginBottom: '15px' }}>
+                                            <SmartAddress formData={userData} onChange={handleInputChange} errors={errors} />
                                         </div>
 
                                         <div className="form-row" style={{ gap: '15px' }}>
@@ -1514,10 +1649,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                                             fontWeight: '600'
                                                         }}
                                                     >
-                                                        {currentUserRole === 'super_admin' && (
-                                                            <option value="Super Admin">Super Admin</option>
-                                                        )}
-                                                        <option value="Admin">Admin</option>
+                                                        {!isAdminAddingUser && <option value="Admin">Admin (Branch Manager)</option>}
                                                         <option value="Staff">Staff</option>
                                                     </select>
                                                 )}
@@ -1549,6 +1681,9 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                                     }}
                                                 >
                                                     <option value="">Select a branch</option>
+                                                    {normalizeRoleValue(userData.role) === 'admin' && (
+                                                        <option value="all">All Branches</option>
+                                                    )}
                                                     {branches.map((branch) => (
                                                         <option key={branch.id} value={branch.id}>
                                                             {formatBranchName(branch.name)}
@@ -1576,7 +1711,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                                     <div>
                                                         <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-color)' }}>Permission Access</h4>
                                                         <p style={{ margin: '2px 0 0 0', fontSize: '0.75rem', color: 'var(--secondary-text)' }}>
-                                                            {userData.permissions.length} selected out of {ALL_PERMISSION_KEYS.length}
+                                                            {userData.permissions.length} selected out of {visiblePermissionKeys.length}
                                                         </p>
                                                     </div>
                                                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -1646,8 +1781,23 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                                     </div>
                                                 )}
 
+                                                {limitPermissionPickerToStaff && (
+                                                    <div style={{
+                                                        marginBottom: '10px',
+                                                        padding: '8px 10px',
+                                                        borderRadius: '8px',
+                                                        border: '1px solid #bfdbfe',
+                                                        background: '#eff6ff',
+                                                        color: '#1d4ed8',
+                                                        fontSize: '0.75rem',
+                                                        fontWeight: 600
+                                                    }}>
+                                                        Staff permission mode: only staff-level permissions are shown for this account.
+                                                    </div>
+                                                )}
+
                                                 <div style={{ display: 'grid', gap: '10px' }}>
-                                                    {PERMISSION_GROUPS.map(group => {
+                                                    {visiblePermissionGroups.map(group => {
                                                         const groupKeys = group.permissions.map(permission => permission.key);
                                                         const selectedCount = groupKeys.filter(permissionKey => userData.permissions.includes(permissionKey)).length;
                                                         const allSelected = selectedCount === groupKeys.length;

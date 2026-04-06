@@ -13,21 +13,9 @@ import AnalyticsReports from './AnalyticsReports';
 import CRMManagement from './CRM';
 import { useTheme } from '../context/ThemeContext';
 import { useNotification } from '../context/NotificationContext';
-import { authAPI, adminAPI, notificationsAPI, MEDIA_BASE_URL } from '../services/api';
+import { authAPI, adminAPI, notificationsAPI, MEDIA_BASE_URL, branchesAPI } from '../services/api';
 import { resolveAvatar } from '../utils/avatarUtils';
-import {
-    AreaChart,
-    Area,
-    BarChart,
-    Bar,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    Legend,
-    ResponsiveContainer,
-
-} from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
 const logo = '/images/logo.png';
 const cover = '/images/cover.png';
@@ -40,6 +28,7 @@ const ADMIN_TAB_TO_PATH = {
     sales: '/admin/sales',
     crm: '/admin/crm',
     analytics: '/admin/analytics',
+    'best-selling-courses': '/admin/best-selling-courses',
     users: '/admin/users',
     courses: '/admin/courses',
     branches: '/admin/branches',
@@ -71,22 +60,40 @@ const getAdminPathForTab = (tab) => ADMIN_TAB_TO_PATH[tab] || '/admin/dashboard'
 const ADMIN_DEFAULT_PERMISSIONS_BY_ROLE = {
     admin: [
         'operations.schedules.manage',
+        'operations.schedules.tab.schedule',
+        'operations.schedules.tab.summary',
+        'operations.schedules.tab.noshow',
         'operations.bookings.manage',
         'operations.walk_in.manage',
         'operations.sales.manage',
         'operations.crm.manage',
         'operations.news.manage',
         'operations.analytics.view',
+        'operations.best_selling_courses.view',
         'accounts.users.view',
         'accounts.users.create',
+        'accounts.users.edit',
+        'accounts.users.reset_password',
         'accounts.courses.view',
+        'accounts.courses.tab.courses',
+        'accounts.courses.tab.discounts',
+        'accounts.courses.tab.config',
+        'accounts.config.view',
+        'accounts.config.tab.branches',
+        'accounts.config.tab.coursetypes',
+        'accounts.config.tab.emailcontent',
+        'accounts.config.tab.settings',
     ],
     staff: [
         'operations.schedules.manage',
+        'operations.schedules.tab.schedule',
+        'operations.schedules.tab.summary',
+        'operations.schedules.tab.noshow',
         'operations.bookings.manage',
         'operations.walk_in.manage',
         'operations.sales.manage',
         'operations.crm.manage',
+        'operations.best_selling_courses.view',
         'operations.news.manage',
     ],
 };
@@ -98,6 +105,7 @@ const ADMIN_TAB_PERMISSION_MAP = {
     sales: 'operations.sales.manage',
     crm: 'operations.crm.manage',
     analytics: 'operations.analytics.view',
+    'best-selling-courses': 'operations.best_selling_courses.view',
     news: 'operations.news.manage',
     users: [
         'accounts.users.view',
@@ -125,7 +133,7 @@ const hasRequiredPermission = (permissionSet, requiredPermission) => {
 };
 
 const getDefaultAdminTab = (allowedTabs) => {
-    const priority = ['dashboard', 'schedules', 'bookings', 'walk-in', 'sales', 'crm', 'news', 'analytics', 'users', 'courses', 'branches', 'profile', 'settings', 'notifications'];
+    const priority = ['dashboard', 'schedules', 'bookings', 'walk-in', 'sales', 'crm', 'news', 'analytics', 'best-selling-courses', 'users', 'courses', 'branches', 'profile', 'settings', 'notifications'];
     return priority.find((tab) => allowedTabs.has(tab)) || 'profile';
 };
 
@@ -159,11 +167,17 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         todayEnrollments: 0,
     });
 
-    // Chart data state
-    const [revenueData, setRevenueData] = useState([]);
-    const [enrollmentData, setEnrollmentData] = useState([]);
+    const [pendingCollectibles, setPendingCollectibles] = useState([]);
+    const [pendingCollectiblesTotal, setPendingCollectiblesTotal] = useState(0);
+    const [todayScheduleGroups, setTodayScheduleGroups] = useState([]);
     const [bestSellingCourses, setBestSellingCourses] = useState([]);
+    const [bestSellingLoading, setBestSellingLoading] = useState(false);
+    const [bestSellingBranchId, setBestSellingBranchId] = useState('');
+    const [bestSellingFilter, setBestSellingFilter] = useState('all_time');
+    const [adminBranches, setAdminBranches] = useState([]);
     const [enrollees, setEnrollees] = useState([]);
+
+    const formatCurrency = (amount) => `₱ ${Number(amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
     const allowedAdminTabs = useMemo(() => {
         const role = String(adminProfile.rawRole || '').toLowerCase();
@@ -378,9 +392,14 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                 setLoading(true);
                 try {
                     // Fetch core data needed for immediate display
-                    const [statsRes, bookingsRes] = await Promise.all([
+                    const [statsRes, bookingsRes, unpaidRes, todayScheduleRes] = await Promise.all([
                         adminAPI.getStats(),
-                        adminAPI.getAllBookings(null, 10)
+                        adminAPI.getAllBookings(null, 10, adminProfile.branchId || undefined),
+                        adminAPI.getUnpaidBookings(10, adminProfile.branchId || undefined),
+                        adminAPI.getTodayStudents({
+                            date: new Date().toISOString().split('T')[0],
+                            branchId: adminProfile.branchId || undefined,
+                        }),
                     ]);
 
                     if (statsRes.success) setStats(statsRes.stats);
@@ -405,18 +424,24 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         setEnrollees(formattedEnrollees);
                     }
 
-                    setLoading(false); // Show the dashboard cards and table
+                    if (unpaidRes.success) {
+                        const collectibles = unpaidRes.bookings || [];
+                        setPendingCollectibles(collectibles);
+                        setPendingCollectiblesTotal(
+                            collectibles.reduce((sum, booking) => sum + Number(booking.balance_due || 0), 0)
+                        );
+                    } else {
+                        setPendingCollectibles([]);
+                        setPendingCollectiblesTotal(0);
+                    }
 
-                    // Fetch chart data and other details in the background
-                    Promise.all([
-                        adminAPI.getRevenueData(),
-                        adminAPI.getEnrollmentData(),
-                        adminAPI.getBestSellingCourses(),
-                    ]).then(([revenueRes, enrollmentRes, bestSellingRes]) => {
-                        if (revenueRes.success) setRevenueData(revenueRes.data);
-                        if (enrollmentRes.success) setEnrollmentData(enrollmentRes.data);
-                        if (bestSellingRes.success) setBestSellingCourses(bestSellingRes.courses);
-                    }).catch(err => console.error('Error fetching secondary dashboard data:', err));
+                    if (todayScheduleRes.success) {
+                        setTodayScheduleGroups(todayScheduleRes.data || []);
+                    } else {
+                        setTodayScheduleGroups([]);
+                    }
+
+                    setLoading(false); // Show the dashboard cards and table
 
                 } catch (error) {
                     console.error('Error fetching dashboard data:', error);
@@ -427,7 +452,46 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         };
 
         fetchDashboardData();
-    }, [activeTab]);
+    }, [activeTab, adminProfile.branchId, showNotification]);
+
+    useEffect(() => {
+        const fetchBestSellingCourses = async () => {
+            if (activeTab !== 'best-selling-courses') return;
+            setBestSellingLoading(true);
+            try {
+                let currentBranches = adminBranches;
+                if (currentBranches.length === 0) {
+                    const branchRes = await branchesAPI.getAll();
+                    if (branchRes.success) {
+                        currentBranches = branchRes.branches || [];
+                        setAdminBranches(currentBranches);
+                    }
+                }
+                
+                // Determine effective branch ID based on role
+                let effectiveBranchId = bestSellingBranchId;
+                if (adminProfile.rawRole === 'admin' || adminProfile.rawRole === 'staff') {
+                    effectiveBranchId = adminProfile.branchId;
+                } else if (!effectiveBranchId) {
+                    effectiveBranchId = undefined; // All branches for super_admin
+                }
+
+                const bestSellingRes = await adminAPI.getBestSellingCourses(effectiveBranchId, bestSellingFilter);
+                if (bestSellingRes.success) {
+                    setBestSellingCourses(bestSellingRes.courses || []);
+                } else {
+                    setBestSellingCourses([]);
+                }
+            } catch (error) {
+                console.error('Error fetching best selling courses:', error);
+                setBestSellingCourses([]);
+            } finally {
+                setBestSellingLoading(false);
+            }
+        };
+
+        fetchBestSellingCourses();
+    }, [activeTab, bestSellingBranchId, bestSellingFilter, adminProfile.branchId, adminProfile.rawRole]);
 
 
     const fileInputRef = useRef(null);
@@ -701,6 +765,285 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         document.body.removeChild(a);
     };
 
+    const formatBranchNameShort = (name) => {
+        if (!name) return '';
+        return name
+            .replace(/^Master(s)?\s+(Prime\s+)?Driving\s+School\s+/i, '')
+            .replace(/^Master(s)?\s+(Prime\s+)?Holdings\s+Corp\.\s+/i, '')
+            .replace(/^PRIME\s+MASTER\s+DRIVING\s+SCHOOL\s+/i, '')
+            .trim();
+    };
+
+    const formatCourseNameShort = (name) => {
+        if (!name) return '';
+        // Try extracting acronyms from parenthesis (e.g., "(TDC)", "(PDC)")
+        const match = name.match(/\(([^)]+)\)/);
+        if (match) return match[1]; // Returns "TDC" or "PDC" etc.
+        // Fallback: take first 15 chars
+        return name.length > 15 ? name.substring(0, 15) + '...' : name;
+    };
+
+    const renderBestSellingCoursesSection = () => {
+        // Find current branch name for display
+        let activeBranchName = 'All Branches';
+        if (adminProfile.rawRole === 'admin' || adminProfile.rawRole === 'staff') {
+            activeBranchName = adminProfile.branch || 'Assigned Branch';
+        } else if (bestSellingBranchId) {
+            const rawName = adminBranches.find(b => String(b.id) === String(bestSellingBranchId))?.name || 'Selected';
+            activeBranchName = formatBranchNameShort(rawName);
+        }
+
+        const isSuperAdmin = adminProfile.rawRole === 'super_admin';
+
+        return (
+        <section className="data-section best-courses-section">
+            <div className="section-header">
+                <div>
+                    <h2>Best Selling Courses</h2>
+                    <p className="section-subtitle">Analyze top performing courses and revenue</p>
+                </div>
+            </div>
+
+            {/* Filter Banner */}
+            <div style={{
+                background: 'var(--card-bg)',
+                borderRadius: '16px',
+                padding: '16px 24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '24px',
+                border: '1px solid var(--border-color)',
+                boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+                flexWrap: 'wrap',
+                gap: '16px'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div style={{
+                        background: 'var(--primary-color)',
+                        color: 'white',
+                        width: '48px',
+                        height: '48px',
+                        borderRadius: '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                    }}>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                            <circle cx="12" cy="10" r="3"></circle>
+                        </svg>
+                    </div>
+                    <div>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            Viewing Branch
+                        </div>
+                        <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-color)' }}>
+                            {activeBranchName}
+                        </div>
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    {isSuperAdmin && (
+                        <>
+                            <span style={{ 
+                                background: 'rgba(var(--primary-rgb), 0.1)', 
+                                color: 'var(--primary-color)', 
+                                padding: '6px 12px', 
+                                borderRadius: '8px', 
+                                fontSize: '0.85rem', 
+                                fontWeight: 600 
+                            }}>
+                                {adminBranches.length} Branches
+                            </span>
+                            <select 
+                                className="custom-select" 
+                                value={bestSellingBranchId} 
+                                onChange={(e) => setBestSellingBranchId(e.target.value)}
+                                style={{ padding: '8px 36px 8px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--card-bg)' }}
+                            >
+                                <option value="">All Branches</option>
+                                {adminBranches.map(b => (
+                                    <option key={b.id} value={b.id}>{formatBranchNameShort(b.name)}</option>
+                                ))}
+                            </select>
+                        </>
+                    )}
+                    
+                    <select 
+                        className="custom-select" 
+                        value={bestSellingFilter} 
+                        onChange={(e) => setBestSellingFilter(e.target.value)}
+                        style={{ padding: '8px 36px 8px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--card-bg)' }}
+                    >
+                        <option value="all_time">All Time</option>
+                        <option value="today">Today</option>
+                        <option value="this_week">This Week</option>
+                        <option value="this_month">This Month</option>
+                        <option value="this_year">This Year</option>
+                    </select>
+                </div>
+            </div>
+
+            {/* Graph Visualization */}
+            {!bestSellingLoading && bestSellingCourses.length > 0 && (
+                <div style={{
+                    background: 'var(--card-bg)',
+                    borderRadius: '16px',
+                    padding: '24px',
+                    marginBottom: '24px',
+                    border: '1px solid var(--border-color)',
+                    height: '400px'
+                }}>
+                    <h3 style={{ textAlign: 'center', marginBottom: '24px', fontSize: '1.05rem', color: 'var(--secondary-text)', fontWeight: 500 }}>Enrollments Overview</h3>
+                    <ResponsiveContainer width="100%" height="90%">
+                        <BarChart 
+                            data={bestSellingCourses.map(c => ({ 
+                                fullname: c.course_name, 
+                                name: formatCourseNameShort(c.course_name), 
+                                enrollments: Number(c.total_bookings),
+                                revenue: Number(c.total_revenue)
+                            }))} 
+                            margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
+                        >
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" opacity={0.5} />
+                            <XAxis 
+                                dataKey="name" 
+                                axisLine={false} 
+                                tickLine={false} 
+                                tick={{ fill: 'var(--secondary-text)', fontSize: 11 }} 
+                                dy={10} 
+                            />
+                            <YAxis 
+                                axisLine={false} 
+                                tickLine={false} 
+                                tick={{ fill: 'var(--secondary-text)', fontSize: 11 }} 
+                                dx={-10}
+                            />
+                            <RechartsTooltip 
+                                contentStyle={{ borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', padding: '12px' }}
+                                cursor={{ fill: 'rgba(0,0,0,0.03)' }}
+                                formatter={(value, name) => [name === 'enrollments' ? value : formatCurrency(value), name === 'enrollments' ? 'Enrollments' : 'Revenue']}
+                                labelFormatter={(label, payload) => payload?.[0]?.payload?.fullname || label}
+                            />
+                            <Bar dataKey="enrollments" fill="#1e40af" radius={[4, 4, 0, 0]} maxBarSize={45} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+            )}
+
+            {bestSellingLoading ? (
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '200px',
+                    color: 'var(--secondary-text)',
+                    background: 'var(--card-bg)',
+                    borderRadius: '16px',
+                    border: '1px solid var(--border-color)'
+                }}>
+                    Loading courses data...
+                </div>
+            ) : bestSellingCourses.length === 0 ? (
+                <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '200px',
+                    color: 'var(--secondary-text)',
+                    background: 'var(--card-bg)',
+                    borderRadius: '16px',
+                    border: '1px solid var(--border-color)'
+                }}>
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: '12px', opacity: 0.5 }}>
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                    </svg>
+                    <span style={{ fontSize: '14px' }}>No course data available yet</span>
+                    <span style={{ fontSize: '12px', marginTop: '4px', opacity: 0.7 }}>Courses will appear here once enrollments are recorded</span>
+                </div>
+            ) : (
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                    gap: '24px',
+                    padding: '16px 0',
+                    position: 'relative'
+                }}>
+                    {bestSellingCourses.map((course, index) => (
+                        <div
+                            key={course.id}
+                            style={{
+                                background: '#fff',
+                                borderRadius: '16px',
+                                padding: '24px',
+                                border: '1px solid #e2e8f0',
+                                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                position: 'relative',
+                                transition: 'all 0.3s ease'
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.transform = 'translateY(-4px)';
+                                e.currentTarget.style.boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.1)';
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.transform = 'translateY(0)';
+                                e.currentTarget.style.boxShadow = 'none';
+                            }}
+                        >
+                            {index < 3 ? (
+                                <div style={{
+                                    position: 'absolute', top: '-12px', right: '-12px',
+                                    background: index === 0 ? '#f59e0b' : index === 1 ? '#64748b' : '#d97706',
+                                    color: 'white', width: '36px', height: '36px',
+                                    borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontWeight: 800, fontSize: '1.1rem', boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
+                                    zIndex: 2, border: '3px solid var(--card-bg)'
+                                }}>
+                                    {index + 1}
+                                </div>
+                            ) : null}
+
+                            <div style={{ padding: '0 8px', marginBottom: '24px', textAlign: 'center', flexGrow: 1 }}>
+                                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '12px', color: 'var(--text-color)', lineHeight: 1.4 }}>
+                                    {course.course_name}
+                                </h3>
+                                <p style={{ fontSize: '0.85rem', color: 'var(--secondary-text)', lineHeight: 1.5 }}>
+                                    {course.description || 'LTO Accredited Licensing Program Flexible Lesson Times Experienced Instructors'}
+                                </p>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '32px' }}>
+                                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px 12px', textAlign: 'center' }}>
+                                    <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', letterSpacing: '0.05em', marginBottom: '8px' }}>ENROLLMENTS</div>
+                                    <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#1e40af' }}>{course.total_bookings}</div>
+                                </div>
+                                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px 12px', textAlign: 'center' }}>
+                                    <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', letterSpacing: '0.05em', marginBottom: '8px' }}>REVENUE</div>
+                                    <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#10b981' }}>{formatCurrency(course.total_revenue)}</div>
+                                </div>
+                            </div>
+
+                            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.875rem' }}>
+                                <div style={{ color: '#64748b', fontWeight: 600 }}>
+                                    Price: {formatCurrency(course.price)}
+                                </div>
+                                <div style={{ color: '#10b981', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    ✓ {course.completed_bookings} Completed
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </section>
+        );
+    };
+
     return (
         <>
         {/* Session Expired Overlay */}
@@ -781,6 +1124,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                     activeTab === 'schedules' ? 'Schedules' :
                                         activeTab === 'bookings' ? 'Bookings' :
                                             activeTab === 'sales' ? 'Financials' :
+                                                activeTab === 'best-selling-courses' ? 'Best Selling Courses' :
                                                 activeTab === 'profile' ? 'Profile' :
                                                     activeTab === 'settings' ? 'Settings' :
                                                         activeTab === 'walk-in' ? 'Walk-in Enrollment' :
@@ -800,6 +1144,29 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                     </div>
 
                     <div className="header-right">
+                        {(adminProfile.rawRole === 'admin' || adminProfile.rawRole === 'staff') && (
+                            <div
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    padding: '8px 14px',
+                                    borderRadius: '12px',
+                                    border: '1px solid rgba(59, 130, 246, 0.25)',
+                                    background: 'rgba(59, 130, 246, 0.08)',
+                                    color: '#1d4ed8',
+                                    fontSize: '0.9rem',
+                                    fontWeight: 600,
+                                }}
+                                title="Assigned branch"
+                            >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                                    <circle cx="12" cy="10" r="3"></circle>
+                                </svg>
+                                <span>{formatBranchNameShort(adminProfile.branch || 'Assigned Branch')}</span>
+                            </div>
+                        )}
                         <div className="notification-wrapper">
                             <button
                                 className={`notification-btn ${showNotifications ? 'active' : ''}`}
@@ -977,7 +1344,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                             <div className="stat-card">
                                 <div className="stat-info">
                                     <span>Total Sales (This Month)</span>
-                                    <h2>{loading ? <span className="skeleton-text">---</span> : `₱ ${stats.monthlyRevenue > 0 ? (stats.monthlyRevenue / 1000).toFixed(1) + 'k' : '0.00'}`}</h2>
+                                    <h2>{loading ? <span className="skeleton-text">---</span> : formatCurrency(stats.monthlyRevenue)}</h2>
                                     <p className="stat-subtitle">Monthly revenue</p>
                                 </div>
                                 <div className="stat-icon green">
@@ -997,238 +1364,101 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                             </div>
                         </section>
 
-                        {/* Charts Section */}
-                        <section className="charts-grid section">
-                            <div className="chart-card">
-                                <div className="chart-header">
-                                    <div>
-                                        <h3>Monthly Revenue</h3>
-                                        <span>Financial Trends</span>
-                                    </div>
+                        <section className="data-section">
+                            <div className="section-header">
+                                <div>
+                                    <h2>Pending Collectibles</h2>
+                                    <p className="section-subtitle">Outstanding balances waiting for collection</p>
                                 </div>
-                                <div className="chart-container">
-                                    {loading ? (
-                                        <div className="chart-loading-skeleton">
-                                            <div className="skeleton-bar" style={{ height: '40%' }}></div>
-                                            <div className="skeleton-bar" style={{ height: '70%' }}></div>
-                                            <div className="skeleton-bar" style={{ height: '55%' }}></div>
-                                            <div className="skeleton-bar" style={{ height: '85%' }}></div>
-                                            <div className="skeleton-bar" style={{ height: '60%' }}></div>
-                                            <div className="skeleton-bar" style={{ height: '45%' }}></div>
-                                        </div>
-                                    ) : revenueData.length === 0 ? (
-                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8' }}>
-                                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: '12px', opacity: 0.5 }}>
-                                                <line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-                                            </svg>
-                                            <span style={{ fontSize: '14px' }}>No revenue data available yet</span>
-                                        </div>
-                                    ) : (
-                                        <ResponsiveContainer width="100%" height={300}>
-                                            <AreaChart
-                                                data={revenueData}
-                                                margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                                            >
-                                                <defs>
-                                                    <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                                                        <stop offset="5%" stopColor="#1a4fba" stopOpacity={0.1} />
-                                                        <stop offset="95%" stopColor="#1a4fba" stopOpacity={0} />
-                                                    </linearGradient>
-                                                </defs>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#1b254b' : '#f1f5f9'} />
-                                                <XAxis
-                                                    dataKey="name"
-                                                    axisLine={false}
-                                                    tickLine={false}
-                                                    tick={{ fill: theme === 'dark' ? '#a3b1cc' : '#94a3b8', fontSize: 12 }}
-                                                    dy={10}
-                                                />
-                                                <YAxis
-                                                    axisLine={false}
-                                                    tickLine={false}
-                                                    tick={{ fill: theme === 'dark' ? '#a3b1cc' : '#94a3b8', fontSize: 12 }}
-                                                />
-                                                <Tooltip
-                                                    contentStyle={{
-                                                        borderRadius: '12px',
-                                                        border: 'none',
-                                                        backgroundColor: theme === 'dark' ? '#111c44' : '#ffffff',
-                                                        color: theme === 'dark' ? '#ffffff' : '#1e293b',
-                                                        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                                                    }}
-                                                />
-                                                <Area
-                                                    type="monotone"
-                                                    dataKey="revenue"
-                                                    stroke="#1a4fba"
-                                                    fillOpacity={1}
-                                                    fill="url(#colorRevenue)"
-                                                    strokeWidth={3}
-                                                />
-                                            </AreaChart>
-                                        </ResponsiveContainer>
-                                    )}
+                                <div className="section-actions" style={{ fontWeight: 700, color: 'var(--text-color)' }}>
+                                    Total Balance: {formatCurrency(pendingCollectiblesTotal)}
                                 </div>
                             </div>
 
-                            <div className="chart-card">
-                                <div className="chart-header">
-                                    <div>
-                                        <h3>Monthly Enrollments</h3>
-                                        <span>Student Acquisition</span>
-                                    </div>
-                                </div>
-                                <div className="chart-container">
-                                    {loading ? (
-                                        <div className="chart-loading-skeleton">
-                                            <div className="skeleton-bar" style={{ height: '60%' }}></div>
-                                            <div className="skeleton-bar" style={{ height: '45%' }}></div>
-                                            <div className="skeleton-bar" style={{ height: '80%' }}></div>
-                                            <div className="skeleton-bar" style={{ height: '35%' }}></div>
-                                            <div className="skeleton-bar" style={{ height: '65%' }}></div>
-                                            <div className="skeleton-bar" style={{ height: '50%' }}></div>
-                                        </div>
-                                    ) : enrollmentData.length === 0 ? (
-                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8' }}>
-                                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: '12px', opacity: 0.5 }}>
-                                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle>
-                                            </svg>
-                                            <span style={{ fontSize: '14px' }}>No enrollment data available yet</span>
-                                        </div>
-                                    ) : (
-                                        <ResponsiveContainer width="100%" height={300}>
-                                            <BarChart
-                                                data={enrollmentData}
-                                                margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                                            >
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#1b254b' : '#f1f5f9'} />
-                                                <XAxis
-                                                    dataKey="name"
-                                                    axisLine={false}
-                                                    tickLine={false}
-                                                    tick={{ fill: theme === 'dark' ? '#a3b1cc' : '#94a3b8', fontSize: 12 }}
-                                                    dy={10}
-                                                />
-                                                <YAxis
-                                                    axisLine={false}
-                                                    tickLine={false}
-                                                    tick={{ fill: theme === 'dark' ? '#a3b1cc' : '#94a3b8', fontSize: 12 }}
-                                                />
-                                                <Tooltip
-                                                    contentStyle={{
-                                                        borderRadius: '12px',
-                                                        border: 'none',
-                                                        backgroundColor: theme === 'dark' ? '#111c44' : '#ffffff',
-                                                        color: theme === 'dark' ? '#ffffff' : '#1e293b',
-                                                        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                                                    }}
-                                                />
-                                                <Legend verticalAlign="top" height={36} />
-                                                <Bar dataKey="students" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
-                                            </BarChart>
-                                        </ResponsiveContainer>
-                                    )}
-                                </div>
+                            <div className="table-wrapper">
+                                <table className="custom-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Student</th>
+                                            <th>Course</th>
+                                            <th>Amount Paid</th>
+                                            <th>Balance Due</th>
+                                            <th>Payment Type</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {pendingCollectibles.length === 0 ? (
+                                            <tr>
+                                                <td colSpan="5" style={{ textAlign: 'center', padding: '28px', color: 'var(--secondary-text)' }}>
+                                                    No pending collectibles today.
+                                                </td>
+                                            </tr>
+                                        ) : pendingCollectibles.slice(0, 10).map((item) => (
+                                            <tr key={item.id} className="table-row-hover">
+                                                <td>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        <div className="student-avatar" style={{ background: 'var(--primary-color)', color: '#fff', fontSize: '12px' }}>
+                                                            {item.student_name?.charAt(0)?.toUpperCase() || '?'}
+                                                        </div>
+                                                        <span style={{ fontWeight: 500 }}>{item.student_name || 'Unknown'}</span>
+                                                    </div>
+                                                </td>
+                                                <td>{item.course_name || 'N/A'}</td>
+                                                <td>{formatCurrency(item.total_amount)}</td>
+                                                <td>
+                                                    <span style={{
+                                                        background: '#fee2e2',
+                                                        color: '#b45309',
+                                                        padding: '4px 10px',
+                                                        borderRadius: '20px',
+                                                        fontWeight: 700,
+                                                        fontSize: '0.85rem'
+                                                    }}>
+                                                        {formatCurrency(item.balance_due)}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <span className="status-badge down">{item.payment_type || 'N/A'}</span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                         </section>
 
-                        {/* Best Selling Courses Section */}
-                        <section className="data-section best-courses-section">
+                        <section className="data-section">
                             <div className="section-header">
                                 <div>
-                                    <h2>Best Selling Courses</h2>
-                                    <p className="section-subtitle">Top performing courses by enrollment count</p>
+                                    <h2>Today&apos;s Schedule</h2>
+                                    <p className="section-subtitle">Students with active sessions today</p>
                                 </div>
                             </div>
 
-                            {loading ? (
-                                <div style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    height: '200px',
-                                    color: 'var(--secondary-text)',
-                                    background: 'var(--card-bg)',
-                                    borderRadius: '16px',
-                                    border: '1px solid var(--border-color)'
-                                }}>
-                                    Loading courses data...
-                                </div>
-                            ) : bestSellingCourses.length === 0 ? (
-                                <div style={{
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    height: '200px',
-                                    color: 'var(--secondary-text)',
-                                    background: 'var(--card-bg)',
-                                    borderRadius: '16px',
-                                    border: '1px solid var(--border-color)'
-                                }}>
-                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: '12px', opacity: 0.5 }}>
-                                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-                                    </svg>
-                                    <span style={{ fontSize: '14px' }}>No course data available yet</span>
-                                    <span style={{ fontSize: '12px', marginTop: '4px', opacity: 0.7 }}>Courses will appear here once enrollments are recorded</span>
+                            {todayScheduleGroups.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '28px', color: 'var(--secondary-text)' }}>
+                                    No schedules found for today.
                                 </div>
                             ) : (
-                                <div className="courses-grid">
-                                    {bestSellingCourses.slice(0, 6).map((course, index) => (
-                                        <div
-                                            key={course.id}
-                                            className="course-card"
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.transform = 'translateY(-4px)';
-                                                e.currentTarget.style.boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.1)';
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.transform = 'translateY(0)';
-                                                e.currentTarget.style.boxShadow = 'none';
-                                            }}
-                                        >
-                                            {/* Ranking Badge */}
-                                            {index < 3 && (
-                                                <div className={`ranking-badge rank-${index + 1}`}>
-                                                    {index + 1}
-                                                </div>
-                                            )}
-
-                                            <div className="course-card-body">
-                                                <h3 className="course-title">
-                                                    {course.course_name}
-                                                </h3>
-                                                <p className="course-description">
-                                                    {course.description || 'Professional driving course with comprehensive training'}
-                                                </p>
-                                            </div>
-
-                                            <div className="course-stats-grid">
-                                                <div className="course-stat-item">
-                                                    <div className="course-stat-label">Enrollments</div>
-                                                    <div className="course-stat-value primary">
-                                                        {course.total_bookings}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                                    {todayScheduleGroups.map((group) => (
+                                        <div key={group.course_type} style={{ border: '1px solid var(--border-color)', borderRadius: '14px', padding: '14px', background: 'var(--card-bg)' }}>
+                                            <h3 style={{ marginBottom: '8px', fontSize: '1rem' }}>{group.course_type}</h3>
+                                            <p style={{ marginBottom: '10px', color: 'var(--secondary-text)', fontSize: '0.86rem' }}>
+                                                {group.students.length} student{group.students.length > 1 ? 's' : ''}
+                                            </p>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                {group.students.slice(0, 10).map((student) => (
+                                                    <div key={student.enrollment_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', fontSize: '0.88rem', padding: '6px 10px', background: 'rgba(0,0,0,0.03)', borderRadius: '8px' }}>
+                                                        <span style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--primary-color)' }}></span>
+                                                            {student.name}
+                                                        </span>
+                                                        <span style={{ color: 'var(--primary-color)', fontWeight: 500, background: 'rgba(var(--primary-rgb), 0.1)', padding: '2px 8px', borderRadius: '4px' }}>
+                                                            {student.time_range || student.session || 'TBA'}
+                                                        </span>
                                                     </div>
-                                                </div>
-
-                                                <div className="course-stat-item">
-                                                    <div className="course-stat-label">Revenue</div>
-                                                    <div className="course-stat-value success">
-                                                        ₱{(parseFloat(course.total_revenue) / 1000).toFixed(1)}k
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="course-card-footer">
-                                                <div className="course-price">
-                                                    <span className="label">Price:</span> ₱{parseFloat(course.price).toLocaleString()}
-                                                </div>
-                                                <div className="course-completion">
-                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                                                        <polyline points="20 6 9 17 4 12"></polyline>
-                                                    </svg>
-                                                    {course.completed_bookings} Completed
-                                                </div>
+                                                ))}
                                             </div>
                                         </div>
                                     ))}
@@ -1284,7 +1514,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                                     </div>
                                                 </td>
                                             </tr>
-                                        ) : enrollees.map((student, index) => (
+                                        ) : enrollees.slice(0, 10).map((student, index) => (
                                             <tr key={index} className="table-row-hover">
                                                 <td>
                                                     <div className="student-cell">
@@ -1319,7 +1549,11 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
                     </>
                 ) : activeTab === 'schedules' ? (
-                    <Schedule onNavigate={setActiveTab} />
+                    <Schedule
+                        onNavigate={setActiveTab}
+                        currentUserPermissions={effectiveAdminPermissions}
+                        currentUserRole={adminProfile.rawRole}
+                    />
                 ) : activeTab === 'bookings' ? (
                     <Booking />
                 ) : activeTab === 'sales' ? (
@@ -1412,15 +1646,28 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         </div>
                     </div>
                 ) : activeTab === 'settings' ? (
-                    <Configuration initialTab="settings" />
+                    <Configuration
+                        initialTab="settings"
+                        currentUserPermissions={effectiveAdminPermissions}
+                        currentUserRole={adminProfile.rawRole}
+                    />
                 ) : activeTab === 'users' ? (
                     <UserManagement currentUserPermissions={effectiveAdminPermissions} currentUserRole={adminProfile.rawRole} />
                 ) : activeTab === 'courses' ? (
-                    <CourseManagement />
+                    <CourseManagement
+                        currentUserPermissions={effectiveAdminPermissions}
+                        currentUserRole={adminProfile.rawRole}
+                        currentUserBranchId={adminProfile.branchId}
+                    />
                 ) : activeTab === 'branches' ? (
-                    <Configuration />
+                    <Configuration
+                        currentUserPermissions={effectiveAdminPermissions}
+                        currentUserRole={adminProfile.rawRole}
+                    />
                 ) : activeTab === 'analytics' ? (
                     <AnalyticsReports onNavigate={setActiveTab} />
+                ) : activeTab === 'best-selling-courses' ? (
+                    renderBestSellingCoursesSection()
                 ) : activeTab === 'crm' ? (
                     <CRMManagement />
                 ) : activeTab === 'news' ? (

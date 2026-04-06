@@ -241,6 +241,7 @@ const SalePayment = () => {
     // Auth / role state
     const [userRole, setUserRole] = useState(null);
     const [userBranchId, setUserBranchId] = useState(null);
+    const isBranchScopedUser = userRole === 'staff' || (userRole === 'admin' && !!userBranchId);
 
     // Pagination states
     const SP_PAGE_SIZE = 10;
@@ -374,8 +375,8 @@ const SalePayment = () => {
                     const branchId = profileRes.user.branchId;
                     setUserRole(role);
                     setUserBranchId(branchId);
-                    if (role === 'staff' && branchId) {
-                        // Lock branch filter to this staff member's branch
+                    if ((role === 'staff' || (role === 'admin' && branchId)) && branchId) {
+                        // Lock branch filter to assigned branch for staff and branch-assigned admin
                         const branchRes = await branchesAPI.getAll();
                         if (branchRes.success && branchRes.branches) {
                             const staffBranch = branchRes.branches.find(b => String(b.id) === String(branchId));
@@ -1114,7 +1115,7 @@ const SalePayment = () => {
                     </div>
                 </div>
                 <div className="branch-filter-right">
-                    {userRole !== 'staff' && (
+                    {!isBranchScopedUser && (
                         <>
                             <span className="branch-filter-count">{branchesList.length} Branches</span>
                             <select
@@ -1658,7 +1659,7 @@ const SalePayment = () => {
                                             <option key={c.id} value={c.name}>{c.name}</option>
                                         ))}
                                     </select>
-                                    {userRole !== 'staff' && (
+                                    {!isBranchScopedUser && (
                                         <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className="modal-filter-select">
                                             <option value="All">All Branches</option>
                                             {branchesList.map(b => (
@@ -1709,15 +1710,15 @@ const SalePayment = () => {
                                 </div>
 
                                 {/* Active filter chips */}
-                                {(searchTerm || statusFilter !== 'All' || courseFilter !== 'All' || (userRole !== 'staff' && branchFilter !== 'All') || dateFilter !== 'All Time') && (
+                                {(searchTerm || statusFilter !== 'All' || courseFilter !== 'All' || (!isBranchScopedUser && branchFilter !== 'All') || dateFilter !== 'All Time') && (
                                     <div className="active-filters-bar">
                                         <span className="active-filters-label">Filters:</span>
                                         {searchTerm && <span className="active-filter-chip">"{searchTerm}" <button onClick={() => setSearchTerm('')}>×</button></span>}
                                         {statusFilter !== 'All' && <span className="active-filter-chip">{statusFilter} <button onClick={() => setStatusFilter('All')}>×</button></span>}
                                         {courseFilter !== 'All' && <span className="active-filter-chip">{courseFilter} <button onClick={() => setCourseFilter('All')}>×</button></span>}
-                                        {userRole !== 'staff' && branchFilter !== 'All' && <span className="active-filter-chip">📍 {branchFilter} <button onClick={() => setBranchFilter('All')}>×</button></span>}
+                                        {!isBranchScopedUser && branchFilter !== 'All' && <span className="active-filter-chip">📍 {branchFilter} <button onClick={() => setBranchFilter('All')}>×</button></span>}
                                         {dateFilter !== 'All Time' && <span className="active-filter-chip">{dateFilter === 'Past X Days' ? `Past ${customDays} days` : dateFilter} <button onClick={() => setDateFilter('All Time')}>×</button></span>}
-                                        <button className="clear-all-filters" onClick={() => { setSearchTerm(''); setStatusFilter('All'); setCourseFilter('All'); if (userRole !== 'staff') setBranchFilter('All'); setDateFilter('All Time'); }}>Clear all</button>
+                                        <button className="clear-all-filters" onClick={() => { setSearchTerm(''); setStatusFilter('All'); setCourseFilter('All'); if (!isBranchScopedUser) setBranchFilter('All'); setDateFilter('All Time'); }}>Clear all</button>
                                     </div>
                                 )}
                             </div>

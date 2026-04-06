@@ -5,7 +5,18 @@ import { schedulesAPI, branchesAPI, authAPI, coursesAPI, adminAPI } from '../ser
 import { useNotification } from '../context/NotificationContext';
 import { ConfirmModal } from './config/Modals';
 
-const Schedule = ({ onNavigate }) => {
+const SCHEDULE_TAB_PERMISSION_MAP = {
+    schedule: ['operations.schedules.manage', 'operations.schedules.tab.schedule'],
+    summary: ['operations.schedules.manage', 'operations.schedules.tab.summary'],
+    noshow: ['operations.schedules.manage', 'operations.schedules.tab.noshow'],
+};
+
+const normalizePermissionList = (permissions) => {
+    if (!Array.isArray(permissions)) return [];
+    return permissions.filter((permission) => typeof permission === 'string' && permission.trim().length > 0);
+};
+
+const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '' }) => {
     const [todayStudents, setTodayStudents] = React.useState({ data: [], total: 0, date: '' });
     const [scheduleView, setScheduleView] = React.useState('schedule'); // 'schedule' | 'summary' | 'noshow'
     const [noShowStudents, setNoShowStudents] = React.useState({ data: [], loading: false });
@@ -52,6 +63,17 @@ const Schedule = ({ onNavigate }) => {
     const [branches, setBranches] = useState([]);
     const [selectedBranch, setSelectedBranch] = useState('');
     const [courses, setCourses] = useState([]);
+    const normalizedRole = String(currentUserRole || '').toLowerCase();
+    const isSuperAdmin = normalizedRole === 'super_admin';
+    const permissionSet = new Set(normalizePermissionList(currentUserPermissions));
+    const canAccessScheduleTab = (tabKey) => {
+        if (isSuperAdmin) return true;
+        const requiredPermissions = SCHEDULE_TAB_PERMISSION_MAP[tabKey] || [];
+        // If no explicit permission payload is provided, keep legacy behavior by allowing tabs.
+        if (permissionSet.size === 0) return true;
+        return requiredPermissions.some((permission) => permissionSet.has(permission));
+    };
+    const allowedScheduleTabs = ['schedule', 'summary', 'noshow'].filter((tabKey) => canAccessScheduleTab(tabKey));
 
     // Always fetch both tab counts so badges show on initial load
     React.useEffect(() => {
@@ -85,6 +107,13 @@ const Schedule = ({ onNavigate }) => {
                 .catch(() => setNoShowStudents({ data: [], loading: false }));
         }
     }, [scheduleView]);
+
+    React.useEffect(() => {
+        if (allowedScheduleTabs.length === 0) return;
+        if (!allowedScheduleTabs.includes(scheduleView)) {
+            setScheduleView(allowedScheduleTabs[0]);
+        }
+    }, [allowedScheduleTabs, scheduleView]);
 
     const [formData, setFormData] = useState({
         type: 'tdc',
@@ -168,8 +197,8 @@ const Schedule = ({ onNavigate }) => {
                 const response = await branchesAPI.getAll();
                 let loadedBranches = response.branches || [];
 
-                // Restrict viewing for staff
-                if (role === 'staff' && profileBranchId) {
+                // Restrict viewing for staff and branch-assigned admins.
+                if ((role === 'staff' || (role === 'admin' && profileBranchId)) && profileBranchId) {
                     loadedBranches = loadedBranches.filter(b => String(b.id) === String(profileBranchId));
                     setSelectedBranch(String(profileBranchId));
                 }
@@ -955,9 +984,9 @@ const Schedule = ({ onNavigate }) => {
                         className="branch-filter-select"
                         value={selectedBranch}
                         onChange={(e) => setSelectedBranch(e.target.value)}
-                        disabled={userRole === 'staff'}
+                        disabled={userRole === 'staff' || (userRole === 'admin' && !!selectedBranch && branches.length === 1)}
                     >
-                        {userRole !== 'staff' && <option value="">All Branches / Default View</option>}
+                        {!(userRole === 'staff' || (userRole === 'admin' && branches.length === 1)) && <option value="">All Branches / Default View</option>}
                         {branches.map(branch => {
                             let formattedName = branch.name;
                             const prefixes = ['Master Driving School ', 'Master Prime Driving School ', 'Masters Prime Holdings Corp. ', 'Master Prime Holdings Corp. '];
@@ -982,55 +1011,77 @@ const Schedule = ({ onNavigate }) => {
                 padding: '0 24px',
                 boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
             }}>
-                <button
-                    className={`cfg-tab-btn${scheduleView === 'schedule' ? ' active' : ''}`}
-                    onClick={() => setScheduleView('schedule')}
-                    style={{ marginBottom: '-2px' }}
-                >
-                    <span className="cfg-tab-icon">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                    </span>
-                    <span className="tab-label">Schedule</span>
-                </button>
-                <button
-                    className={`cfg-tab-btn${scheduleView === 'summary' ? ' active' : ''}`}
-                    onClick={() => setScheduleView('summary')}
-                    style={{ marginBottom: '-2px' }}
-                >
-                    <span className="cfg-tab-icon">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                    </span>
-                    <span className="tab-label">Student Summary</span>
-                    {todayStudents.total > 0 && (
-                        <span style={{
-                            marginLeft: '6px',
-                            background: scheduleView === 'summary' ? 'var(--primary-color, #1a56db)' : '#e0e7ff',
-                            color: scheduleView === 'summary' ? '#fff' : 'var(--primary-color, #1a56db)',
-                            borderRadius: '20px', padding: '1px 8px',
-                            fontSize: '0.72rem', fontWeight: 700, lineHeight: '1.5',
-                        }}>{todayStudents.total}</span>
-                    )}
-                </button>
-                <button
-                    className={`cfg-tab-btn${scheduleView === 'noshow' ? ' active' : ''}`}
-                    onClick={() => setScheduleView('noshow')}
-                    style={{ marginBottom: '-2px' }}
-                >
-                    <span className="cfg-tab-icon">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                    </span>
-                    <span className="tab-label">No-Show Students</span>
-                    {!noShowStudents.loading && noShowStudents.data.length > 0 && (
-                        <span style={{
-                            marginLeft: '6px',
-                            background: scheduleView === 'noshow' ? '#ef4444' : '#fee2e2',
-                            color: scheduleView === 'noshow' ? '#fff' : '#b91c1c',
-                            borderRadius: '20px', padding: '1px 8px',
-                            fontSize: '0.72rem', fontWeight: 700, lineHeight: '1.5',
-                        }}>{noShowStudents.data.length}</span>
-                    )}
-                </button>
+                {canAccessScheduleTab('schedule') && (
+                    <button
+                        className={`cfg-tab-btn${scheduleView === 'schedule' ? ' active' : ''}`}
+                        onClick={() => setScheduleView('schedule')}
+                        style={{ marginBottom: '-2px' }}
+                    >
+                        <span className="cfg-tab-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                        </span>
+                        <span className="tab-label">Schedule</span>
+                    </button>
+                )}
+                {canAccessScheduleTab('summary') && (
+                    <button
+                        className={`cfg-tab-btn${scheduleView === 'summary' ? ' active' : ''}`}
+                        onClick={() => setScheduleView('summary')}
+                        style={{ marginBottom: '-2px' }}
+                    >
+                        <span className="cfg-tab-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                        </span>
+                        <span className="tab-label">Student Summary</span>
+                        {todayStudents.total > 0 && (
+                            <span style={{
+                                marginLeft: '6px',
+                                background: scheduleView === 'summary' ? 'var(--primary-color, #1a56db)' : '#e0e7ff',
+                                color: scheduleView === 'summary' ? '#fff' : 'var(--primary-color, #1a56db)',
+                                borderRadius: '20px', padding: '1px 8px',
+                                fontSize: '0.72rem', fontWeight: 700, lineHeight: '1.5',
+                            }}>{todayStudents.total}</span>
+                        )}
+                    </button>
+                )}
+                {canAccessScheduleTab('noshow') && (
+                    <button
+                        className={`cfg-tab-btn${scheduleView === 'noshow' ? ' active' : ''}`}
+                        onClick={() => setScheduleView('noshow')}
+                        style={{ marginBottom: '-2px' }}
+                    >
+                        <span className="cfg-tab-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                        </span>
+                        <span className="tab-label">No-Show Students</span>
+                        {!noShowStudents.loading && noShowStudents.data.length > 0 && (
+                            <span style={{
+                                marginLeft: '6px',
+                                background: scheduleView === 'noshow' ? '#ef4444' : '#fee2e2',
+                                color: scheduleView === 'noshow' ? '#fff' : '#b91c1c',
+                                borderRadius: '20px', padding: '1px 8px',
+                                fontSize: '0.72rem', fontWeight: 700, lineHeight: '1.5',
+                            }}>{noShowStudents.data.length}</span>
+                        )}
+                    </button>
+                )}
             </div>
+
+            {allowedScheduleTabs.length === 0 && (
+                <div style={{
+                    marginTop: '12px',
+                    marginBottom: '14px',
+                    border: '1px solid #fecaca',
+                    background: '#fef2f2',
+                    color: '#991b1b',
+                    borderRadius: '10px',
+                    padding: '12px 14px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600
+                }}>
+                    No Schedule tabs are enabled for this account.
+                </div>
+            )}
 
             {scheduleView === 'noshow' ? (
                 /* No-Show Students view */

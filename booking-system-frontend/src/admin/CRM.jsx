@@ -20,6 +20,8 @@ const CRMManagement = () => {
 
     // Auth / role state
     const [userRole, setUserRole] = useState(null);
+    const [userBranchId, setUserBranchId] = useState(null);
+    const isBranchScopedUser = userRole === 'staff' || (userRole === 'admin' && !!userBranchId);
 
     // Course Management Modal State
     const [selectedStudent, setSelectedStudent] = useState(null);
@@ -35,9 +37,10 @@ const CRMManagement = () => {
                     const role = profileRes.user.role;
                     const branchId = profileRes.user.branchId;
                     setUserRole(role);
+                    setUserBranchId(branchId || null);
                     const branchRes = await branchesAPI.getAll();
                     if (branchRes.success && branchRes.branches) {
-                        if (role === 'staff' && branchId) {
+                        if ((role === 'staff' || (role === 'admin' && branchId)) && branchId) {
                             const staffBranch = branchRes.branches.find(b => String(b.id) === String(branchId));
                             if (staffBranch) {
                                 setBranchesList([staffBranch]);
@@ -175,7 +178,7 @@ const CRMManagement = () => {
                     </div>
                 </div>
                 <div className="branch-filter-right">
-                    {userRole !== 'staff' && (
+                    {!isBranchScopedUser && (
                         <>
                             <span className="branch-filter-count">{branchesList.length} Branches</span>
                             <select

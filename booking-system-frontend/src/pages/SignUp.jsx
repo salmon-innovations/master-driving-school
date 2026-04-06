@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react'
 import { authAPI } from '../services/api'
 import { useNotification } from '../context/NotificationContext'
 import { getZipFromAddress } from '../utils/philippineZipCodes'
+import NationalitySelect from '../components/NationalitySelect'
+import SmartAddress from '../components/SmartAddress'
+import TurnstileWidget from '../components/TurnstileWidget'
 
 // Zip code lookup is handled by the shared utility: getZipFromAddress(address)
 
@@ -18,7 +21,13 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
     firstName: '',
     middleName: '',
     lastName: '',
-    address: '',
+    houseNumber: '',
+    streetName: '',
+    village: '',
+    barangay: '',
+    city: '',
+    province: '',
+    address: '', // Combined address
     age: '',
     gender: '',
     birthday: '',
@@ -41,6 +50,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
+  const [turnstileToken, setTurnstileToken] = useState('')
 
   const calculateAge = (birthday) => {
     if (!birthday) return ''
@@ -92,9 +102,21 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
         }
       }
 
-      // Auto-fill zip code based on Philippine city/municipality in address
-      if (name === 'address') {
-        updated.zipCode = getZipFromAddress(formattedValue);
+      // Re-evaluate combined address whenever address parts change
+      const addressPartsFields = ['houseNumber', 'streetName', 'village', 'barangay', 'city', 'province'];
+      if (addressPartsFields.includes(name)) {
+        const parts = [
+          updated.houseNumber,
+          updated.streetName,
+          updated.village,
+          updated.barangay,
+          updated.city,
+          updated.province
+        ].filter(Boolean);
+        updated.address = parts.join(', ');
+
+        const locationStr = [updated.barangay, updated.city, updated.province].filter(Boolean).join(', ');
+        updated.zipCode = getZipFromAddress(locationStr) || updated.zipCode; // Auto-fill zip
       }
 
       return updated;
@@ -125,6 +147,10 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
   const validateStep2 = () => {
     const newErrors = {}
     if (!formData.address) newErrors.address = 'Address is required'
+    if (!formData.province) newErrors.province = 'Province is required'
+    if (!formData.city) newErrors.city = 'City/Municipality is required'
+    if (!formData.barangay) newErrors.barangay = 'Barangay is required'
+    if (!formData.streetName) newErrors.streetName = 'Street Name is required'
     if (!formData.zipCode) newErrors.zipCode = 'Zip code is required'
     if (!formData.birthPlace) newErrors.birthPlace = 'Birth place is required'
     if (!formData.contactNumbers) {
@@ -163,6 +189,9 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
     if (formData.password !== formData.confirmPassword) {
       newErrors.confirmPassword = 'Passwords do not match'
     }
+    if (!turnstileToken) {
+      newErrors.turnstile = 'Please complete human verification'
+    }
     return newErrors
   }
 
@@ -184,13 +213,21 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  const handleTopBack = () => {
+    if (currentStep > 1) {
+      handlePrev()
+      return
+    }
+    onNavigate('signin')
+  }
+
   const handleSubmit = async () => {
     const newErrors = validateStep3()
     
     if (Object.keys(newErrors).length === 0) {
       setLoading(true)
       try {
-        const response = await authAPI.register(formData)
+        const response = await authAPI.register({ ...formData, turnstileToken })
         showNotification('Registration successful! Please verify your email.', 'success')
         setPendingVerificationEmail(formData.email)
         onNavigate('verify-email')
@@ -215,17 +252,29 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
         {/* Left Section - Form */}
         <div className="w-full lg:w-2/3 p-8 lg:p-12 relative">
           <button 
-            onClick={() => onNavigate('signin')}
+            onClick={handleTopBack}
             className="absolute top-8 left-8 text-gray-500 hover:text-[#2157da] flex items-center gap-2 transition-colors font-medium"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
-            Back to Login
+            {currentStep > 1 ? 'Back to Previous Step' : 'Back to Login'}
           </button>
 
           <div className="mt-12 max-w-2xl mx-auto">
             <h1 className="text-4xl font-bold text-gray-900 mb-6">Enrollment Form</h1>
+            {currentStep > 1 && (
+              <button
+                type="button"
+                onClick={handlePrev}
+                className="mb-4 inline-flex items-center gap-2 text-sm font-bold text-[#2157da] hover:text-[#1a3a8a] transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                Back to previous section
+              </button>
+            )}
             
             <div className="flex items-center justify-between mb-8">
               <div>
@@ -239,10 +288,17 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
                 {steps.map((step) => (
                   <div 
                     key={step.id}
+                    onClick={() => {
+                      if (step.id < currentStep) {
+                        setCurrentStep(step.id)
+                        setErrors({})
+                        window.scrollTo({ top: 0, behavior: 'smooth' })
+                      }
+                    }}
                     className={`w-3 h-3 rounded-full transition-all duration-300 ${
                       step.id === currentStep ? 'bg-[#2157da] scale-125' : 
                       step.id < currentStep ? 'bg-[#2157da] opacity-50' : 'bg-gray-200'
-                    }`}
+                    } ${step.id < currentStep ? 'cursor-pointer hover:opacity-80' : ''}`}
                   />
                 ))}
               </div>
@@ -381,13 +437,10 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Nationality</label>
-                    <input
-                      type="text"
-                      name="nationality"
+                    <NationalitySelect
                       value={formData.nationality}
                       onChange={handleChange}
-                      placeholder="e.g. Filipino"
-                      className={`w-full px-4 py-3 bg-gray-50 border ${errors.nationality ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:ring-2 focus:ring-[#2157da] outline-none transition-all`}
+                      className={`w-full px-4 py-3 bg-gray-50 border ${errors.nationality ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:ring-2 focus:ring-[#2157da] outline-none transition-all pr-10`}
                     />
                     {errors.nationality && <p className="text-xs text-red-500 mt-1">{errors.nationality}</p>}
                   </div>
@@ -398,18 +451,20 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
             {/* Step 2: Address & Contact */}
             {currentStep === 2 && (
               <div className="space-y-6 animate-fade-in">
+                <SmartAddress formData={formData} onChange={handleChange} errors={errors} />
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Home Address</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Place of Birth</label>
                     <input
                       type="text"
-                      name="address"
-                      value={formData.address}
+                      name="birthPlace"
+                      value={formData.birthPlace}
                       onChange={handleChange}
-                      className={`w-full px-4 py-3 bg-gray-50 border ${errors.address ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:ring-2 focus:ring-[#2157da] outline-none transition-all`}
-                      placeholder="House No., Street, Barangay, City"
+                      className={`w-full px-4 py-3 bg-gray-50 border ${errors.birthPlace ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:ring-2 focus:ring-[#2157da] outline-none transition-all`}
+                      placeholder="City or Province"
                     />
-                    {errors.address && <p className="text-xs text-red-500 mt-1">{errors.address}</p>}
+                    {errors.birthPlace && <p className="text-xs text-red-500 mt-1">{errors.birthPlace}</p>}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Zip Code</label>
@@ -423,19 +478,6 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
                     />
                     {errors.zipCode && <p className="text-xs text-red-500 mt-1">{errors.zipCode}</p>}
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Place of Birth</label>
-                  <input
-                    type="text"
-                    name="birthPlace"
-                    value={formData.birthPlace}
-                    onChange={handleChange}
-                    className={`w-full px-4 py-3 bg-gray-50 border ${errors.birthPlace ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:ring-2 focus:ring-[#2157da] outline-none transition-all`}
-                    placeholder="City or Province"
-                  />
-                  {errors.birthPlace && <p className="text-xs text-red-500 mt-1">{errors.birthPlace}</p>}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -561,6 +603,25 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
                   </div>
                   {errors.confirmPassword && <p className="text-xs text-red-500 mt-1">{errors.confirmPassword}</p>}
                 </div>
+
+                <div className="space-y-2">
+                  <TurnstileWidget
+                    onVerify={(token) => {
+                      setTurnstileToken(token)
+                      if (errors.turnstile) {
+                        setErrors(prev => ({ ...prev, turnstile: '' }))
+                      }
+                    }}
+                    onExpire={() => {
+                      setTurnstileToken('')
+                    }}
+                    onError={() => {
+                      setTurnstileToken('')
+                      setErrors(prev => ({ ...prev, turnstile: 'Verification failed. Please retry.' }))
+                    }}
+                  />
+                  {errors.turnstile && <p className="text-xs text-red-500 mt-1">{errors.turnstile}</p>}
+                </div>
               </div>
             )}
 
@@ -588,7 +649,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
                 <button
                   type="button"
                   onClick={handleSubmit}
-                  disabled={loading}
+                  disabled={loading || !turnstileToken}
                   className="flex-1 bg-[#2157da] text-white py-3.5 rounded-lg font-bold hover:bg-[#1a3a8a] transition-all disabled:opacity-50 uppercase tracking-wide shadow-lg shadow-blue-900/20"
                 >
                   {loading ? 'Creating Account...' : 'Complete Enrollment'}

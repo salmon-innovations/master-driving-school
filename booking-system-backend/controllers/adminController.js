@@ -32,6 +32,7 @@ const PERMISSION_GROUPS = [
       'operations.crm.manage',
       'operations.news.manage',
       'operations.analytics.view',
+      'operations.best_selling_courses.view',
     ],
   },
   {
@@ -39,6 +40,33 @@ const PERMISSION_GROUPS = [
     permissions: [
       'accounts.courses.view',
       'accounts.config.view',
+    ],
+  },
+  {
+    id: 'course_management_tabs',
+    permissions: [
+      'accounts.courses.tab.courses',
+      'accounts.courses.tab.discounts',
+      'accounts.courses.tab.config',
+    ],
+  },
+  {
+    id: 'config_management_tabs',
+    permissions: [
+      'accounts.config.tab.branches',
+      'accounts.config.tab.roles',
+      'accounts.config.tab.coursetypes',
+      'accounts.config.tab.emailcontent',
+      'accounts.config.tab.settings',
+      'accounts.config.tab.backup',
+    ],
+  },
+  {
+    id: 'schedule_page_tabs',
+    permissions: [
+      'operations.schedules.tab.schedule',
+      'operations.schedules.tab.summary',
+      'operations.schedules.tab.noshow',
     ],
   },
   {
@@ -57,13 +85,41 @@ const ALLOWED_PERMISSION_KEYS = new Set(ALL_PERMISSION_KEYS);
 
 const ROLE_PERMISSION_PRESETS = {
   super_admin: [...ALL_PERMISSION_KEYS],
-  admin: [...ALL_PERMISSION_KEYS],
-  staff: [
+  admin: [
     'operations.schedules.manage',
+    'operations.schedules.tab.schedule',
+    'operations.schedules.tab.summary',
+    'operations.schedules.tab.noshow',
     'operations.bookings.manage',
     'operations.walk_in.manage',
     'operations.sales.manage',
     'operations.crm.manage',
+    'operations.analytics.view',
+    'operations.best_selling_courses.view',
+    'operations.news.manage',
+    'accounts.courses.view',
+    'accounts.courses.tab.courses',
+    'accounts.courses.tab.discounts',
+    'accounts.courses.tab.config',
+    'accounts.config.view',
+    'accounts.config.tab.branches',
+    'accounts.config.tab.coursetypes',
+    'accounts.config.tab.emailcontent',
+    'accounts.config.tab.settings',
+    'accounts.users.create',
+    'accounts.users.edit',
+    'accounts.users.reset_password',
+  ],
+  staff: [
+    'operations.schedules.manage',
+    'operations.schedules.tab.schedule',
+    'operations.schedules.tab.summary',
+    'operations.schedules.tab.noshow',
+    'operations.bookings.manage',
+    'operations.walk_in.manage',
+    'operations.sales.manage',
+    'operations.crm.manage',
+    'operations.best_selling_courses.view',
     'operations.news.manage',
   ],
 };
@@ -95,22 +151,87 @@ const getRoleDefaultPermissions = (role) => {
   return [...(ROLE_PERMISSION_PRESETS[normalizedRole] || [])];
 };
 
+const getUserBranchScope = async (user = {}) => {
+  const role = String(user.role || '').toLowerCase();
+  const userId = user.id;
+
+  if (role === 'super_admin') {
+    return { role, branchId: null, canViewAll: true };
+  }
+
+  const userRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [userId]);
+  const branchId = userRow.rows.length > 0 ? userRow.rows[0].branch_id : null;
+
+  if (role === 'admin') {
+    // Admin with null branch_id means "All Branches".
+    return { role, branchId, canViewAll: !branchId };
+  }
+
+  // Staff and other roles are always branch-scoped.
+  return { role, branchId, canViewAll: false };
+};
+
+const isSameBranch = (left, right) => String(left || '') === String(right || '');
+
+const getBookingAccessInScope = async (bookingId, scope, db = pool) => {
+  const bookingRow = await db.query('SELECT id, branch_id FROM bookings WHERE id = $1', [bookingId]);
+  if (bookingRow.rows.length === 0) {
+    return { exists: false, allowed: false };
+  }
+
+  if (scope.canViewAll) {
+    return { exists: true, allowed: true, branchId: bookingRow.rows[0].branch_id };
+  }
+
+  return {
+    exists: true,
+    allowed: isSameBranch(bookingRow.rows[0].branch_id, scope.branchId),
+    branchId: bookingRow.rows[0].branch_id,
+  };
+};
+
+const isScopedWithoutBranch = (scope) => !scope.canViewAll && !scope.branchId;
+
 // Get dashboard statistics
 const getDashboardStats = async (req, res) => {
   try {
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({
+        success: true,
+        stats: {
+          totalStudents: 0,
+          monthlyRevenue: 0,
+          pendingBookings: 0,
+          todayEnrollments: 0,
+          growthRate: '0.0',
+          retention: 0,
+          traffic: 0,
+          addedStudents: 0,
+          walkIns: 0,
+        },
+      });
+    }
+    const bookingBranchFilter = scope.branchId && !scope.canViewAll ? ` AND branch_id = ${parseInt(scope.branchId, 10)}` : '';
+    const slotBranchFilter = scope.branchId && !scope.canViewAll ? ` AND ss.branch_id = ${parseInt(scope.branchId, 10)}` : '';
+
     // Get total enrolled students (from bookings + schedule_enrollments)
     const studentsResult = await pool.query(
       `SELECT COUNT(DISTINCT student_id) as total FROM (
-        SELECT user_id as student_id FROM bookings WHERE status IN ('confirmed', 'completed', 'paid', 'collectable')
+        SELECT user_id as student_id FROM bookings WHERE status IN ('confirmed', 'completed', 'paid', 'collectable')${bookingBranchFilter}
         UNION
-        SELECT student_id FROM schedule_enrollments WHERE enrollment_status IN ('enrolled', 'completed')
+        SELECT se.student_id
+        FROM schedule_enrollments se
+        JOIN schedule_slots ss ON se.slot_id = ss.id
+        WHERE se.enrollment_status IN ('enrolled', 'completed')${slotBranchFilter}
       ) combined`
     );
 
     // Get total revenue this month
     const revenueResult = await pool.query(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bookings 
-       WHERE status IN ('confirmed', 'completed', 'paid', 'collectable') 
+       WHERE status IN ('confirmed', 'completed', 'paid', 'collectable')
+       ${bookingBranchFilter}
        AND EXTRACT(MONTH FROM created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
        AND EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)`
     );
@@ -118,36 +239,41 @@ const getDashboardStats = async (req, res) => {
     // Get total revenue LAST month for growth rate
     const lastMonthRevenueResult = await pool.query(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bookings 
-       WHERE status IN ('confirmed', 'completed', 'paid', 'collectable') 
+       WHERE status IN ('confirmed', 'completed', 'paid', 'collectable')
+       ${bookingBranchFilter}
        AND created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
        AND created_at < DATE_TRUNC('month', CURRENT_DATE)`
     );
 
     // Get pending bookings count
     const pendingResult = await pool.query(
-      `SELECT COUNT(*) as total FROM bookings WHERE status = 'pending'`
+      `SELECT COUNT(*) as total FROM bookings WHERE status = 'pending'${bookingBranchFilter}`
     );
 
     // Get today's enrollments
     const todayEnrollmentsResult = await pool.query(
       `SELECT COUNT(*) as total FROM (
-        SELECT id FROM bookings WHERE created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + INTERVAL '1 day'
+        SELECT id FROM bookings WHERE created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + INTERVAL '1 day'${bookingBranchFilter}
         UNION ALL
-        SELECT id FROM schedule_enrollments WHERE created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + INTERVAL '1 day'
+        SELECT se.id
+        FROM schedule_enrollments se
+        JOIN schedule_slots ss ON se.slot_id = ss.id
+        WHERE se.created_at >= CURRENT_DATE AND se.created_at < CURRENT_DATE + INTERVAL '1 day'${slotBranchFilter}
       ) combined`
     );
 
     // Get this month's added students (for Analytics Page)
     const addedStudentsResult = await pool.query(
       `SELECT COUNT(*) as total FROM bookings 
-       WHERE EXTRACT(MONTH FROM created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
+       WHERE 1=1${bookingBranchFilter}
+       AND EXTRACT(MONTH FROM created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
        AND EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)`
     );
 
     // Get walk-ins count (total or monthly? Analytics likely wants total or relevant timeframe. Let's do monthly)
     const walkInsResult = await pool.query(
       `SELECT COUNT(*) as total FROM bookings 
-       WHERE enrollment_type = 'walk-in'
+       WHERE enrollment_type = 'walk-in'${bookingBranchFilter}
        AND EXTRACT(MONTH FROM created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
        AND EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)`
     );
@@ -188,27 +314,17 @@ const getDashboardStats = async (req, res) => {
 const getAllBookings = async (req, res) => {
   try {
     const { status, limit = 50, branchId } = req.query;
-    const userRole = req.user.role;
-    const userId = req.user.id;
-
-    // Always fetch the actual branch_id from DB — don't rely on JWT payload
-    let userBranchId = null;
-    if (userRole === 'staff') {
-      const userRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [userId]);
-      if (userRow.rows.length > 0) {
-        userBranchId = userRow.rows[0].branch_id;
-        console.log(`🔍 [getAllBookings] Role: ${userRole}, branch_id from DB: ${userBranchId}`);
-      } else {
-        console.warn(`⚠️ [getAllBookings] Staff user ID ${userId} not found in database.`);
-      }
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, bookings: [] });
     }
+    const requestedBranchId = branchId ? parseInt(branchId, 10) : null;
+    const effectiveBranchId = scope.canViewAll ? requestedBranchId : scope.branchId;
 
     const queryParams = [];
     let paramIndex = 1;
     const whereClauses = [];
 
-    // Branch filter: staff restricted to their branch; admins can filter by selected branch
-    const effectiveBranchId = userBranchId || (branchId ? parseInt(branchId) : null);
     if (effectiveBranchId) {
       whereClauses.push(`b.branch_id = $${paramIndex++}`);
       queryParams.push(effectiveBranchId);
@@ -302,8 +418,16 @@ const getAllBookings = async (req, res) => {
 const getAllUsers = async (req, res) => {
   try {
     await ensureUserPermissionsColumn();
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, users: [] });
+    }
 
     const { role, limit = 100 } = req.query;
+
+    const userBranchExpr = `COALESCE(u.branch_id, (
+      SELECT branch_id FROM bookings WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1
+    ))`;
 
     let query = `
       SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.role, 
@@ -312,9 +436,7 @@ const getAllUsers = async (req, res) => {
              u.birth_place, u.nationality, u.marital_status, u.zip_code,
              u.emergency_contact_person, u.emergency_contact_number,
              COALESCE(u.permissions, '[]'::jsonb) as permissions,
-             COALESCE(u.branch_id, (
-                SELECT branch_id FROM bookings WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1
-             )) as branch_id, 
+             ${userBranchExpr} as branch_id,
              COALESCE(b.name, (
                 SELECT br.name FROM bookings bk JOIN branches br ON bk.branch_id = br.id WHERE bk.user_id = u.id ORDER BY bk.created_at DESC LIMIT 1
              )) as branch_name, u.avatar
@@ -323,16 +445,25 @@ const getAllUsers = async (req, res) => {
     `;
 
     const queryParams = [];
+    const whereClauses = [];
+    let paramIndex = 1;
+
+    if (!scope.canViewAll && scope.branchId) {
+      whereClauses.push(`${userBranchExpr} = $${paramIndex++}`);
+      queryParams.push(scope.branchId);
+    }
 
     if (role) {
-      query += ` WHERE u.role = $1`;
+      whereClauses.push(`u.role = $${paramIndex++}`);
       queryParams.push(role);
-      query += ` ORDER BY u.created_at DESC LIMIT $2`;
-      queryParams.push(limit);
-    } else {
-      query += ` ORDER BY u.created_at DESC LIMIT $1`;
-      queryParams.push(limit);
     }
+
+    if (whereClauses.length > 0) {
+      query += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+
+    query += ` ORDER BY u.created_at DESC LIMIT $${paramIndex}`;
+    queryParams.push(limit);
 
     const result = await pool.query(query, queryParams);
 
@@ -350,11 +481,22 @@ const getAllUsers = async (req, res) => {
 const searchStudents = async (req, res) => {
   try {
     const { name } = req.query;
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, students: [] });
+    }
     if (!name || name.trim().length < 2) {
       return res.json({ success: true, students: [] });
     }
 
     const searchPattern = `%${name.trim()}%`;
+    const queryParams = [searchPattern];
+    const branchClause = (!scope.canViewAll && scope.branchId)
+      ? ` AND COALESCE(u.branch_id, (SELECT branch_id FROM bookings WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1)) = $2`
+      : '';
+    if (!scope.canViewAll && scope.branchId) {
+      queryParams.push(scope.branchId);
+    }
     const query = `
       SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.role, 
              u.contact_numbers, u.address, u.gender, u.age, u.birthday, 
@@ -363,10 +505,11 @@ const searchStudents = async (req, res) => {
       FROM users u
       WHERE (u.first_name ILIKE $1 OR u.last_name ILIKE $1 OR u.email ILIKE $1)
       AND (u.role = 'student' OR u.role = 'walkin_student')
+      ${branchClause}
       LIMIT 10
     `;
 
-    const result = await pool.query(query, [searchPattern]);
+    const result = await pool.query(query, queryParams);
 
     res.json({
       success: true,
@@ -383,11 +526,20 @@ const updateBookingStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
+    const scope = await getUserBranchScope(req.user);
 
     // Validate status
     const validStatuses = ['collectable', 'paid', 'cancelled', 'completed'];
     if (!validStatuses.includes(status.toLowerCase())) {
       return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const access = await getBookingAccessInScope(id, scope);
+    if (!access.exists) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    if (!access.allowed) {
+      return res.status(403).json({ error: 'Access denied for this branch booking' });
     }
 
     const result = await pool.query(
@@ -416,6 +568,15 @@ const updateBookingStatus = async (req, res) => {
 const deleteBooking = async (req, res) => {
   try {
     const { id } = req.params;
+    const scope = await getUserBranchScope(req.user);
+
+    const access = await getBookingAccessInScope(id, scope);
+    if (!access.exists) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    if (!access.allowed) {
+      return res.status(403).json({ error: 'Access denied for this branch booking' });
+    }
 
     const result = await pool.query(
       'DELETE FROM bookings WHERE id = $1 RETURNING *',
@@ -439,16 +600,27 @@ const deleteBooking = async (req, res) => {
 // Get revenue data for charts (monthly)
 const getRevenueData = async (req, res) => {
   try {
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, data: [] });
+    }
+    const params = [];
+    const branchClause = (!scope.canViewAll && scope.branchId)
+      ? ` AND branch_id = $1`
+      : '';
+    if (!scope.canViewAll && scope.branchId) params.push(scope.branchId);
+
     const result = await pool.query(`
       SELECT 
         TO_CHAR(created_at, 'Mon') as name,
         COALESCE(SUM(total_amount), 0) as revenue
       FROM bookings
       WHERE status IN ('confirmed', 'completed', 'paid', 'collectable')
+        ${branchClause}
         AND created_at >= DATE_TRUNC('year', CURRENT_DATE)
       GROUP BY TO_CHAR(created_at, 'Mon'), EXTRACT(MONTH FROM created_at)
       ORDER BY EXTRACT(MONTH FROM created_at)
-    `);
+    `, params);
 
     // If no data, return placeholder months
     if (result.rows.length === 0) {
@@ -471,6 +643,19 @@ const getRevenueData = async (req, res) => {
 // Get enrollment data for charts (monthly)
 const getEnrollmentData = async (req, res) => {
   try {
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, data: [] });
+    }
+    const params = [];
+    const bookingBranchClause = (!scope.canViewAll && scope.branchId)
+      ? ` AND branch_id = $1`
+      : '';
+    const slotBranchClause = (!scope.canViewAll && scope.branchId)
+      ? ` AND ss.branch_id = $1`
+      : '';
+    if (!scope.canViewAll && scope.branchId) params.push(scope.branchId);
+
     const result = await pool.query(`
       SELECT 
         TO_CHAR(created_at, 'Mon') as name,
@@ -480,13 +665,16 @@ const getEnrollmentData = async (req, res) => {
       FROM (
         SELECT created_at, enrollment_type FROM bookings
         WHERE created_at >= DATE_TRUNC('year', CURRENT_DATE)
+        ${bookingBranchClause}
         UNION ALL
-        SELECT created_at, 'online' as enrollment_type FROM schedule_enrollments
-        WHERE created_at >= DATE_TRUNC('year', CURRENT_DATE)
+        SELECT se.created_at, 'online' as enrollment_type FROM schedule_enrollments se
+        JOIN schedule_slots ss ON ss.id = se.slot_id
+        WHERE se.created_at >= DATE_TRUNC('year', CURRENT_DATE)
+        ${slotBranchClause}
       ) combined
       GROUP BY TO_CHAR(created_at, 'Mon'), EXTRACT(MONTH FROM created_at)
       ORDER BY EXTRACT(MONTH FROM created_at)
-    `);
+    `, params);
 
     // If no data, return placeholder months
     if (result.rows.length === 0) {
@@ -509,6 +697,35 @@ const getEnrollmentData = async (req, res) => {
 // Get best selling courses
 const getBestSellingCourses = async (req, res) => {
   try {
+    const { branchId, filter } = req.query;
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, courses: [] });
+    }
+    const requestedBranchId = branchId ? parseInt(branchId, 10) : null;
+    const effectiveBranchId = scope.canViewAll ? requestedBranchId : scope.branchId;
+    
+    const conditionClauses = [];
+    const queryParams = [];
+    let paramIndex = 1;
+
+    if (effectiveBranchId) {
+      conditionClauses.push(`b.branch_id = $${paramIndex++}`);
+      queryParams.push(effectiveBranchId);
+    }
+
+    if (filter === 'today') {
+      conditionClauses.push(`DATE(b.created_at) = CURRENT_DATE`);
+    } else if (filter === 'this_week') {
+      conditionClauses.push(`b.created_at >= date_trunc('week', CURRENT_DATE)`);
+    } else if (filter === 'this_month') {
+      conditionClauses.push(`b.created_at >= date_trunc('month', CURRENT_DATE)`);
+    } else if (filter === 'this_year') {
+      conditionClauses.push(`b.created_at >= date_trunc('year', CURRENT_DATE)`);
+    }
+
+    const joinConditions = conditionClauses.length > 0 ? `AND ${conditionClauses.join(' AND ')}` : '';
+
     const result = await pool.query(`
       SELECT 
         c.id,
@@ -519,11 +736,11 @@ const getBestSellingCourses = async (req, res) => {
         COALESCE(SUM(b.total_amount), 0) as total_revenue,
         COUNT(CASE WHEN b.status IN ('confirmed', 'completed', 'paid') THEN 1 END) as completed_bookings
       FROM courses c
-      LEFT JOIN bookings b ON c.id = b.course_id
+      LEFT JOIN bookings b ON c.id = b.course_id ${joinConditions}
       GROUP BY c.id, c.name, c.price, c.description
       ORDER BY total_bookings DESC
       LIMIT 10
-    `);
+    `, queryParams);
 
     res.json({
       success: true,
@@ -539,6 +756,7 @@ const getBestSellingCourses = async (req, res) => {
 const createUser = async (req, res) => {
   try {
     await ensureUserPermissionsColumn();
+    const scope = await getUserBranchScope(req.user);
 
     console.log('📝 CREATE USER REQUEST - Body:', req.body);
 
@@ -549,6 +767,7 @@ const createUser = async (req, res) => {
       gender,
       age,
       birthday,
+      nationality,
       address,
       zipCode,
       contactNumber,
@@ -571,6 +790,11 @@ const createUser = async (req, res) => {
       return res.status(403).json({ error: 'Can only create admin or staff accounts' });
     }
 
+    // Branch-assigned admin (Branch Manager) can only create staff accounts.
+    if (!scope.canViewAll && scope.role === 'admin' && role !== 'staff') {
+      return res.status(403).json({ error: 'Branch managers can only create staff accounts' });
+    }
+
     // Check if user already exists
     console.log('🔍 Checking if user exists with email:', email);
     const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
@@ -590,8 +814,22 @@ const createUser = async (req, res) => {
     const hashedPassword = await bcrypt.hash(generatedPassword, 10);
     console.log('✅ Password hashed successfully');
 
-    // Prepare branch_id value
-    const branchId = branch ? parseInt(branch) : null;
+    // Prepare branch_id value. Admin can be assigned to all branches via branch = 'all'.
+    const normalizedBranchValue = String(branch || '').trim().toLowerCase();
+    const branchId = normalizedBranchValue && normalizedBranchValue !== 'all'
+      ? parseInt(normalizedBranchValue, 10)
+      : null;
+    if (normalizedBranchValue && normalizedBranchValue !== 'all' && Number.isNaN(branchId)) {
+      return res.status(400).json({ error: 'Invalid branch selection' });
+    }
+    if (role === 'staff' && !branchId) {
+      return res.status(400).json({ error: 'Staff accounts must be assigned to a branch' });
+    }
+    if (!scope.canViewAll) {
+      if (!branchId || !isSameBranch(branchId, scope.branchId)) {
+        return res.status(403).json({ error: 'Branch managers can only create users in their assigned branch' });
+      }
+    }
     console.log('🏢 Branch ID:', branchId);
 
     // Insert new user
@@ -599,9 +837,9 @@ const createUser = async (req, res) => {
     const result = await pool.query(
       `INSERT INTO users (
         first_name, middle_name, last_name, email, password, 
-        gender, age, birthday, address, contact_numbers, 
+        gender, age, birthday, nationality, address, contact_numbers, 
         zip_code, role, branch_id, permissions, status, is_verified
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       RETURNING id, first_name, middle_name, last_name, email, role, branch_id, permissions, status, created_at`,
       [
         firstName,
@@ -612,6 +850,7 @@ const createUser = async (req, res) => {
         gender,
         age,
         birthday,
+        nationality || null,
         address,
         contactNumber,
         zipCode || null,
@@ -652,6 +891,7 @@ const createUser = async (req, res) => {
 const updateUser = async (req, res) => {
   try {
     await ensureUserPermissionsColumn();
+    const scope = await getUserBranchScope(req.user);
 
     const { id } = req.params;
     const {
@@ -661,6 +901,7 @@ const updateUser = async (req, res) => {
       gender,
       age,
       birthday,
+      nationality,
       address,
       zipCode,
       contactNumber,
@@ -678,14 +919,50 @@ const updateUser = async (req, res) => {
       ? providedPermissions
       : getRoleDefaultPermissions(role);
 
-    // Get current user email
-    const currentUserResult = await pool.query('SELECT email, first_name FROM users WHERE id = $1', [id]);
+    // Get current user email and role
+    const currentUserResult = await pool.query(
+      `SELECT email, first_name, role,
+              COALESCE(branch_id, (SELECT branch_id FROM bookings WHERE user_id = users.id ORDER BY created_at DESC LIMIT 1)) AS branch_id
+       FROM users WHERE id = $1`,
+      [id]
+    );
     if (currentUserResult.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     const currentEmail = currentUserResult.rows[0].email;
+    const currentRole = currentUserResult.rows[0].role;
+    const currentBranchId = currentUserResult.rows[0].branch_id;
     const isEmailChanged = email !== currentEmail;
+
+    if (!scope.canViewAll && !isSameBranch(currentBranchId, scope.branchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch user' });
+    }
+
+    // Keep super_admin role immutable in this admin/staff management flow.
+    // This prevents creating a second super admin via role changes.
+    if (currentRole !== 'super_admin' && role === 'super_admin') {
+      return res.status(403).json({ error: 'Cannot assign Super Admin role from this page' });
+    }
+    if (currentRole === 'super_admin' && role !== 'super_admin') {
+      return res.status(403).json({ error: 'Super Admin role cannot be changed' });
+    }
+
+    const normalizedBranchValue = String(branch || '').trim().toLowerCase();
+    const parsedBranchId = normalizedBranchValue && normalizedBranchValue !== 'all'
+      ? parseInt(normalizedBranchValue, 10)
+      : null;
+    if (normalizedBranchValue && normalizedBranchValue !== 'all' && Number.isNaN(parsedBranchId)) {
+      return res.status(400).json({ error: 'Invalid branch selection' });
+    }
+    if (role === 'staff' && !parsedBranchId) {
+      return res.status(400).json({ error: 'Staff accounts must be assigned to a branch' });
+    }
+    if (!scope.canViewAll) {
+      if (!parsedBranchId || !isSameBranch(parsedBranchId, scope.branchId)) {
+        return res.status(403).json({ error: 'Branch managers can only assign users to their branch' });
+      }
+    }
 
     // Check if email is taken by another user
     if (isEmailChanged) {
@@ -719,15 +996,16 @@ const updateUser = async (req, res) => {
           gender = $6,
           age = $7,
           birthday = $8,
-          address = $9,
-          contact_numbers = $10,
-          zip_code = $11,
-          role = $12,
-          branch_id = $13,
-          permissions = $14,
-          status = $15,
-          avatar = $16
-        WHERE id = $17
+          nationality = $9,
+          address = $10,
+          contact_numbers = $11,
+          zip_code = $12,
+          role = $13,
+          branch_id = $14,
+          permissions = $15,
+          status = $16,
+          avatar = $17
+        WHERE id = $18
         RETURNING id, first_name, middle_name, last_name, email, role, branch_id, permissions, status, avatar`
       : `UPDATE users SET
           first_name = $1,
@@ -736,15 +1014,16 @@ const updateUser = async (req, res) => {
           gender = $4,
           age = $5,
           birthday = $6,
-          address = $7,
-          contact_numbers = $8,
-          zip_code = $9,
-          role = $10,
-          branch_id = $11,
-          permissions = $12,
-          status = $13,
-          avatar = $14
-        WHERE id = $15
+          nationality = $7,
+          address = $8,
+          contact_numbers = $9,
+          zip_code = $10,
+          role = $11,
+          branch_id = $12,
+          permissions = $13,
+          status = $14,
+          avatar = $15
+        WHERE id = $16
         RETURNING id, first_name, middle_name, last_name, email, role, branch_id, permissions, status, avatar`;
 
     const updateParams = isEmailChanged
@@ -757,11 +1036,12 @@ const updateUser = async (req, res) => {
         gender,
         age,
         birthday,
+        nationality || null,
         address,
         contactNumber,
         zipCode || null,
         role,
-        branch ? parseInt(branch) : null,
+        parsedBranchId,
         JSON.stringify(normalizedPermissions),
         status,
         avatar || null,
@@ -774,11 +1054,12 @@ const updateUser = async (req, res) => {
         gender,
         age,
         birthday,
+        nationality || null,
         address,
         contactNumber,
         zipCode || null,
         role,
-        branch ? parseInt(branch) : null,
+        parsedBranchId,
         JSON.stringify(normalizedPermissions),
         status,
         avatar || null,
@@ -818,11 +1099,21 @@ const updateUser = async (req, res) => {
 const toggleUserStatus = async (req, res) => {
   try {
     const { id } = req.params;
+    const scope = await getUserBranchScope(req.user);
 
     // Get current user data
-    const userResult = await pool.query('SELECT status, role FROM users WHERE id = $1', [id]);
+    const userResult = await pool.query(
+      `SELECT status, role,
+              COALESCE(branch_id, (SELECT branch_id FROM bookings WHERE user_id = users.id ORDER BY created_at DESC LIMIT 1)) AS branch_id
+       FROM users WHERE id = $1`,
+      [id]
+    );
     if (userResult.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!scope.canViewAll && !isSameBranch(userResult.rows[0].branch_id, scope.branchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch user' });
     }
 
     // Protect super_admin accounts from being deactivated by anyone
@@ -857,6 +1148,7 @@ const resetUserPassword = async (req, res) => {
   try {
     const { id } = req.params;
     const { newPassword } = req.body;
+    const scope = await getUserBranchScope(req.user);
 
     // Validate password
     if (!newPassword || newPassword.length < 6) {
@@ -865,7 +1157,9 @@ const resetUserPassword = async (req, res) => {
 
     // Check if user exists
     const userResult = await pool.query(
-      'SELECT id, email, first_name, last_name FROM users WHERE id = $1',
+      `SELECT id, email, first_name, last_name,
+              COALESCE(branch_id, (SELECT branch_id FROM bookings WHERE user_id = users.id ORDER BY created_at DESC LIMIT 1)) AS branch_id
+       FROM users WHERE id = $1`,
       [id]
     );
 
@@ -874,6 +1168,10 @@ const resetUserPassword = async (req, res) => {
     }
 
     const user = userResult.rows[0];
+
+    if (!scope.canViewAll && !isSameBranch(user.branch_id, scope.branchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch user' });
+    }
 
     // Hash the new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
@@ -914,6 +1212,7 @@ const walkInEnrollment = async (req, res) => {
       scheduleSlotId, scheduleDate,
       scheduleSlotId2, scheduleDate2,
       promoPdcSlotId2, promoPdcDate2,
+      promoPdcSchedules = [],
       paymentMethod, amountPaid, paymentStatus,
       enrolledBy, addons = []
     } = req.body;
@@ -922,6 +1221,7 @@ const walkInEnrollment = async (req, res) => {
 
     // Parse branchId to integer (comes as string from frontend select)
     const parsedBranchId = parseInt(branchId, 10);
+    const scope = await getUserBranchScope(req.user);
 
     // Validate required fields
     if (!firstName || !lastName || !email || !courseId || !parsedBranchId || !scheduleSlotId || !scheduleDate) {
@@ -936,14 +1236,38 @@ const walkInEnrollment = async (req, res) => {
       return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
     }
 
-    // Pre-flight check: Slot availability (all slots!)
-    const slotsToCheck = [scheduleSlotId, scheduleSlotId2, promoPdcSlotId2].filter(Boolean);
-    for (const slotId of slotsToCheck) {
-        const slotCheck = await pool.query('SELECT date, course_type, available_slots FROM schedule_slots WHERE id = $1', [slotId]);
+    if (!scope.canViewAll && !isSameBranch(parsedBranchId, scope.branchId)) {
+      return res.status(403).json({ error: 'Branch managers can only enroll walk-ins in their assigned branch' });
+    }
+
+    const pdcSchedules = Array.isArray(promoPdcSchedules) ? promoPdcSchedules : [];
+
+    const fallbackPdcDay1 = pdcSchedules.find(s => s?.scheduleSlotId && s?.scheduleDate) || null;
+    const fallbackPdcDay2 = pdcSchedules.find(s => s?.promoPdcSlotId2 && s?.promoPdcDate2) || null;
+
+    const resolvedScheduleSlotId2 = scheduleSlotId2 || fallbackPdcDay1?.scheduleSlotId || null;
+    const resolvedScheduleDate2 = scheduleDate2 || fallbackPdcDay1?.scheduleDate || null;
+    const resolvedPromoPdcSlotId2 = promoPdcSlotId2 || fallbackPdcDay2?.promoPdcSlotId2 || null;
+    const resolvedPromoPdcDate2 = promoPdcDate2 || fallbackPdcDay2?.promoPdcDate2 || null;
+
+    // Pre-flight check: Slot availability (all slots)
+    const slotsToCheck = [
+      scheduleSlotId,
+      resolvedScheduleSlotId2,
+      resolvedPromoPdcSlotId2,
+      ...pdcSchedules.flatMap(s => [s?.scheduleSlotId, s?.promoPdcSlotId2])
+    ].filter(Boolean);
+
+    const uniqueSlotsToCheck = [...new Set(slotsToCheck)];
+    for (const slotId of uniqueSlotsToCheck) {
+        const slotCheck = await pool.query('SELECT date, course_type, available_slots, branch_id FROM schedule_slots WHERE id = $1', [slotId]);
         if (slotCheck.rows.length === 0) {
           return res.status(404).json({ error: `Selected schedule slot ${slotId} not found` });
         }
-        const { date: slotDate, course_type: slotCourseType, available_slots: slotAvailable } = slotCheck.rows[0];
+        const { date: slotDate, course_type: slotCourseType, available_slots: slotAvailable, branch_id: slotBranchId } = slotCheck.rows[0];
+        if (!isSameBranch(slotBranchId, parsedBranchId)) {
+          return res.status(400).json({ error: 'Selected schedule slot does not belong to the chosen branch' });
+        }
         if (slotAvailable <= 0) {
           return res.status(400).json({ error: `The selected slot on ${slotDate} is fully booked` });
         }
@@ -952,8 +1276,9 @@ const walkInEnrollment = async (req, res) => {
             SELECT 1 FROM schedule_slots 
             WHERE date = $1 
               AND (course_type ILIKE '%B1%' OR course_type ILIKE '%B2%')
+              AND branch_id IS NOT DISTINCT FROM $2
               AND available_slots < total_capacity
-          `, [slotDate]);
+          `, [slotDate, slotBranchId]);
           if (b1b2Check.rows.length > 0) {
             return res.status(400).json({ error: `The B1/B2 unit is already fully booked for ${slotDate}.` });
           }
@@ -1064,12 +1389,18 @@ const walkInEnrollment = async (req, res) => {
 
     // 6. Slot capacity management (Loops through all passed slots)
     const allSlots = [
-      { id: scheduleSlotId, date: scheduleDate, label: 'Day 1' },
-      { id: scheduleSlotId2, date: scheduleDate2, label: 'Day 2' },
-      { id: promoPdcSlotId2, date: promoPdcDate2, label: 'Promo PDC Day 2' }
+      { id: scheduleSlotId, date: scheduleDate, label: 'TDC Day 1' },
+      { id: resolvedScheduleSlotId2, date: resolvedScheduleDate2, label: 'PDC Day 1' },
+      { id: resolvedPromoPdcSlotId2, date: resolvedPromoPdcDate2, label: 'PDC Day 2' },
+      ...pdcSchedules.flatMap((s, idx) => ([
+        { id: s?.scheduleSlotId, date: s?.scheduleDate, label: `PDC ${idx + 1} Day 1` },
+        { id: s?.promoPdcSlotId2, date: s?.promoPdcDate2, label: `PDC ${idx + 1} Day 2` }
+      ]))
     ].filter(s => s.id);
 
-    for (const slot of allSlots) {
+    const uniqueAllSlots = [...new Map(allSlots.map(s => [String(s.id), s])).values()];
+
+    for (const slot of uniqueAllSlots) {
       const enrollResult = await client.query(
         `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status, booking_id)
          VALUES ($1, $2, 'enrolled', $3)
@@ -1114,22 +1445,22 @@ const walkInEnrollment = async (req, res) => {
     let pdcSession1 = null;
     let pdcTime1 = null;
     let pdcDate1 = null;
-    if (scheduleSlotId2 && scheduleDate2) {
-      const slot2Result = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [scheduleSlotId2]);
+    if (resolvedScheduleSlotId2 && resolvedScheduleDate2) {
+      const slot2Result = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [resolvedScheduleSlotId2]);
       pdcSession1 = slot2Result.rows[0]?.session || 'N/A';
       pdcTime1 = slot2Result.rows[0]?.time_range || 'N/A';
-      pdcDate1 = scheduleDate2;
+      pdcDate1 = resolvedScheduleDate2;
     }
 
     // Get PDC Day 2 details
     let pdcSession2 = null;
     let pdcTime2 = null;
     let pdcDate2 = null;
-    if (promoPdcSlotId2 && promoPdcDate2) {
-      const promoSlot2Result = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [promoPdcSlotId2]);
+    if (resolvedPromoPdcSlotId2 && resolvedPromoPdcDate2) {
+      const promoSlot2Result = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [resolvedPromoPdcSlotId2]);
       pdcSession2 = promoSlot2Result.rows[0]?.session || 'N/A';
       pdcTime2 = promoSlot2Result.rows[0]?.time_range || 'N/A';
-      pdcDate2 = promoPdcDate2;
+      pdcDate2 = resolvedPromoPdcDate2;
     }
 
     // Detect if Digital Add-ons were selected
@@ -1208,6 +1539,21 @@ const walkInEnrollment = async (req, res) => {
 const getAllTransactions = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, transactions: [] });
+    }
+
+    const whereParts = ["b.status IN ('paid', 'collectable', 'confirmed', 'completed')"];
+    const queryParams = [];
+    let paramIndex = 1;
+
+    if (!scope.canViewAll && scope.branchId) {
+      whereParts.push(`b.branch_id = $${paramIndex++}`);
+      queryParams.push(scope.branchId);
+    }
+
+    queryParams.push(limit);
 
     const result = await pool.query(
       `SELECT 
@@ -1229,10 +1575,10 @@ const getAllTransactions = async (req, res) => {
       LEFT JOIN users u ON b.user_id = u.id
       LEFT JOIN courses c ON b.course_id = c.id
       LEFT JOIN branches br ON b.branch_id = br.id
-      WHERE b.status IN ('paid', 'collectable', 'confirmed', 'completed')
+      WHERE ${whereParts.join(' AND ')}
       ORDER BY b.created_at DESC
-      LIMIT $1`,
-      [limit]
+      LIMIT $${paramIndex}`,
+      queryParams
     );
 
     const transactions = [];
@@ -1283,6 +1629,22 @@ const getAllTransactions = async (req, res) => {
 const getUnpaidBookings = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
+    const { branchId } = req.query;
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, bookings: [] });
+    }
+    const requestedBranchId = branchId ? parseInt(branchId, 10) : null;
+    const effectiveBranchId = scope.canViewAll ? requestedBranchId : scope.branchId;
+
+    const whereParts = ["b.status = 'collectable'", "b.payment_type != 'Full Payment'"];
+    const params = [];
+    let paramIdx = 1;
+    if (effectiveBranchId) {
+      whereParts.push(`b.branch_id = $${paramIdx++}`);
+      params.push(effectiveBranchId);
+    }
+    params.push(limit);
 
     const result = await pool.query(
       `SELECT 
@@ -1301,10 +1663,10 @@ const getUnpaidBookings = async (req, res) => {
       FROM bookings b
       LEFT JOIN users u ON b.user_id = u.id
       LEFT JOIN courses c ON b.course_id = c.id
-      WHERE b.status = 'collectable' AND b.payment_type != 'Full Payment'
+      WHERE ${whereParts.join(' AND ')}
       ORDER BY b.created_at DESC
-      LIMIT $1`,
-      [limit]
+      LIMIT $${paramIdx}`,
+      params
     );
 
     const bookings = result.rows.map(row => {
@@ -1337,11 +1699,30 @@ const getUnpaidBookings = async (req, res) => {
 // Get funnel data
 const getFunnelData = async (req, res) => {
   try {
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, data: [
+        { name: 'Visitors', value: 0, fill: '#8884d8' },
+        { name: 'Inquiries', value: 0, fill: '#83a6ed' },
+        { name: 'Enrolled', value: 0, fill: '#8dd1e1' },
+        { name: 'Active', value: 0, fill: '#82ca9d' },
+        { name: 'Graduates', value: 0, fill: '#a4de6c' },
+      ] });
+    }
+    const params = [];
+    const userBranchClause = (!scope.canViewAll && scope.branchId)
+      ? ` WHERE COALESCE(branch_id, (SELECT branch_id FROM bookings WHERE user_id = users.id ORDER BY created_at DESC LIMIT 1)) = $1`
+      : '';
+    const bookingBranchClause = (!scope.canViewAll && scope.branchId)
+      ? ` AND branch_id = $1`
+      : '';
+    if (!scope.canViewAll && scope.branchId) params.push(scope.branchId);
+
     // Determine counts for each stage
-    const totalUsersResult = await pool.query('SELECT COUNT(*) as count FROM users');
-    const totalBookingsResult = await pool.query('SELECT COUNT(*) as count FROM bookings');
-    const activeBookingsResult = await pool.query("SELECT COUNT(*) as count FROM bookings WHERE status IN ('confirmed', 'paid', 'collectable')");
-    const completedBookingsResult = await pool.query("SELECT COUNT(*) as count FROM bookings WHERE status = 'completed'");
+    const totalUsersResult = await pool.query(`SELECT COUNT(*) as count FROM users ${userBranchClause}`, params);
+    const totalBookingsResult = await pool.query(`SELECT COUNT(*) as count FROM bookings WHERE 1=1 ${bookingBranchClause}`, params);
+    const activeBookingsResult = await pool.query(`SELECT COUNT(*) as count FROM bookings WHERE status IN ('confirmed', 'paid', 'collectable') ${bookingBranchClause}`, params);
+    const completedBookingsResult = await pool.query(`SELECT COUNT(*) as count FROM bookings WHERE status = 'completed' ${bookingBranchClause}`, params);
 
     const totalUsers = parseInt(totalUsersResult.rows[0].count);
     const totalBookings = parseInt(totalBookingsResult.rows[0].count);
@@ -1370,13 +1751,24 @@ const getFunnelData = async (req, res) => {
 // Get course distribution
 const getCourseDistribution = async (req, res) => {
   try {
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, data: [] });
+    }
+    const params = [];
+    const branchClause = (!scope.canViewAll && scope.branchId)
+      ? ` AND b.branch_id = $1`
+      : '';
+    if (!scope.canViewAll && scope.branchId) params.push(scope.branchId);
+
     const result = await pool.query(`
       SELECT c.category, COUNT(b.id) as count
       FROM bookings b
       JOIN courses c ON b.course_id = c.id
+      WHERE 1=1 ${branchClause}
       GROUP BY c.category
       ORDER BY count DESC
-    `);
+    `, params);
 
     res.json({ success: true, data: result.rows });
   } catch (error) {
@@ -1388,14 +1780,25 @@ const getCourseDistribution = async (req, res) => {
 // Get branch performance
 const getBranchPerformance = async (req, res) => {
   try {
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, data: [] });
+    }
+    const params = [];
+    const branchClause = (!scope.canViewAll && scope.branchId)
+      ? ` AND b.branch_id = $1`
+      : '';
+    if (!scope.canViewAll && scope.branchId) params.push(scope.branchId);
+
     const result = await pool.query(`
       SELECT br.name as branch_name, COALESCE(SUM(b.total_amount), 0) as revenue
       FROM bookings b
       JOIN branches br ON b.branch_id = br.id
       WHERE b.status IN ('confirmed', 'completed', 'paid', 'collectable')
+      ${branchClause}
       GROUP BY br.name
       ORDER BY revenue DESC
-    `);
+    `, params);
 
     res.json({ success: true, data: result.rows });
   } catch (error) {
@@ -1409,6 +1812,15 @@ const markBookingAsPaid = async (req, res) => {
   try {
     const { id } = req.params;
     const { payment_method, transaction_id, amount_to_collect } = req.body;
+    const scope = await getUserBranchScope(req.user);
+
+    const access = await getBookingAccessInScope(id, scope);
+    if (!access.exists) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    if (!access.allowed) {
+      return res.status(403).json({ error: 'Access denied for this branch booking' });
+    }
 
     // Fetch booking + course price
     const bookingResult = await pool.query(
@@ -1525,6 +1937,15 @@ const markBookingAsPaid = async (req, res) => {
 const sendReceiptEmail = async (req, res) => {
   try {
     const { id } = req.params;
+    const scope = await getUserBranchScope(req.user);
+
+    const access = await getBookingAccessInScope(id, scope);
+    if (!access.exists) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    if (!access.allowed) {
+      return res.status(403).json({ error: 'Access denied for this branch booking' });
+    }
 
     const result = await pool.query(
       `SELECT b.id, b.total_amount, b.payment_type, b.payment_method, b.status, b.created_at,
@@ -1569,20 +1990,13 @@ const sendReceiptEmail = async (req, res) => {
 // Get notifications — payment and enrollment events filtered by branch role
 const getNotifications = async (req, res) => {
   try {
-    const userRole = req.user.role;
-    const userId = req.user.id;
-
-    // Always resolve branch from DB — not from JWT payload
-    let userBranchId = null;
-    if (userRole === 'staff') {
-      const branchRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [userId]);
-      userBranchId = branchRow.rows[0]?.branch_id || null;
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, notifications: [] });
     }
-
-    // Build branch condition
-    const branchCondition = userBranchId
-      ? `AND b.branch_id = ${parseInt(userBranchId)}`
-      : ''; // admin = no filter
+    const branchCondition = (!scope.canViewAll && scope.branchId)
+      ? `AND b.branch_id = ${parseInt(scope.branchId, 10)}`
+      : '';
 
     const query = `
       SELECT
@@ -1815,7 +2229,12 @@ const getTodayStudents = async (req, res) => {
   try {
     const dateParam = req.query.date;
     const today = dateParam || new Date().toISOString().split('T')[0];
-    const branchId = req.query.branch_id ? parseInt(req.query.branch_id, 10) : null;
+    const requestedBranchId = req.query.branch_id ? parseInt(req.query.branch_id, 10) : null;
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, date: today, data: [], total: 0 });
+    }
+    const branchId = scope.canViewAll ? requestedBranchId : scope.branchId;
     const result = await pool.query(`
       SELECT
         ss.id as slot_id,

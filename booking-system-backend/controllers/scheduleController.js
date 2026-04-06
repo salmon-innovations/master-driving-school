@@ -1,10 +1,67 @@
 const pool = require('../config/db');
 const { sendNoShowEmail, sendPaymentReceiptEmail } = require('../utils/emailService');
 
+const getRequestBranchScope = async (req) => {
+  if (!req.user || !req.user.id) {
+    return { role: null, branchId: null, canViewAll: true };
+  }
+
+  const role = String(req.user.role || '').toLowerCase();
+  if (role === 'super_admin') {
+    return { role, branchId: null, canViewAll: true };
+  }
+
+  if (role === 'admin' || role === 'staff') {
+    const branchRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [req.user.id]);
+    const branchId = branchRow.rows[0]?.branch_id || null;
+    if (role === 'admin') {
+      return { role, branchId, canViewAll: !branchId };
+    }
+    return { role, branchId, canViewAll: false };
+  }
+
+  return { role, branchId: null, canViewAll: true };
+};
+
+const resolveEffectiveBranchId = (requestedBranchId, scope) => {
+  if (scope.canViewAll) return requestedBranchId;
+  return scope.branchId || null;
+};
+
+const canAccessBranch = (scope, branchId) => {
+  if (scope.canViewAll) return true;
+  if (!scope.branchId) return false;
+  return String(scope.branchId) === String(branchId || '');
+};
+
+const getSlotBranchId = async (slotId) => {
+  const slotRow = await pool.query('SELECT branch_id FROM schedule_slots WHERE id = $1', [slotId]);
+  if (slotRow.rows.length === 0) return null;
+  return slotRow.rows[0].branch_id;
+};
+
+const getEnrollmentBranchId = async (enrollmentId) => {
+  const row = await pool.query(
+    `SELECT ss.branch_id
+     FROM schedule_enrollments se
+     JOIN schedule_slots ss ON ss.id = se.slot_id
+     WHERE se.id = $1`,
+    [enrollmentId]
+  );
+  if (row.rows.length === 0) return null;
+  return row.rows[0].branch_id;
+};
+
 // Get slots (either by specific date, or all upcoming if date is omitted)
 const getSlotsByDate = async (req, res) => {
   try {
     const { date, start_date, end_date, branch_id, type } = req.query;
+    const scope = await getRequestBranchScope(req);
+    if (!scope.canViewAll && !scope.branchId) {
+      return res.json([]);
+    }
+    const requestedBranchId = branch_id ? parseInt(branch_id, 10) : null;
+    const effectiveBranchId = resolveEffectiveBranchId(requestedBranchId, scope);
 
     let query = `
       SELECT 
@@ -67,10 +124,10 @@ const getSlotsByDate = async (req, res) => {
       query += ` AND ss.date >= CURRENT_DATE`;
     }
 
-    if (branch_id) {
+    if (effectiveBranchId) {
       // Strict match — only return slots for the specified branch
       query += ` AND ss.branch_id = $${paramCount}`;
-      params.push(branch_id);
+      params.push(effectiveBranchId);
       paramCount++;
     }
 
@@ -95,6 +152,7 @@ const getSlotsByDate = async (req, res) => {
 const createSlot = async (req, res) => {
   try {
     const { date, type, session, time_range, total_capacity, available_slots, branch_id, course_type, transmission } = req.body;
+    const scope = await getRequestBranchScope(req);
 
     if (!date || !type || !session || !time_range || !total_capacity) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -105,6 +163,10 @@ const createSlot = async (req, res) => {
     if (!resolvedBranchId && req.user) {
       const userRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [req.user.id]);
       resolvedBranchId = userRow.rows[0]?.branch_id || null;
+    }
+
+    if (!scope.canViewAll && !canAccessBranch(scope, resolvedBranchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch' });
     }
 
     // Determine end_date based on type and session logic
@@ -177,6 +239,7 @@ const updateSlot = async (req, res) => {
   try {
     const { id } = req.params;
     const { type, session, time_range, total_capacity, available_slots, branch_id, course_type, transmission } = req.body;
+    const scope = await getRequestBranchScope(req);
 
     console.log('Update slot request:', { id, type, session, time_range, total_capacity, available_slots, course_type, transmission });
 
@@ -187,11 +250,25 @@ const updateSlot = async (req, res) => {
       });
     }
 
+    const existingBranchId = await getSlotBranchId(id);
+    if (existingBranchId === null) {
+      return res.status(404).json({ error: 'Slot not found' });
+    }
+    if (!scope.canViewAll && !canAccessBranch(scope, existingBranchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch slot' });
+    }
+
     // Auto-resolve branch_id from logged-in user if not provided
     let resolvedBranchId = branch_id || null;
     if (!resolvedBranchId && req.user) {
       const userRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [req.user.id]);
       resolvedBranchId = userRow.rows[0]?.branch_id || null;
+    }
+
+    if (!scope.canViewAll) {
+      resolvedBranchId = existingBranchId;
+    } else if (resolvedBranchId && !canAccessBranch(scope, resolvedBranchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch' });
     }
 
     const result = await pool.query(
@@ -218,6 +295,15 @@ const updateSlot = async (req, res) => {
 const deleteSlot = async (req, res) => {
   try {
     const { id } = req.params;
+    const scope = await getRequestBranchScope(req);
+
+    const slotBranchId = await getSlotBranchId(id);
+    if (slotBranchId === null) {
+      return res.status(404).json({ error: 'Slot not found' });
+    }
+    if (!scope.canViewAll && !canAccessBranch(scope, slotBranchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch slot' });
+    }
 
     const result = await pool.query('DELETE FROM schedule_slots WHERE id = $1 RETURNING *', [id]);
 
@@ -236,6 +322,15 @@ const deleteSlot = async (req, res) => {
 const getSlotEnrollments = async (req, res) => {
   try {
     const { slotId } = req.params;
+    const scope = await getRequestBranchScope(req);
+
+    const slotBranchId = await getSlotBranchId(slotId);
+    if (slotBranchId === null) {
+      return res.status(404).json({ error: 'Slot not found' });
+    }
+    if (!scope.canViewAll && !canAccessBranch(scope, slotBranchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch slot' });
+    }
 
     const result = await pool.query(
       `SELECT 
@@ -266,6 +361,15 @@ const enrollStudent = async (req, res) => {
   try {
     const { slotId } = req.params;
     const { student_id, enrollment_status } = req.body;
+    const scope = await getRequestBranchScope(req);
+
+    const slotBranchId = await getSlotBranchId(slotId);
+    if (slotBranchId === null) {
+      return res.status(404).json({ error: 'Slot not found' });
+    }
+    if (!scope.canViewAll && !canAccessBranch(scope, slotBranchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch slot' });
+    }
 
     if (!student_id) {
       return res.status(400).json({ error: 'Student ID is required' });
@@ -352,6 +456,15 @@ const updateEnrollmentStatus = async (req, res) => {
   try {
     const { enrollmentId } = req.params;
     const { status } = req.body;
+    const scope = await getRequestBranchScope(req);
+
+    const enrollmentBranchId = await getEnrollmentBranchId(enrollmentId);
+    if (enrollmentBranchId === null) {
+      return res.status(404).json({ error: 'Enrollment not found' });
+    }
+    if (!scope.canViewAll && !canAccessBranch(scope, enrollmentBranchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch enrollment' });
+    }
 
     const result = await pool.query(
       `UPDATE schedule_enrollments 
@@ -376,6 +489,15 @@ const updateEnrollmentStatus = async (req, res) => {
 const cancelEnrollment = async (req, res) => {
   try {
     const { enrollmentId } = req.params;
+    const scope = await getRequestBranchScope(req);
+
+    const enrollmentBranchId = await getEnrollmentBranchId(enrollmentId);
+    if (enrollmentBranchId === null) {
+      return res.status(404).json({ error: 'Enrollment not found' });
+    }
+    if (!scope.canViewAll && !canAccessBranch(scope, enrollmentBranchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch enrollment' });
+    }
 
     // Get slot_id before deleting
     const enrollment = await pool.query('SELECT slot_id FROM schedule_enrollments WHERE id = $1', [enrollmentId]);
@@ -407,6 +529,15 @@ const markFeePaid = async (req, res) => {
   try {
     const { enrollmentId } = req.params;
     const { amount, paymentMethod, transactionNumber } = req.body;
+    const scope = await getRequestBranchScope(req);
+
+    const enrollmentBranchId = await getEnrollmentBranchId(enrollmentId);
+    if (enrollmentBranchId === null) {
+      return res.status(404).json({ error: 'No-show enrollment not found' });
+    }
+    if (!scope.canViewAll && !canAccessBranch(scope, enrollmentBranchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch enrollment' });
+    }
     const result = await pool.query(
       `UPDATE schedule_enrollments
          SET reschedule_fee_paid = TRUE,
@@ -512,6 +643,24 @@ const rescheduleEnrollment = async (req, res) => {
 
   const client = await pool.connect();
   try {
+    const scope = await getRequestBranchScope(req);
+
+    const sourceEnrollmentBranchId = await getEnrollmentBranchId(enrollmentId);
+    if (sourceEnrollmentBranchId === null) {
+      return res.status(404).json({ error: 'Enrollment not found' });
+    }
+    if (!scope.canViewAll && !canAccessBranch(scope, sourceEnrollmentBranchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch enrollment' });
+    }
+
+    const targetSlotBranchId = await getSlotBranchId(new_slot_id);
+    if (targetSlotBranchId === null) {
+      return res.status(404).json({ error: 'Target slot not found' });
+    }
+    if (!scope.canViewAll && !canAccessBranch(scope, targetSlotBranchId)) {
+      return res.status(403).json({ error: 'Access denied for this target branch slot' });
+    }
+
     await client.query('BEGIN');
 
     // 1. Fetch old enrollment + slot info
@@ -664,6 +813,15 @@ const rescheduleEnrollment = async (req, res) => {
 const processNoShow = async (req, res) => {
   try {
     const { enrollmentId } = req.params;
+    const scope = await getRequestBranchScope(req);
+
+    const enrollmentBranchId = await getEnrollmentBranchId(enrollmentId);
+    if (enrollmentBranchId === null) {
+      return res.status(404).json({ error: 'Enrollment not found' });
+    }
+    if (!scope.canViewAll && !canAccessBranch(scope, enrollmentBranchId)) {
+      return res.status(403).json({ error: 'Access denied for this branch enrollment' });
+    }
 
     // 1. Mark as no-show and retrieve details in one query
     const updateResult = await pool.query(
@@ -762,6 +920,12 @@ const processNoShow = async (req, res) => {
 const getUnassignedPdcStudents = async (req, res) => {
   try {
     const { course_type, slot_type = 'pdc', branch_id } = req.query;
+    const scope = await getRequestBranchScope(req);
+    if (!scope.canViewAll && !scope.branchId) {
+      return res.json({ success: true, students: [] });
+    }
+    const requestedBranchId = branch_id ? parseInt(branch_id, 10) : null;
+    const effectiveBranchId = resolveEffectiveBranchId(requestedBranchId, scope);
 
     // $1 — slot_type pattern used for category matching and enrollment check
     const params = [`%${slot_type}%`];
@@ -779,8 +943,8 @@ const getUnassignedPdcStudents = async (req, res) => {
 
     // Branch filter: only return students who enrolled at the same branch as the target slot
     let branchFilter = '';
-    if (branch_id) {
-      params.push(branch_id);
+    if (effectiveBranchId) {
+      params.push(effectiveBranchId);
       branchFilter = `AND b.branch_id = $${params.length}`;
     }
 
@@ -968,10 +1132,16 @@ const requestFreeReschedule = async (req, res) => {
 const getNoShowStudents = async (req, res) => {
   try {
     const { branchId } = req.query;
+    const scope = await getRequestBranchScope(req);
+    if (!scope.canViewAll && !scope.branchId) {
+      return res.json({ success: true, data: [] });
+    }
+    const requestedBranchId = branchId ? parseInt(branchId, 10) : null;
+    const effectiveBranchId = resolveEffectiveBranchId(requestedBranchId, scope);
     const params = [];
     let branchFilter = '';
-    if (branchId) {
-      params.push(branchId);
+    if (effectiveBranchId) {
+      params.push(effectiveBranchId);
       branchFilter = `AND ss.branch_id = $${params.length}`;
     }
 

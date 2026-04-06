@@ -604,7 +604,7 @@ const AnalyticsReports = ({ onNavigate }) => {
                 <div className="chart-card trend-card">
                     <div className="chart-header">
                         <div className="header-text">
-                            <h3>Revenue Trend (6 Months)</h3>
+                            <h3>Monthly Revenue</h3>
                             <p>Financial growth trajectory</p>
                         </div>
                     </div>
@@ -669,8 +669,8 @@ const AnalyticsReports = ({ onNavigate }) => {
                 <div className="chart-card enrollment-source-card">
                     <div className="chart-header">
                         <div className="header-text">
-                            <h3>Student Enrollment</h3>
-                            <p>Walk-in & Online Trend</p>
+                            <h3>Monthly Enrollments</h3>
+                            <p>Walk-in and online enrollment trend</p>
                         </div>
                         <div className="header-badge primary">NEW</div>
                     </div>

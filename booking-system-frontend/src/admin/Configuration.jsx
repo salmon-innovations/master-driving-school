@@ -10,6 +10,20 @@ import EmailContentSection from './config/EmailContentSection';
 import { BranchModal, RoleModal, ConfirmModal } from './config/Modals';
 import { adminAPI } from '../services/api';
 
+const CONFIG_TAB_PERMISSION_MAP = {
+    branches: ['accounts.config.view', 'accounts.config.tab.branches'],
+    roles: ['accounts.config.view', 'accounts.config.tab.roles'],
+    coursetypes: ['accounts.config.view', 'accounts.config.tab.coursetypes'],
+    emailcontent: ['accounts.config.view', 'accounts.config.tab.emailcontent'],
+    settings: ['accounts.config.view', 'accounts.config.tab.settings'],
+    backup: ['accounts.config.view', 'accounts.config.tab.backup'],
+};
+
+const normalizePermissionList = (permissions) => {
+    if (!Array.isArray(permissions)) return [];
+    return permissions.filter((permission) => typeof permission === 'string' && permission.trim().length > 0);
+};
+
 const BackupSection = ({ branches = [] }) => {
     const { showNotification } = useNotification();
     const [loading, setLoading] = useState({ db: false, students: false, transactions: false, clear: false, restore: false });
@@ -370,9 +384,19 @@ const BackupSection = ({ branches = [] }) => {
     );
 };
 
-const Configuration = ({ initialTab = 'branches' }) => {
+const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], currentUserRole = '' }) => {
     const { showNotification } = useNotification();
     const [activeTab, setActiveTab] = useState(initialTab);
+    const normalizedRole = String(currentUserRole || '').toLowerCase();
+    const isSuperAdmin = normalizedRole === 'super_admin';
+    const permissionSet = new Set(normalizePermissionList(currentUserPermissions));
+    const canAccessConfigTab = (tabKey) => {
+        if (isSuperAdmin) return true;
+        const requiredPermissions = CONFIG_TAB_PERMISSION_MAP[tabKey] || [];
+        // If no explicit permission payload is provided, keep legacy behavior by allowing tabs.
+        if (permissionSet.size === 0) return true;
+        return requiredPermissions.some((permission) => permissionSet.has(permission));
+    };
 
     // Branch States
     const [branches, setBranches] = useState([]);
@@ -561,7 +585,7 @@ const Configuration = ({ initialTab = 'branches' }) => {
         showNotification('Settings saved successfully!', 'success');
     };
 
-    const tabs = [
+    const allTabs = [
         {
             key: 'branches',
             label: 'Branches',
@@ -623,6 +647,14 @@ const Configuration = ({ initialTab = 'branches' }) => {
             )
         },
     ];
+    const tabs = allTabs.filter((tab) => canAccessConfigTab(tab.key));
+
+    useEffect(() => {
+        if (tabs.length === 0) return;
+        if (!tabs.some((tab) => tab.key === activeTab)) {
+            setActiveTab(tabs[0].key);
+        }
+    }, [activeTab, tabs]);
 
     return (
         <div className="cfg-root">
@@ -667,6 +699,21 @@ const Configuration = ({ initialTab = 'branches' }) => {
                         </button>
                     ))}
                 </div>
+
+                {tabs.length === 0 && (
+                    <div style={{
+                        marginTop: '12px',
+                        border: '1px solid #fecaca',
+                        background: '#fef2f2',
+                        color: '#991b1b',
+                        borderRadius: '10px',
+                        padding: '12px 14px',
+                        fontSize: '0.85rem',
+                        fontWeight: 600
+                    }}>
+                        No Configuration tabs are enabled for this account.
+                    </div>
+                )}
             </div>
 
             {/* Content */}

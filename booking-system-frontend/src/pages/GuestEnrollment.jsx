@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { authAPI } from '../services/api'
 import { useNotification } from '../context/NotificationContext'
 import { getZipFromAddress } from '../utils/philippineZipCodes'
+import NationalitySelect from '../components/NationalitySelect'
+import SmartAddress from '../components/SmartAddress'
 
 // Zip code lookup is handled by the shared utility: getZipFromAddress(address)
 
@@ -18,6 +20,12 @@ function GuestEnrollment({ onNavigate, setIsLoggedIn, preSelectedBranch }) {
     middleName: '',
     lastName: '',
     address: '',
+    houseNumber: '',
+    streetName: '',
+    village: '',
+    barangay: '',
+    city: '',
+    province: '',
     age: '',
     gender: '',
     birthday: '',
@@ -88,8 +96,20 @@ function GuestEnrollment({ onNavigate, setIsLoggedIn, preSelectedBranch }) {
       }
 
       // Auto-fill zip code based on Philippine city/municipality in address
-      if (name === 'address') {
-        updated.zipCode = getZipFromAddress(formattedValue);
+      const addressPartsFields = ['houseNumber', 'streetName', 'village', 'barangay', 'city', 'province'];
+      if (addressPartsFields.includes(name)) {
+        const parts = [
+          updated.houseNumber,
+          updated.streetName,
+          updated.village,
+          updated.barangay,
+          updated.city,
+          updated.province
+        ].filter(Boolean);
+        updated.address = parts.join(', ');
+
+        const locationStr = [updated.barangay, updated.city, updated.province].filter(Boolean).join(', ');
+        updated.zipCode = getZipFromAddress(locationStr) || updated.zipCode; // Auto-fill zip
       }
 
       return updated;
@@ -119,7 +139,10 @@ function GuestEnrollment({ onNavigate, setIsLoggedIn, preSelectedBranch }) {
 
   const validateStep2 = () => {
     const newErrors = {}
-    if (!formData.address) newErrors.address = 'Address is required'
+    if (!formData.streetName) newErrors.streetName = 'Street is required'
+    if (!formData.province) newErrors.province = 'Province is required'
+    if (!formData.city) newErrors.city = 'City is required'
+    if (!formData.barangay) newErrors.barangay = 'Barangay is required'
     if (!formData.zipCode) newErrors.zipCode = 'Zip code is required'
     if (!formData.birthPlace) newErrors.birthPlace = 'Birth place is required'
     if (!formData.contactNumbers) {
@@ -166,6 +189,14 @@ function GuestEnrollment({ onNavigate, setIsLoggedIn, preSelectedBranch }) {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  const handleTopBack = () => {
+    if (currentStep > 1) {
+      handlePrev()
+      return
+    }
+    onNavigate('courses')
+  }
+
   const handleSubmit = async () => {
     const newErrors = validateStep2()
 
@@ -203,7 +234,7 @@ function GuestEnrollment({ onNavigate, setIsLoggedIn, preSelectedBranch }) {
             ────────────────────────────────────────────────────────────────── */}
         <div className="w-full lg:w-2/3 p-8 lg:p-12 relative flex flex-col">
           <button
-            onClick={() => onNavigate('courses')}
+            onClick={handleTopBack}
             className="absolute top-10 left-10 text-gray-400 hover:text-[#2157da] flex items-center gap-2.5 transition-all duration-300 font-semibold group"
           >
             <div className="p-2 rounded-full bg-gray-50 group-hover:bg-blue-50 transition-colors">
@@ -211,13 +242,25 @@ function GuestEnrollment({ onNavigate, setIsLoggedIn, preSelectedBranch }) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
             </div>
-            <span>Back to Courses</span>
+            <span>{currentStep > 1 ? 'Back to Previous Step' : 'Back to Courses'}</span>
           </button>
 
           <div className="mt-14 w-full">
             <header className="mb-10 text-center lg:text-left">
               <h1 className="text-4xl font-black text-gray-900 tracking-tight mb-3">Begin Your Journey</h1>
               <p className="text-gray-500 font-medium">Complete your profile to get started with Master School.</p>
+              {currentStep > 1 && (
+                <button
+                  type="button"
+                  onClick={handlePrev}
+                  className="mt-3 inline-flex items-center gap-2 text-sm font-bold text-[#2157da] hover:text-[#1a3a8a] transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                  </svg>
+                  Back to Personal Details
+                </button>
+              )}
             </header>
 
             {/* Step Progress Bar */}
@@ -419,13 +462,10 @@ function GuestEnrollment({ onNavigate, setIsLoggedIn, preSelectedBranch }) {
                         </div>
                         <div>
                           <label className="text-[0.65rem] font-black text-gray-400 uppercase tracking-widest mb-1.5 block ml-1">Nationality</label>
-                          <input
-                            type="text"
-                            name="nationality"
+                          <NationalitySelect
                             value={formData.nationality}
                             onChange={handleChange}
-                            placeholder="e.g. Filipino"
-                            className={`w-full px-4 py-3.5 bg-white border-2 border-transparent shadow-sm rounded-xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all font-semibold ${errors.nationality ? 'border-red-300 ring-4 ring-red-50' : 'hover:border-gray-200'}`}
+                            className={`w-full px-4 py-3.5 bg-white border-2 border-transparent shadow-sm rounded-xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all font-semibold pr-10 ${errors.nationality ? 'border-red-300 ring-4 ring-red-50' : 'hover:border-gray-200'}`}
                           />
                           {errors.nationality && <p className="text-[10px] text-red-500 font-bold mt-1.5 ml-1">{errors.nationality}</p>}
                         </div>
@@ -449,19 +489,10 @@ function GuestEnrollment({ onNavigate, setIsLoggedIn, preSelectedBranch }) {
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                        <div className="md:col-span-3">
-                          <label className="text-[0.65rem] font-black text-gray-400 uppercase tracking-widest mb-1.5 block ml-1">Home Address</label>
-                          <input
-                            type="text"
-                            name="address"
-                            value={formData.address}
-                            onChange={handleChange}
-                            className={`w-full px-4 py-3.5 bg-white border-2 border-transparent shadow-sm rounded-xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all font-semibold ${errors.address ? 'border-red-300 ring-4 ring-red-50' : 'hover:border-gray-200'}`}
-                            placeholder="House No., Street, Barangay, City"
-                          />
-                          {errors.address && <p className="text-[10px] text-red-500 font-bold mt-1.5 ml-1">{errors.address}</p>}
+                        <div className="md:col-span-4">
+                          <SmartAddress formData={formData} onChange={handleChange} errors={errors} />
                         </div>
-                        <div>
+                        <div className="md:col-span-2">
                           <label className="text-[0.65rem] font-black text-gray-400 uppercase tracking-widest mb-1.5 block ml-1">Zip Code</label>
                           <input
                             type="text"

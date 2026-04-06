@@ -187,6 +187,7 @@ const Booking = () => {
     const [branches, setBranches] = useState([]);
     const [selectedBranch, setSelectedBranch] = useState('');
     const [userRole, setUserRole] = useState(null);
+    const [userBranchId, setUserBranchId] = useState(null);
     const [showMarkPaidModal, setShowMarkPaidModal] = useState(false);
     const [markPaidBooking, setMarkPaidBooking] = useState(null);
     const [markPaidMethod, setMarkPaidMethod] = useState('Cash');
@@ -221,10 +222,11 @@ const Booking = () => {
                     role = profileRes.user.role;
                     profileBranchId = profileRes.user.branchId;
                     setUserRole(role);
+                    setUserBranchId(profileBranchId || null);
                 }
                 const res = await branchesAPI.getAll();
                 let loaded = res.branches || [];
-                if (role === 'staff' && profileBranchId) {
+                if ((role === 'staff' || (role === 'admin' && profileBranchId)) && profileBranchId) {
                     loaded = loaded.filter(b => String(b.id) === String(profileBranchId));
                     setSelectedBranch(String(profileBranchId));
                 }
@@ -927,9 +929,9 @@ const Booking = () => {
                         className="branch-filter-select"
                         value={selectedBranch}
                         onChange={(e) => setSelectedBranch(e.target.value)}
-                        disabled={userRole === 'staff'}
+                        disabled={userRole === 'staff' || (userRole === 'admin' && !!userBranchId)}
                     >
-                        {userRole !== 'staff' && <option value="">All Branches / Default View</option>}
+                        {!(userRole === 'staff' || (userRole === 'admin' && !!userBranchId)) && <option value="">All Branches / Default View</option>}
                         {branches.map(branch => {
                             let formattedName = branch.name;
                             const prefixes = ['Master Driving School ', 'Master Prime Driving School ', 'Masters Prime Holdings Corp. ', 'Master Prime Holdings Corp. '];

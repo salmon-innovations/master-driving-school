@@ -27,7 +27,6 @@ const Payment = lazy(() => import('./pages/Payment'))
 const Schedule = lazy(() => import('./pages/Schedule'))
 const Reviews = lazy(() => import('./pages/Reviews'))
 const Admin = lazy(() => import('./admin/Admin'))
-const StaffDashboard = lazy(() => import('./admin/staff/StaffDashboard'))
 
 import { ThemeProvider } from './context/ThemeContext'
 import { NotificationProvider } from './context/NotificationContext'
@@ -56,7 +55,6 @@ const PAGE_TO_PATH = {
   reviews: '/reviews',
   payment: '/payment',
   admin: '/admin',
-  'staff-dashboard': '/staff-dashboard',
 }
 
 const PATH_TO_PAGE = Object.entries(PAGE_TO_PATH).reduce((acc, [page, path]) => {
@@ -75,16 +73,13 @@ const isPathCompatibleWithPage = (pathname, page) => {
   if (page === 'admin') {
     return path === '/admin' || path.startsWith('/admin/')
   }
-  if (page === 'staff-dashboard') {
-    return path === '/staff-dashboard' || path.startsWith('/staff-dashboard/')
-  }
   return path === getPathForPage(page)
 }
 
 const getPageFromLocation = () => {
   const path = normalizePath(window.location.pathname)
   if (path === '/admin' || path.startsWith('/admin/')) return 'admin'
-  if (path === '/staff-dashboard' || path.startsWith('/staff-dashboard/')) return 'staff-dashboard'
+  if (path === '/staff-dashboard' || path.startsWith('/staff-dashboard/')) return 'admin'
   return PATH_TO_PAGE[path] || null
 }
 
@@ -306,20 +301,14 @@ function App() {
       case 'admin': {
         const role = getStoredUserRole()
         if (!role) { handleNavigation('signin'); return null }
-        if (role !== 'admin' && role !== 'super_admin') { handleNavigation('signin'); return null }
+        if (role !== 'admin' && role !== 'super_admin' && role !== 'staff') { handleNavigation('signin'); return null }
         return <Admin onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} />
-      }
-      case 'staff-dashboard': {
-        const role = getStoredUserRole()
-        if (!role) { handleNavigation('signin'); return null }
-        if (role !== 'staff') { handleNavigation('signin'); return null }
-        return <StaffDashboard onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} />
       }
       default: return <Home onNavigate={handleNavigation} />
     }
   }
 
-  const isAuthPage = ['signin', 'signup', 'guest-enrollment', 'verify-email', 'forgot-password', 'lock-account', 'admin', 'staff-dashboard'].includes(currentPage)
+  const isAuthPage = ['signin', 'signup', 'guest-enrollment', 'verify-email', 'forgot-password', 'lock-account', 'admin'].includes(currentPage)
 
   return (
     <SimpleErrorBoundary>

@@ -472,8 +472,10 @@ export const adminAPI = {
   },
 
   // Get best selling courses
-  getBestSellingCourses: async () => {
-    return await apiRequest('/admin/best-selling-courses');
+  getBestSellingCourses: async (branchId = null, filter = 'all') => {
+    let url = `/admin/best-selling-courses?filter=${filter}`;
+    if (branchId) url += `&branchId=${branchId}`;
+    return await apiRequest(url);
   },
 
   // Get funnel data
@@ -550,8 +552,10 @@ export const adminAPI = {
   },
 
   // Get all unpaid bookings (No Pay Users)
-  getUnpaidBookings: async (limit = 100) => {
-    return await apiRequest(`/admin/unpaid-bookings?limit=${limit}`);
+  getUnpaidBookings: async (limit = 100, branchId = null) => {
+    let url = `/admin/unpaid-bookings?limit=${limit}`;
+    if (branchId) url += `&branchId=${branchId}`;
+    return await apiRequest(url);
   },
 
   // Mark a downpayment booking as fully paid (collects remaining balance)
