@@ -1,7 +1,43 @@
 const pool = require('./config/db');
 
+function parseEmailArg() {
+    const args = process.argv.slice(2);
+    if (!args.length) return null;
+
+    // Supports:
+    // node cleanup_test_user.js user@example.com
+    // node cleanup_test_user.js --email=user@example.com
+    // node cleanup_test_user.js --email user@example.com
+    const direct = args.find((arg) => !arg.startsWith('-'));
+    const emailFlagEq = args.find((arg) => arg.startsWith('--email='));
+    const emailFlagIndex = args.findIndex((arg) => arg === '--email' || arg === '-e');
+
+    if (emailFlagEq) return emailFlagEq.split('=').slice(1).join('=').trim();
+    if (emailFlagIndex >= 0 && args[emailFlagIndex + 1]) return String(args[emailFlagIndex + 1]).trim();
+    if (direct) return String(direct).trim();
+
+    return null;
+}
+
+function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+}
+
 async function cleanupUser() {
-    const email = 'gabasamarcjeff03@gmail.com';
+    const email = parseEmailArg();
+
+    if (!email) {
+        console.log('Usage: node cleanup_test_user.js <email>');
+        console.log('   or: node cleanup_test_user.js --email=<email>');
+        console.log('   or: node cleanup_test_user.js --email <email>');
+        process.exit(1);
+    }
+
+    if (!isValidEmail(email)) {
+        console.log(`❌ Invalid email format: ${email}`);
+        process.exit(1);
+    }
+
     try {
         console.log(`🧹 Starting data cleanup for: ${email} (Account will be kept)`);
 
