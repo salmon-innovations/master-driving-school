@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const pool = require('../config/db');
 const {
   getDashboardStats,
   getAllBookings,
@@ -43,9 +44,74 @@ const { authenticateToken } = require('../middleware/auth');
 const multer = require('multer');
 const upload = multer({ dest: 'tmp/' });
 
+const ROLE_PERMISSION_PRESETS = {
+  super_admin: ['*'],
+  admin: [
+    'operations.schedules.manage',
+    'operations.schedules.tab.schedule',
+    'operations.schedules.tab.summary',
+    'operations.schedules.tab.noshow',
+    'operations.bookings.manage',
+    'operations.walk_in.manage',
+    'operations.sales.manage',
+    'operations.crm.manage',
+    'operations.analytics.view',
+    'operations.best_selling_courses.view',
+    'operations.news.manage',
+    'accounts.courses.view',
+    'accounts.courses.tab.courses',
+    'accounts.courses.tab.discounts',
+    'accounts.courses.tab.config',
+    'accounts.config.view',
+    'accounts.config.tab.branches',
+    'accounts.config.tab.coursetypes',
+    'accounts.config.tab.emailcontent',
+    'accounts.config.tab.settings',
+    'accounts.users.create',
+    'accounts.users.edit',
+    'accounts.users.reset_password',
+  ],
+};
+
+const normalizePermissions = (permissions) => {
+  if (!Array.isArray(permissions)) return [];
+  return permissions.filter((permission) => typeof permission === 'string' && permission.trim().length > 0);
+};
+
+const resolveUserPermissions = async (user) => {
+  const role = String(user?.role || '').toLowerCase();
+  if (role === 'super_admin') {
+    return new Set(['*']);
+  }
+
+  const result = await pool.query('SELECT permissions FROM users WHERE id = $1', [user.id]);
+  const explicitPermissions = result.rows[0]?.permissions;
+  const normalizedExplicit = normalizePermissions(explicitPermissions);
+  const fallback = ROLE_PERMISSION_PRESETS[role] || [];
+  const effective = normalizedExplicit.length > 0 ? normalizedExplicit : fallback;
+  return new Set(effective);
+};
+
+const requireAnyPermission = (requiredPermissions = []) => async (req, res, next) => {
+  try {
+    const permissionSet = await resolveUserPermissions(req.user);
+    if (permissionSet.has('*')) return next();
+
+    const allowed = requiredPermissions.some((permission) => permissionSet.has(permission));
+    if (!allowed) {
+      return res.status(403).json({ error: 'Access denied. Insufficient permissions.' });
+    }
+
+    next();
+  } catch (error) {
+    console.error('Permission check error:', error);
+    return res.status(500).json({ error: 'Server error while validating permissions.' });
+  }
+};
+
 // Middleware to check if user is admin
 const isAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'staff' && req.user.role !== 'super_admin') {
+  if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
     return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
   }
   next();
@@ -124,14 +190,14 @@ router.get('/today-students', getTodayStudents);
 router.get('/student-detail/:studentId', getStudentDetail);
 
 // Backup & Export routes
-router.get('/db-backup', getDatabaseBackup);
-router.get('/export-students', exportStudentsCSV);
-router.get('/export-transactions', exportTransactionsCSV);
+router.get('/db-backup', requireAnyPermission(['accounts.config.tab.backup']), getDatabaseBackup);
+router.get('/export-students', requireAnyPermission(['accounts.config.tab.backup']), exportStudentsCSV);
+router.get('/export-transactions', requireAnyPermission(['accounts.config.tab.backup']), exportTransactionsCSV);
 
 // Maintenance routes
-router.post('/clear-database', clearDatabase);
-router.post('/import-sql', upload.single('file'), importSQLBackup);
-router.post('/import-students', upload.single('file'), importStudentsCSV);
-router.post('/import-transactions', upload.single('file'), importTransactionsCSV);
+router.post('/clear-database', requireAnyPermission(['accounts.config.tab.backup']), clearDatabase);
+router.post('/import-sql', requireAnyPermission(['accounts.config.tab.backup']), upload.single('file'), importSQLBackup);
+router.post('/import-students', requireAnyPermission(['accounts.config.tab.backup']), upload.single('file'), importStudentsCSV);
+router.post('/import-transactions', requireAnyPermission(['accounts.config.tab.backup']), upload.single('file'), importTransactionsCSV);
 
 module.exports = router;

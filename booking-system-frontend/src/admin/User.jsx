@@ -67,9 +67,9 @@ const PERMISSION_GROUPS = [
         id: 'account_actions',
         label: 'Account Management Actions',
         permissions: [
-            { key: 'accounts.users.create', label: 'Add Staff/Admin' },
-            { key: 'accounts.users.edit', label: 'Edit Staff/Admin' },
-            { key: 'accounts.users.status', label: 'Activate/Deactivate Staff/Admin' },
+            { key: 'accounts.users.create', label: 'Add Admin' },
+            { key: 'accounts.users.edit', label: 'Edit Admin' },
+            { key: 'accounts.users.status', label: 'Activate/Deactivate Admin' },
             { key: 'accounts.users.reset_password', label: 'Reset User Password' },
         ],
     },
@@ -119,27 +119,15 @@ const ROLE_PERMISSION_PRESETS = {
         'accounts.users.edit',
         'accounts.users.reset_password',
     ],
-    staff: [
-        'operations.schedules.manage',
-        'operations.schedules.tab.schedule',
-        'operations.schedules.tab.summary',
-        'operations.schedules.tab.noshow',
-        'operations.bookings.manage',
-        'operations.walk_in.manage',
-        'operations.sales.manage',
-        'operations.crm.manage',
-        'operations.best_selling_courses.view',
-        'operations.news.manage',
-    ],
 };
 
-const STAFF_PERMISSION_KEYS = new Set(ROLE_PERMISSION_PRESETS.staff || []);
+const ADMIN_PERMISSION_KEYS = new Set(ROLE_PERMISSION_PRESETS.admin || []);
 
 const normalizeRoleValue = (role) => String(role || '').toLowerCase();
 
-const isStaffOrAdminRole = (role) => {
+const isAdminRole = (role) => {
     const normalizedRole = normalizeRoleValue(role);
-    return normalizedRole === 'admin' || normalizedRole === 'staff';
+    return normalizedRole === 'admin';
 };
 
 const normalizePermissionList = (permissions) => {
@@ -173,6 +161,8 @@ const getPermissionGroupsForDisplay = (permissions) => {
 };
 
 const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) => {
+    const USERS_CACHE_KEY = 'admin_users_cache_v1';
+    const USERS_CACHE_TTL_MS = 3 * 60 * 1000;
     const { showNotification } = useNotification();
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState('All');
@@ -188,6 +178,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
     const [newPassword, setNewPassword] = useState('');
     const [passwordError, setPasswordError] = useState('');
     const [editingUser, setEditingUser] = useState(null);
+    const [submitLoading, setSubmitLoading] = useState(false);
     const [errors, setErrors] = useState({});
     const [submitError, setSubmitError] = useState('');
     const [openPermissionGroups, setOpenPermissionGroups] = useState(() => {
@@ -215,11 +206,11 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
         zipCode: '',
         contactNumber: '',
         email: '',
-        role: 'Staff',
+        role: 'Admin',
         branch: '',
         status: 'active',
         avatar: '',
-        permissions: getDefaultPermissionsForRole('staff')
+        permissions: getDefaultPermissionsForRole('admin')
     });
     const [originalEmail, setOriginalEmail] = useState('');
 
@@ -228,12 +219,12 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
     const isCurrentUserAdmin = normalizedCurrentUserRole === 'admin';
     const isAddMode = !editingUser;
     const isAdminAddingUser = isCurrentUserAdmin && isAddMode;
-    const isStaffTargetRole = normalizeRoleValue(userData.role) === 'staff';
-    const limitPermissionPickerToStaff = isAdminAddingUser || isStaffTargetRole;
-    const visiblePermissionGroups = limitPermissionPickerToStaff
+    const isAdminTargetRole = normalizeRoleValue(userData.role) === 'admin';
+    const limitPermissionPickerToAdmin = isAdminAddingUser || isAdminTargetRole;
+    const visiblePermissionGroups = limitPermissionPickerToAdmin
         ? PERMISSION_GROUPS.map((group) => ({
             ...group,
-            permissions: group.permissions.filter((permission) => STAFF_PERMISSION_KEYS.has(permission.key)),
+            permissions: group.permissions.filter((permission) => ADMIN_PERMISSION_KEYS.has(permission.key)),
         })).filter((group) => group.permissions.length > 0)
         : PERMISSION_GROUPS;
     const visiblePermissionKeys = visiblePermissionGroups.flatMap((group) => group.permissions.map((permission) => permission.key));
@@ -246,8 +237,13 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
 
     // Fetch users and branches from database
     useEffect(() => {
-        fetchUsers();
-        fetchBranches();
+        const init = async () => {
+            await Promise.all([
+                fetchUsers(),
+                fetchBranches()
+            ]);
+        };
+        init();
     }, []);
 
     const fetchBranches = async () => {
@@ -260,8 +256,21 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
     };
 
     const fetchUsers = async () => {
+        let usedCache = false;
         try {
-            setLoading(true);
+            const cachedRaw = sessionStorage.getItem(USERS_CACHE_KEY);
+            if (cachedRaw) {
+                const cached = JSON.parse(cachedRaw);
+                if (cached?.ts && Array.isArray(cached?.data) && (Date.now() - cached.ts) < USERS_CACHE_TTL_MS) {
+                    setUsers(cached.data);
+                    setLoading(false);
+                    usedCache = true;
+                }
+            }
+        } catch (_) {}
+
+        try {
+            if (!usedCache) setLoading(true);
             const response = await adminAPI.getAllUsers();
 
             // Transform database data to match component format
@@ -283,7 +292,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                     name: `${user.first_name} ${user.middle_name ? user.middle_name + ' ' : ''}${user.last_name}`.trim(),
                     email: user.email,
                     role: roleDisplay,
-                    branch: user.branch_name ? user.branch_name : (roleDisplay === 'Admin' ? 'All Branches' : (roleDisplay === 'Staff' ? 'Not Assigned' : 'Not enrolled')),
+                    branch: user.branch_name ? user.branch_name : (roleDisplay === 'Admin' ? 'All Branches' : 'Not enrolled'),
                     branchId: user.branch_id,
                     status: user.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'Active',
                     lastLogin: user.last_login ? formatLastLogin(user.last_login) : 'Never',
@@ -307,9 +316,14 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
             });
 
             setUsers(transformedUsers);
+            try {
+                sessionStorage.setItem(USERS_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: transformedUsers }));
+            } catch (_) {}
         } catch (error) {
             console.error('Error fetching users:', error);
-            showNotification('Failed to load users. Please try again.', 'error');
+            if (!usedCache) {
+                showNotification('Failed to load users. Please try again.', 'error');
+            }
         } finally {
             setLoading(false);
         }
@@ -413,13 +427,13 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
         }
 
         if (name === 'role') {
-            if (isAdminAddingUser && normalizeRoleValue(formattedValue) !== 'staff') {
+            if (isAdminAddingUser && normalizeRoleValue(formattedValue) !== 'admin') {
                 return;
             }
             const permissions = getDefaultPermissionsForRole(value);
             setUserData((prev) => {
                 const nextRole = normalizeRoleValue(formattedValue);
-                const nextBranch = nextRole === 'staff' && prev.branch === 'all' ? '' : prev.branch;
+                const nextBranch = nextRole === 'admin' ? prev.branch : '';
                 return { ...prev, [name]: formattedValue, branch: nextBranch, permissions };
             });
             if (errors.permissions) {
@@ -510,19 +524,16 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
             newErrors.gender = 'Gender is required';
         }
 
-        // Branch validation (not required for non-Admin/non-Staff when editing)
-        const isStudentEdit = editingUser && !['Admin', 'Staff'].includes(editingUser.role);
+        // Branch validation (not required for non-Admin when editing)
+        const isStudentEdit = editingUser && !['Admin'].includes(editingUser.role);
         const normalizedRole = normalizeRoleValue(userData.role);
         if (!isStudentEdit) {
-            if (normalizedRole === 'staff' && !userData.branch) {
-                newErrors.branch = 'Branch selection is required for staff';
-            }
             if (normalizedRole === 'admin' && !userData.branch) {
                 newErrors.branch = 'Select a branch or All Branches for admin';
             }
         }
 
-        if (isStaffOrAdminRole(userData.role) && normalizePermissionList(userData.permissions).length === 0) {
+        if (isAdminRole(userData.role) && normalizePermissionList(userData.permissions).length === 0) {
             newErrors.permissions = 'Select at least one permission for this account';
         }
 
@@ -532,6 +543,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
 
     const handleAddUser = async (e) => {
         e.preventDefault();
+        if (submitLoading) return;
         setSubmitError('');
 
         if (!editingUser && !canCreateUsers) {
@@ -550,18 +562,19 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
             return;
         }
 
-        if (isAdminAddingUser && normalizeRoleValue(userData.role) !== 'staff') {
-            setSubmitError('Admins can only add Staff accounts.');
+        if (isAdminAddingUser && normalizeRoleValue(userData.role) !== 'admin') {
+            setSubmitError('Admins can only add Admin accounts.');
             return;
         }
 
-        // Only allow Admin or Staff creation
-        if (!editingUser && userData.role.toLowerCase() !== 'admin' && userData.role.toLowerCase() !== 'staff') {
-            setSubmitError('Only Admin or Staff members can be added.');
+        // Only allow Admin creation
+        if (!editingUser && userData.role.toLowerCase() !== 'admin') {
+            setSubmitError('Only Admin members can be added.');
             return;
         }
 
         try {
+            setSubmitLoading(true);
             if (editingUser) {
                 // Check if email has changed
                 const emailChanged = userData.email !== originalEmail;
@@ -593,7 +606,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                     showNotification('User updated successfully!', 'success');
                 }
             } else {
-                // Create new user (Admin or Staff only) - password auto-generated
+                // Create new user (Admin only) - password auto-generated
                 const response = await adminAPI.createUser({
                     firstName: userData.firstName,
                     middleInitial: userData.middleInitial,
@@ -630,11 +643,11 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                 zipCode: '',
                 contactNumber: '',
                 email: '',
-                role: 'Staff',
+                role: 'Admin',
                 branch: '',
                 status: 'active',
                 avatar: '',
-                permissions: getDefaultPermissionsForRole('staff')
+                permissions: getDefaultPermissionsForRole('admin')
             });
             setOriginalEmail('');
         } catch (error) {
@@ -668,6 +681,8 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
             } else {
                 setSubmitError('An unexpected error occurred. Please try again later.');
             }
+        } finally {
+            setSubmitLoading(false);
         }
     };
 
@@ -707,6 +722,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
     };
 
     const handleCloseModal = () => {
+        if (submitLoading) return;
         setShowModal(false);
         setEditingUser(null);
         setErrors({});
@@ -723,11 +739,11 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
             zipCode: '',
             contactNumber: '',
             email: '',
-            role: 'Staff',
+            role: 'Admin',
             branch: '',
             status: 'active',
             avatar: '',
-            permissions: getDefaultPermissionsForRole('staff')
+            permissions: getDefaultPermissionsForRole('admin')
         });
     };
 
@@ -781,7 +797,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
     const applyRolePermissionPreset = () => {
         const rolePresetPermissions = getDefaultPermissionsForRole(userData.role);
         const nextPermissions = isAdminAddingUser
-            ? rolePresetPermissions.filter((permission) => STAFF_PERMISSION_KEYS.has(permission))
+            ? rolePresetPermissions.filter((permission) => ADMIN_PERMISSION_KEYS.has(permission))
             : rolePresetPermissions;
         setUserData({ ...userData, permissions: nextPermissions });
         if (errors.permissions) {
@@ -790,27 +806,26 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
     };
 
     useEffect(() => {
-        if (!isAdminAddingUser && !limitPermissionPickerToStaff) return;
+        if (!isAdminAddingUser && !limitPermissionPickerToAdmin) return;
 
-        if (isAdminAddingUser && normalizeRoleValue(userData.role) !== 'staff') {
+        if (isAdminAddingUser && normalizeRoleValue(userData.role) !== 'admin') {
             setUserData((prev) => ({
                 ...prev,
-                role: 'Staff',
-                branch: prev.branch === 'all' ? '' : prev.branch,
-                permissions: getDefaultPermissionsForRole('staff'),
+                role: 'Admin',
+                permissions: getDefaultPermissionsForRole('admin'),
             }));
             return;
         }
 
         const currentPermissions = normalizePermissionList(userData.permissions);
-        const filteredPermissions = currentPermissions.filter((permission) => STAFF_PERMISSION_KEYS.has(permission));
+        const filteredPermissions = currentPermissions.filter((permission) => ADMIN_PERMISSION_KEYS.has(permission));
         if (filteredPermissions.length !== currentPermissions.length) {
             setUserData((prev) => ({
                 ...prev,
                 permissions: filteredPermissions,
             }));
         }
-    }, [isAdminAddingUser, limitPermissionPickerToStaff, userData.role, userData.permissions]);
+    }, [isAdminAddingUser, limitPermissionPickerToAdmin, userData.role, userData.permissions]);
 
     const filteredUsers = users.filter(user => {
         const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -902,7 +917,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
             <div className="user-header">
                 <div className="header-left">
                     <h2>User Management</h2>
-                    <p>Manage system access for admins, staff members, and students</p>
+                    <p>Manage system access for admins and students</p>
                 </div>
                 <div className="header-actions">
                     {canCreateUsers && (
@@ -925,7 +940,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                     />
                 </div>
                 <div className="role-filters">
-                    {['All', 'Admin', 'Staff', 'Student', 'Walkin Student'].map(role => (
+                    {['All', 'Admin', 'Student', 'Walkin Student'].map(role => (
                         <button
                             key={role}
                             className={`filter-chip ${roleFilter === role ? 'active' : ''}`}
@@ -1049,11 +1064,11 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                     </div>
                                     <div>
                                         <h2 style={{ color: 'white' }}>{editingUser ? 'Edit Account' : 'Add New User Account'}</h2>
-                                        <p style={{ color: 'rgba(255,255,255,0.8)' }}>{editingUser ? 'Update account information and permissions' : (isAdminAddingUser ? 'Fill in the details to add a new staff member' : 'Fill in the details to add a new admin or staff member')}</p>
+                                        <p style={{ color: 'rgba(255,255,255,0.8)' }}>{editingUser ? 'Update account information and permissions' : 'Fill in the details to add a new admin member'}</p>
                                     </div>
                                 </div>
                                 <div className="modal-header-right">
-                                    <button className="close-modal" onClick={handleCloseModal} style={{ color: 'white', background: 'rgba(255,255,255,0.1)' }}>
+                                    <button className="close-modal" onClick={handleCloseModal} disabled={submitLoading} style={{ color: 'white', background: 'rgba(255,255,255,0.1)' }}>
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                                     </button>
                                 </div>
@@ -1613,7 +1628,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                                 }}>
                                                     Role <span style={{ color: '#ef4444' }}>*</span>
                                                 </label>
-                                                {editingUser && !['Admin', 'Staff'].includes(editingUser.role) ? (
+                                                {editingUser && !['Admin'].includes(editingUser.role) ? (
                                                     <input
                                                         type="text"
                                                         value={userData.role}
@@ -1649,8 +1664,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                                             fontWeight: '600'
                                                         }}
                                                     >
-                                                        {!isAdminAddingUser && <option value="Admin">Admin (Branch Manager)</option>}
-                                                        <option value="Staff">Staff</option>
+                                                        <option value="Admin">Admin (Branch Manager)</option>
                                                     </select>
                                                 )}
                                             </div>
@@ -1662,13 +1676,13 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                                     marginBottom: '6px',
                                                     display: 'block'
                                                 }}>
-                                                    Branch {!(editingUser && !['Admin', 'Staff'].includes(editingUser.role)) && <span style={{ color: '#ef4444' }}>*</span>}
+                                                    Branch {!(editingUser && !['Admin'].includes(editingUser.role)) && <span style={{ color: '#ef4444' }}>*</span>}
                                                 </label>
                                                 <select
                                                     name="branch"
                                                     value={userData.branch}
                                                     onChange={handleInputChange}
-                                                    required={!(editingUser && !['Admin', 'Staff'].includes(editingUser.role))}
+                                                    required={!(editingUser && !['Admin'].includes(editingUser.role))}
                                                     style={{
                                                         width: '100%',
                                                         padding: '11px 14px',
@@ -1698,7 +1712,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                             </div>
                                         </div>
 
-                                        {isStaffOrAdminRole(userData.role) && (
+                                        {isAdminRole(userData.role) && (
                                             <div style={{ marginTop: '18px' }}>
                                                 <div style={{
                                                     display: 'flex',
@@ -1781,7 +1795,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                                     </div>
                                                 )}
 
-                                                {limitPermissionPickerToStaff && (
+                                                {limitPermissionPickerToAdmin && (
                                                     <div style={{
                                                         marginBottom: '10px',
                                                         padding: '8px 10px',
@@ -1792,7 +1806,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                                         fontSize: '0.75rem',
                                                         fontWeight: 600
                                                     }}>
-                                                        Staff permission mode: only staff-level permissions are shown for this account.
+                                                        Admin permission mode: only admin-level permissions are shown for this account.
                                                     </div>
                                                 )}
 
@@ -1935,6 +1949,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                         type="button"
                                         className="cancel-btn"
                                         onClick={handleCloseModal}
+                                        disabled={submitLoading}
                                         style={{
                                             padding: '12px 28px',
                                             borderRadius: '10px',
@@ -1943,13 +1958,15 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                             color: 'var(--text-color)',
                                             fontSize: '0.9rem',
                                             fontWeight: '600',
-                                            cursor: 'pointer',
+                                            cursor: submitLoading ? 'not-allowed' : 'pointer',
+                                            opacity: submitLoading ? 0.7 : 1,
                                             transition: 'all 0.2s'
                                         }}
                                     >Cancel</button>
                                     <button
                                         type="submit"
                                         className="confirm-btn"
+                                        disabled={submitLoading}
                                         style={{
                                             padding: '12px 28px',
                                             borderRadius: '10px',
@@ -1958,12 +1975,16 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                             color: 'white',
                                             fontSize: '0.9rem',
                                             fontWeight: '700',
-                                            cursor: 'pointer',
+                                            cursor: submitLoading ? 'not-allowed' : 'pointer',
+                                            opacity: submitLoading ? 0.85 : 1,
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '8px',
                                             transition: 'all 0.2s',
                                             boxShadow: '0 4px 12px rgba(26, 79, 186, 0.3)'
                                         }}
                                     >
-                                        {editingUser ? 'Update Account' : 'Create Account'}
+                                        {submitLoading ? (editingUser ? 'Updating...' : 'Creating...') : (editingUser ? 'Update Account' : 'Create Account')}
                                     </button>
                                 </div>
                             </form>
@@ -2221,7 +2242,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                                 }}>{selectedUser.birthday ? new Date(selectedUser.birthday).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not provided'}</div>
                                             </div>
 
-                                            {(!['Admin', 'Staff'].includes(selectedUser.role)) && (
+                                            {(!['Admin'].includes(selectedUser.role)) && (
                                                 <>
                                                     <div className="profile-data-card">
                                                         <label style={{
@@ -2314,7 +2335,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
 
                                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
 
-                                                {(!['Admin', 'Staff'].includes(selectedUser.role)) && (
+                                                {(!['Admin'].includes(selectedUser.role)) && (
                                                     <div className="profile-data-card">
                                                         <label style={{
                                                             fontSize: '0.7rem',
@@ -2375,7 +2396,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                         </div>
                                     </div>
 
-                                    {(['Admin', 'Staff'].includes(selectedUser.role)) && (
+                                    {(['Admin'].includes(selectedUser.role)) && (
                                         <div style={{ marginBottom: '25px' }}>
                                             <h3 style={{
                                                 fontSize: '0.85rem',
@@ -2460,7 +2481,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                                         </div>
                                     )}
 
-                                    {(!['Admin', 'Staff'].includes(selectedUser.role)) && (
+                                    {(!['Admin'].includes(selectedUser.role)) && (
                                         <div style={{ marginBottom: '25px' }}>
                                             <h3 style={{
                                                 fontSize: '0.85rem',

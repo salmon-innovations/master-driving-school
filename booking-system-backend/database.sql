@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS users (
     zip_code VARCHAR(20),
     emergency_contact_person VARCHAR(255),
     emergency_contact_number VARCHAR(50),
-    role VARCHAR(50) DEFAULT 'student' CHECK (role IN ('admin', 'staff', 'student', 'walkin_student')),
+    role VARCHAR(50) DEFAULT 'student' CHECK (role IN ('super_admin', 'admin', 'student', 'walkin_student', 'guest')),
     branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
     status VARCHAR(50) DEFAULT 'active',
     last_login TIMESTAMP,
@@ -96,7 +96,7 @@ CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
 CREATE INDEX IF NOT EXISTS idx_cart_items_user_id ON cart_items(user_id);
 
 -- Add comments for documentation
-COMMENT ON COLUMN users.role IS 'User role: admin, staff, student, or walkin_student';
+COMMENT ON COLUMN users.role IS 'User role: super_admin, admin, student, walkin_student, or guest';
 COMMENT ON COLUMN users.branch_id IS 'Foreign key to branches table for admin/staff users';
 COMMENT ON COLUMN users.status IS 'Account status: active or inactive';
 COMMENT ON COLUMN users.is_verified IS 'Email verification status';

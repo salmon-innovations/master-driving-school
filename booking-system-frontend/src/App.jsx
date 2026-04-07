@@ -79,7 +79,6 @@ const isPathCompatibleWithPage = (pathname, page) => {
 const getPageFromLocation = () => {
   const path = normalizePath(window.location.pathname)
   if (path === '/admin' || path.startsWith('/admin/')) return 'admin'
-  if (path === '/staff-dashboard' || path.startsWith('/staff-dashboard/')) return 'admin'
   return PATH_TO_PAGE[path] || null
 }
 
@@ -301,7 +300,7 @@ function App() {
       case 'admin': {
         const role = getStoredUserRole()
         if (!role) { handleNavigation('signin'); return null }
-        if (role !== 'admin' && role !== 'super_admin' && role !== 'staff') { handleNavigation('signin'); return null }
+        if (role !== 'admin' && role !== 'super_admin') { handleNavigation('signin'); return null }
         return <Admin onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} />
       }
       default: return <Home onNavigate={handleNavigation} />

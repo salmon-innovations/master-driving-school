@@ -11,13 +11,12 @@ const getRequestBranchScope = async (req) => {
     return { role, branchId: null, canViewAll: true };
   }
 
-  if (role === 'admin' || role === 'staff') {
+  if (role === 'admin') {
     const branchRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [req.user.id]);
     const branchId = branchRow.rows[0]?.branch_id || null;
     if (role === 'admin') {
       return { role, branchId, canViewAll: !branchId };
     }
-    return { role, branchId, canViewAll: false };
   }
 
   return { role, branchId: null, canViewAll: true };
@@ -524,7 +523,7 @@ const cancelEnrollment = async (req, res) => {
   }
 };
 
-// Mark reschedule fee as paid (admin/staff confirms ₱1000 no-show fee collected)
+// Mark reschedule fee as paid (admin confirms ₱1000 no-show fee collected)
 const markFeePaid = async (req, res) => {
   try {
     const { enrollmentId } = req.params;
@@ -1128,7 +1127,7 @@ const requestFreeReschedule = async (req, res) => {
   }
 };
 
-// Get all No-Show students with slot + fee info (admin/staff)
+// Get all No-Show students with slot + fee info (admin)
 const getNoShowStudents = async (req, res) => {
   try {
     const { branchId } = req.query;

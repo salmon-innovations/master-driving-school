@@ -25,8 +25,6 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
         const role = (user.role || 'student').toLowerCase()
         if (role === 'admin' || role === 'super_admin') {
           onNavigate('admin')
-        } else if (role === 'staff') {
-          onNavigate('admin')
         } else {
           onNavigate('home')
         }
@@ -124,8 +122,6 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
         const role = (response.user.role || 'student').toLowerCase();
 
         if (role === 'admin' || role === 'super_admin') {
-          onNavigate('admin')
-        } else if (role === 'staff') {
           onNavigate('admin')
         } else {
           onNavigate('home')

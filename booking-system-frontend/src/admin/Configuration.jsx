@@ -11,12 +11,12 @@ import { BranchModal, RoleModal, ConfirmModal } from './config/Modals';
 import { adminAPI } from '../services/api';
 
 const CONFIG_TAB_PERMISSION_MAP = {
-    branches: ['accounts.config.view', 'accounts.config.tab.branches'],
-    roles: ['accounts.config.view', 'accounts.config.tab.roles'],
-    coursetypes: ['accounts.config.view', 'accounts.config.tab.coursetypes'],
-    emailcontent: ['accounts.config.view', 'accounts.config.tab.emailcontent'],
-    settings: ['accounts.config.view', 'accounts.config.tab.settings'],
-    backup: ['accounts.config.view', 'accounts.config.tab.backup'],
+    branches: 'accounts.config.tab.branches',
+    roles: 'accounts.config.tab.roles',
+    coursetypes: 'accounts.config.tab.coursetypes',
+    emailcontent: 'accounts.config.tab.emailcontent',
+    settings: 'accounts.config.tab.settings',
+    backup: 'accounts.config.tab.backup',
 };
 
 const normalizePermissionList = (permissions) => {
@@ -392,11 +392,12 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
     const permissionSet = new Set(normalizePermissionList(currentUserPermissions));
     const canAccessConfigTab = (tabKey) => {
         if (isSuperAdmin) return true;
-        const requiredPermissions = CONFIG_TAB_PERMISSION_MAP[tabKey] || [];
-        // If no explicit permission payload is provided, keep legacy behavior by allowing tabs.
-        if (permissionSet.size === 0) return true;
-        return requiredPermissions.some((permission) => permissionSet.has(permission));
+        if (!permissionSet.has('accounts.config.view')) return false;
+        const requiredPermission = CONFIG_TAB_PERMISSION_MAP[tabKey];
+        if (!requiredPermission) return false;
+        return permissionSet.has(requiredPermission);
     };
+    const canAccessRolesTab = canAccessConfigTab('roles');
 
     // Branch States
     const [branches, setBranches] = useState([]);
@@ -445,11 +446,18 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
     };
     const [generalSettings, setGeneralSettings] = useState(loadSettings);
 
-    useEffect(() => { Promise.all([fetchBranches(), fetchRoles()]); }, []);
+    useEffect(() => {
+        const initialLoads = [fetchBranches()];
+        if (canAccessRolesTab) {
+            initialLoads.push(fetchRoles());
+        }
+        Promise.all(initialLoads);
+    }, [canAccessRolesTab]);
+
     useEffect(() => {
         if (activeTab === 'branches') fetchBranches();
-        if (activeTab === 'roles') fetchRoles();
-    }, [activeTab]);
+        if (activeTab === 'roles' && canAccessRolesTab) fetchRoles();
+    }, [activeTab, canAccessRolesTab]);
 
     // ---------- Branch Logic ----------
     const fetchBranches = async () => {
@@ -519,7 +527,14 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
             setRoleLoading(true);
             const res = await rolesAPI.getAll();
             if (res.success) setRoles(res.roles);
-        } catch { showNotification('Failed to load roles', 'error'); }
+        } catch (err) {
+            const message = String(err?.message || '').toLowerCase();
+            if (message.includes('access denied') || message.includes('insufficient permissions')) {
+                setRoles([]);
+                return;
+            }
+            showNotification('Failed to load roles', 'error');
+        }
         finally { setRoleLoading(false); }
     };
 

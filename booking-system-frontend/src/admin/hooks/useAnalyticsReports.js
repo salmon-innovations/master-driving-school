@@ -144,49 +144,46 @@ export const useAnalyticsReports = () => {
             const revenueData = revenueRes.success ? revenueRes.data : [];
             const enrollmentData = enrollmentRes.success ? enrollmentRes.data : [];
 
-            let combinedTrend = revenueData.map((revItem, index) => {
-                const enrollItem = enrollmentData.find(e => e.name === revItem.name) || enrollmentData[index] || {};
+            const revenueByMonth = new Map(
+                revenueData.map((item) => [
+                    item?.name,
+                    Number(item?.revenue || 0),
+                ])
+            );
 
+            const enrollByMonth = new Map(
+                enrollmentData.map((item) => [
+                    item?.name,
+                    {
+                        students: Number(item?.students || 0),
+                        walkins: Number(item?.walkins || 0),
+                        online: Number(item?.online || 0),
+                    },
+                ])
+            );
+
+            const monthOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const combinedMonths = [...new Set([
+                ...revenueByMonth.keys(),
+                ...enrollByMonth.keys(),
+            ])].filter(Boolean).sort((a, b) => monthOrder.indexOf(a) - monthOrder.indexOf(b));
+
+            const combinedTrend = combinedMonths.map((month) => {
+                const enrollItem = enrollByMonth.get(month) || { students: 0, walkins: 0, online: 0 };
                 return {
-                    month: revItem.name,
-                    revenue: revItem.revenue || 0,
-                    added: enrollItem.students || 0,
-                    walkin: enrollItem.walkins || 0,
-                    online: enrollItem.online || 0
+                    month,
+                    revenue: revenueByMonth.get(month) || 0,
+                    added: enrollItem.students,
+                    walkin: enrollItem.walkins,
+                    online: enrollItem.online,
                 };
             });
 
-            // If API returns only 1 month or no data, use mock trend for better visualization
-            if (combinedTrend.length <= 1) {
-                combinedTrend = [
-                    { month: 'Mar', revenue: 3700, added: 3, walkin: 1, online: 2 }
-                ];
-            }
-
-            let finalBranchData = branchData.length > 0 ? branchData : FAKE_DATA.branchPerformance;
-
-            // Ensure we have the full specific list of branches provided
-            if (finalBranchData.length < 5) {
-                finalBranchData = [
-                    { branch_name: 'V-luna Branch (Main)', revenue: 3700 },
-                    { branch_name: 'Antipolo Branch', revenue: 9800 },
-                    { branch_name: 'Mandaluyong Branch', revenue: 8400 },
-                    { branch_name: 'Marikina Branch', revenue: 7600 },
-                    { branch_name: 'Pasig Branch', revenue: 6900 },
-                    { branch_name: 'Meycauayan Branch', revenue: 6200 },
-                    { branch_name: 'Malabon Branch', revenue: 5800 },
-                    { branch_name: 'Binan Branch', revenue: 5400 },
-                    { branch_name: 'Las Piñas Branch', revenue: 4900 },
-                    { branch_name: 'Bacoor Branch', revenue: 4500 },
-                    { branch_name: 'San Mateo Branch', revenue: 4100 },
-                    { branch_name: 'Valenzuela Branch', revenue: 3800 },
-                    { branch_name: 'Bocaue Bulacan Branch', revenue: 3500 }
-                ];
-            }
+            const finalBranchData = branchData.length > 0 ? branchData : [];
 
             setAnalyticsData({
                 stats,
-                funnel: funnelData.length > 0 ? funnelData : FAKE_DATA.funnel,
+                funnel: funnelData,
                 courseDistribution: distributionData.length > 0 ? distributionData : FAKE_DATA.courseDistribution,
                 monthlyTrend: combinedTrend,
                 branchPerformance: finalBranchData

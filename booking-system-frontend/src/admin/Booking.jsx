@@ -175,6 +175,7 @@ const buildPaymentBreakdown = (booking) => {
 };
 
 const Booking = () => {
+    const BOOKINGS_CACHE_TTL_MS = 2 * 60 * 1000;
     const { showNotification } = useNotification();
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('All');
@@ -226,7 +227,7 @@ const Booking = () => {
                 }
                 const res = await branchesAPI.getAll();
                 let loaded = res.branches || [];
-                if ((role === 'staff' || (role === 'admin' && profileBranchId)) && profileBranchId) {
+                if (role === 'admin' && profileBranchId) {
                     loaded = loaded.filter(b => String(b.id) === String(profileBranchId));
                     setSelectedBranch(String(profileBranchId));
                 }
@@ -242,8 +243,24 @@ const Booking = () => {
     }, [selectedBranch]);
 
     const loadBookings = async () => {
+        const cacheKey = `admin_bookings_cache_v1_${selectedBranch || 'all'}`;
+        let usedCache = false;
+
         try {
-            setLoading(true);
+            const cachedRaw = sessionStorage.getItem(cacheKey);
+            if (cachedRaw) {
+                const cached = JSON.parse(cachedRaw);
+                if (cached?.ts && Array.isArray(cached?.data) && (Date.now() - cached.ts) < BOOKINGS_CACHE_TTL_MS) {
+                    setBookings(cached.data);
+                    setError(null);
+                    setLoading(false);
+                    usedCache = true;
+                }
+            }
+        } catch (_) {}
+
+        try {
+            if (!usedCache) setLoading(true);
             setError(null);
             const response = await adminAPI.getAllBookings(null, 100, selectedBranch || null);
             if (response.success) {
@@ -454,11 +471,16 @@ const Booking = () => {
                     return b;
                 });
                 setBookings(refined);
+                try {
+                    sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: refined }));
+                } catch (_) {}
             }
         } catch (err) {
             console.error('Error loading bookings:', err);
-            setError('Failed to load bookings. Please try again.');
-            showNotification('Failed to load bookings. Please try again.', 'error');
+            if (!usedCache) {
+                setError('Failed to load bookings. Please try again.');
+                showNotification('Failed to load bookings. Please try again.', 'error');
+            }
         } finally {
             setLoading(false);
         }
@@ -929,9 +951,9 @@ const Booking = () => {
                         className="branch-filter-select"
                         value={selectedBranch}
                         onChange={(e) => setSelectedBranch(e.target.value)}
-                        disabled={userRole === 'staff' || (userRole === 'admin' && !!userBranchId)}
+                        disabled={userRole === 'admin' && !!userBranchId}
                     >
-                        {!(userRole === 'staff' || (userRole === 'admin' && !!userBranchId)) && <option value="">All Branches / Default View</option>}
+                        {!(userRole === 'admin' && !!userBranchId) && <option value="">All Branches / Default View</option>}
                         {branches.map(branch => {
                             let formattedName = branch.name;
                             const prefixes = ['Master Driving School ', 'Master Prime Driving School ', 'Masters Prime Holdings Corp. ', 'Master Prime Holdings Corp. '];

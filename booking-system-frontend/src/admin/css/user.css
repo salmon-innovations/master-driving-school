@@ -216,11 +216,6 @@
     color: #ef4444;
 }
 
-.role-pill.staff {
-    background: rgba(59, 130, 246, 0.1);
-    color: #3b82f6;
-}
-
 .role-pill.student {
     background: rgba(16, 185, 129, 0.1);
     color: #10b981;

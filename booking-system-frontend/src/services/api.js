@@ -43,10 +43,11 @@ const getAuthToken = () => {
 
 // Helper function to make API requests
 const apiRequest = async (endpoint, options = {}) => {
+  const { suppressErrorLog = false, ...requestOptions } = options;
   const url = `${API_BASE_URL}${endpoint}`;
   const token = getAuthToken();
-  const method = String(options.method || 'GET').toUpperCase();
-  const shouldUseCache = method === 'GET' && !token && options.cache !== false;
+  const method = String(requestOptions.method || 'GET').toUpperCase();
+  const shouldUseCache = method === 'GET' && !token && requestOptions.cache !== false;
   const cacheKey = `${method}:${url}`;
 
   if (shouldUseCache) {
@@ -57,15 +58,15 @@ const apiRequest = async (endpoint, options = {}) => {
   }
 
   const config = {
-    ...options,
+    ...requestOptions,
     method,
     headers: {
-      ...options.headers,
+      ...requestOptions.headers,
     },
   };
 
   // Only set JSON content type when a body exists and it's not FormData.
-  if (options.body !== undefined && options.body !== null && !(options.body instanceof FormData)) {
+  if (requestOptions.body !== undefined && requestOptions.body !== null && !(requestOptions.body instanceof FormData)) {
     config.headers['Content-Type'] = 'application/json';
   }
 
@@ -137,7 +138,7 @@ const apiRequest = async (endpoint, options = {}) => {
         statusCode: error.statusCode,
         responseSnippet: error.responseSnippet,
       });
-    } else if (!isExpectedAuthFlow) {
+    } else if (!isExpectedAuthFlow && !suppressErrorLog) {
       console.error('API Error:', error);
     }
     throw error;
@@ -507,7 +508,7 @@ export const adminAPI = {
     return await apiRequest(`/admin/student-detail/${studentId}`);
   },
 
-  // Create new user (Admin/Staff only)
+  // Create new user (Admin only)
   createUser: async (userData) => {
     return await apiRequest('/admin/users', {
       method: 'POST',
@@ -768,7 +769,7 @@ export const schedulesAPI = {
     });
   },
 
-  // Get all no-show students (admin/staff)
+  // Get all no-show students (admin)
   getNoShowStudents: async ({ branchId } = {}) => {
     const params = new URLSearchParams();
     if (branchId) params.append('branchId', branchId);
@@ -878,7 +879,10 @@ export const emailContentAPI = {
 
 // News & Announcements API
 export const newsAPI = {
-  getAll: async () => await apiRequest('/news'),
+  getAll: async () => await apiRequest('/news', {
+    cache: 'no-store',
+    suppressErrorLog: true,
+  }),
   create: async (data) => await apiRequest('/news', {
     method: 'POST',
     body: JSON.stringify(data)
@@ -890,7 +894,10 @@ export const newsAPI = {
   delete: async (id) => await apiRequest(`/news/${id}`, {
     method: 'DELETE'
   }),
-  getVideos: async () => await apiRequest('/news/videos'),
+  getVideos: async () => await apiRequest('/news/videos', {
+    cache: 'no-store',
+    suppressErrorLog: true,
+  }),
   broadcast: async (id) => await apiRequest(`/news/${id}/broadcast`, {
     method: 'POST'
   }),

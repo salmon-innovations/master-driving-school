@@ -133,7 +133,7 @@ const EmailContentSection = () => {
         { id: 'noShow', title: 'No-Show / Missed', desc: 'Sent when a student misses a session.', color: 'rose', icon: Icons?.noShow },
         { id: 'news', title: 'News & Promos', desc: 'Promotional broadcast emails.', color: 'purple', icon: Icons?.news },
         { id: 'receipt', title: 'Payment Receipt', desc: 'Sent after successful transactions.', color: 'amber', icon: Icons?.receipt },
-        { id: 'newAccount', title: 'New Admin Account', desc: 'Sent to new staff members.', color: 'indigo', icon: Icons?.newAccount },
+        { id: 'newAccount', title: 'New Admin Account', desc: 'Sent to new admin members.', color: 'indigo', icon: Icons?.newAccount },
         { id: 'verification', title: 'Verification & OTP', desc: 'Sent when users register or reset passwords.', color: 'slate', icon: Icons?.verification }
     ];
 
@@ -271,9 +271,9 @@ const EmailContentSection = () => {
                     <h2 style={{marginTop:0}}>{c.headerTitle}</h2>
                     <h3 style={{ borderBottom: '2px solid #e5e7eb', paddingBottom: '10px', marginTop: '25px' }}>{c.credentialsHeading}</h3>
                     <div style={{ background: '#f3f4f6', padding: '20px', borderRadius: '8px', fontFamily: 'monospace', marginBottom: '15px', border: '1px solid #e5e7eb', fontSize: '15px' }}>
-                        <strong>Role:</strong> Staff<br/>
+                        <strong>Role:</strong> Admin<br/>
                         <strong>Email:</strong> admin@school.com<br/>
-                        <strong>Password:</strong> staffpass123
+                        <strong>Password:</strong> adminpass123
                     </div>
                     <p style={{ marginTop: '25px', padding: '15px', backgroundColor: '#fef2f2', color: '#b91c1c', borderLeft: '4px solid #ef4444', borderRadius: '4px' }}>
                         <strong>{c.securityHeading}</strong><br/>

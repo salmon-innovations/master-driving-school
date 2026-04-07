@@ -187,9 +187,9 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         phone: user.contactNumbers || '+63 912 345 6789',
                         branch: user.branchName || 'Main Office',
                         branchId: user.branchId || null,
-                        role: user.role === 'admin' ? 'Super Admin' :
-                            user.role === 'staff' ? 'Staff' : 'User',
-                        rawRole: user.role || 'staff',
+                        role: user.role === 'super_admin' ? 'Super Admin' :
+                            user.role === 'admin' ? 'Admin' : 'User',
+                        rawRole: user.role || 'admin',
                         avatar: null
                     });
                 }

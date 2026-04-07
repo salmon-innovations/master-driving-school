@@ -567,7 +567,7 @@ const sendVerificationEmail = async (email, code, firstName, type = 'Email Verif
   }
 };
 
-// Send password email to new admin/staff user
+// Send password email to new admin user
 const sendPasswordEmail = async (email, password, firstName, role) => {
   try {
     const transporter = createTransporter();
@@ -691,7 +691,7 @@ const computeTDCDay2 = (dateString) => {
 const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, verificationCode, enrollmentDetails, hasReviewer = false, hasVehicleTips = false) => {
   try {
     const transporter = createTransporter();
-    const { courseName, courseCategory, courseType, branchName, branchAddress, scheduleDate, scheduleSession, scheduleTime, scheduleDate2, scheduleSession2, scheduleTime2, paymentMethod, amountPaid, paymentStatus } = enrollmentDetails;
+    const { courseName, courseCategory, courseType, branchName, branchAddress, scheduleDate, scheduleSession, scheduleTime, scheduleDate2, scheduleSession2, scheduleTime2, pdcSchedules, paymentMethod, amountPaid, paymentStatus } = enrollmentDetails;
 
     const isTDC = (courseCategory || '').toUpperCase() === 'TDC';
     const isPromo = (courseCategory || '').toLowerCase() === 'promo';
@@ -718,24 +718,51 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
       });
     }
 
-    // PDC Day 1
-    if (pdcDate1) {
-      schedules.push({
-        label: 'PDC — Day 1',
-        date: formatDisplayDate(pdcDate1),
-        session: pdcSession1 || 'Morning',
-        time: pdcTime1 || '08:00 AM - 12:00 PM'
-      });
-    }
+    const hasMultiPdc = Array.isArray(pdcSchedules) && pdcSchedules.length > 0;
 
-    // PDC Day 2
-    if (pdcDate2) {
-      schedules.push({
-        label: 'PDC — Day 2',
-        date: formatDisplayDate(pdcDate2),
-        session: pdcSession2 || 'Morning',
-        time: pdcTime2 || '08:00 AM - 12:00 PM'
+    if (hasMultiPdc) {
+      pdcSchedules.forEach((s, idx) => {
+        const baseLabel = s?.label || `PDC ${idx + 1}`;
+        const d1 = formatDisplayDate(s?.scheduleDate);
+        const d2 = formatDisplayDate(s?.promoPdcDate2 || s?.scheduleDate2);
+
+        if (d1) {
+          schedules.push({
+            label: `${baseLabel} — Day 1`,
+            date: d1,
+            session: s?.scheduleSession || s?.scheduleSession2 || 'Morning',
+            time: s?.scheduleTime || s?.scheduleTime2 || '08:00 AM - 12:00 PM'
+          });
+        }
+
+        if (d2) {
+          schedules.push({
+            label: `${baseLabel} — Day 2`,
+            date: d2,
+            session: s?.promoPdcSession2 || s?.scheduleSession2 || 'Morning',
+            time: s?.promoPdcTime2 || s?.scheduleTime2 || '08:00 AM - 12:00 PM'
+          });
+        }
       });
+    } else {
+      // Backward compatibility for older payloads that only pass one PDC schedule.
+      if (pdcDate1) {
+        schedules.push({
+          label: 'PDC — Day 1',
+          date: formatDisplayDate(pdcDate1),
+          session: pdcSession1 || 'Morning',
+          time: pdcTime1 || '08:00 AM - 12:00 PM'
+        });
+      }
+
+      if (pdcDate2) {
+        schedules.push({
+          label: 'PDC — Day 2',
+          date: formatDisplayDate(pdcDate2),
+          session: pdcSession2 || 'Morning',
+          time: pdcTime2 || '08:00 AM - 12:00 PM'
+        });
+      }
     }
 
     const isDownpayment = paymentStatus && paymentStatus.toLowerCase().includes('downpayment');

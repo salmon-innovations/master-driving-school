@@ -642,22 +642,35 @@ const AnalyticsReports = ({ onNavigate }) => {
                         </div>
                     </div>
                     <div className="performance-list-compact">
-                        {(analyticsData?.branchPerformance || [])
-                            .filter(branch => branch.branch_name && branch.branch_name.includes('V-luna'))
-                            .map((branch, index) => (
+                        {(() => {
+                            const branches = (analyticsData?.branchPerformance || [])
+                                .map((branch) => ({
+                                    ...branch,
+                                    revenueValue: Number(branch?.revenue || 0),
+                                }))
+                                .filter((branch) => branch.branch_name && branch.revenueValue >= 0)
+                                .sort((a, b) => b.revenueValue - a.revenueValue);
+
+                            const maxRevenue = Math.max(1, ...branches.map((b) => b.revenueValue));
+
+                            return branches.map((branch, index) => (
                                 <div key={index} className="performance-item-mini">
                                     <div className="branch-info-row">
                                         <span className="branch-name-text">{branch.branch_name}</span>
-                                        <span className="branch-value-text">₱{parseFloat(branch.revenue).toLocaleString()}</span>
+                                        <span className="branch-value-text">₱{branch.revenueValue.toLocaleString()}</span>
                                     </div>
                                     <div className="progress-bar-thin">
-                                        <div className="progress-bar-fill-thin" style={{ width: `${(parseFloat(branch.revenue) / 20000) * 100}%` }}></div>
+                                        <div
+                                            className="progress-bar-fill-thin"
+                                            style={{ width: `${Math.max(4, (branch.revenueValue / maxRevenue) * 100)}%` }}
+                                        ></div>
                                     </div>
                                 </div>
-                            ))}
-                        {((analyticsData?.branchPerformance || []).filter(branch => branch.branch_name && branch.branch_name.includes('V-luna')).length === 0) && (
+                            ));
+                        })()}
+                        {((analyticsData?.branchPerformance || []).filter(branch => branch.branch_name).length === 0) && (
                             <div style={{ padding: '20px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
-                                No performance data for V-luna branch.
+                                No branch performance data available.
                             </div>
                         )}
                     </div>

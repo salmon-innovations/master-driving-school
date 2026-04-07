@@ -261,14 +261,17 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                // Fetch branches
-                const branchResponse = await branchesAPI.getAll();
+                const [branchResponse, coursesResponse] = await Promise.all([
+                    branchesAPI.getAll(),
+                    coursesAPI.getAll()
+                ]);
+
                 if (branchResponse.success) {
                     setBranches(branchResponse.branches);
 
-                    // Staff/Admin with assigned branch: auto-select and lock their assigned branch
+                    // Admin with assigned branch: auto-select and lock their assigned branch
                     // Super admin or admin with all-branch scope: default to first branch and can change
-                    if ((adminProfile?.rawRole === 'staff' || (adminProfile?.rawRole === 'admin' && adminProfile?.branchId)) && adminProfile?.branchId) {
+                    if (adminProfile?.rawRole === 'admin' && adminProfile?.branchId) {
                         const userBranch = branchResponse.branches.find(b => b.id === adminProfile.branchId);
                         if (userBranch) {
                             setFormData(prev => {
@@ -294,12 +297,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     }
                 }
 
-                // Fetch courses
-                const coursesResponse = await coursesAPI.getAll();
                 if (coursesResponse.success) {
                     // Only show active courses
                     const activeCourses = coursesResponse.courses.filter(c => c.status === 'active');
-                    console.log('Fetched active courses:', activeCourses);
                     setCourses(activeCourses);
                 } else {
                     console.error('Failed to fetch courses:', coursesResponse);
@@ -466,7 +466,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 kind: 'B1B2',
                 label: 'B1 VAN / B2 L300',
                 fixedTransmission: null,
-                preferredTransmission: hasAT ? 'AT' : hasMT ? 'MT' : null,
+                preferredTransmission: null,
             };
         }
 
@@ -475,7 +475,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 kind: 'Tricycle',
                 label: `Tricycle${hasAT ? ' (AT)' : hasMT ? ' (MT)' : ''}`,
                 fixedTransmission: null,
-                preferredTransmission: hasAT ? 'AT' : hasMT ? 'MT' : null,
+                preferredTransmission: null,
             };
         }
 
@@ -484,15 +484,15 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 kind: 'Motorcycle',
                 label: `Motorcycle${hasAT ? ' (AT)' : hasMT ? ' (MT)' : ''}`,
                 fixedTransmission: null,
-                preferredTransmission: hasAT ? 'AT' : hasMT ? 'MT' : null,
+                preferredTransmission: null,
             };
         }
 
         if (hasAT) {
-            return { kind: 'CarAT', label: 'Car (AT)', fixedTransmission: null, preferredTransmission: 'AT' };
+            return { kind: 'CarAT', label: 'Car (AT)', fixedTransmission: null, preferredTransmission: null };
         }
         if (hasMT) {
-            return { kind: 'CarMT', label: 'Car (MT)', fixedTransmission: null, preferredTransmission: 'MT' };
+            return { kind: 'CarMT', label: 'Car (MT)', fixedTransmission: null, preferredTransmission: null };
         }
 
         return { kind: 'Car', label: 'Car', fixedTransmission: null, preferredTransmission: null };
@@ -521,6 +521,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         : [];
 
     const activePromoPdcCourse = promoPdcCourses.find(c => c._pdcKey === activePromoPdcCourseId) || promoPdcCourses[0] || null;
+    const activePromoPdcCourseKey = activePromoPdcCourse?._pdcKey || null;
 
     const activePromoPdcType = activePromoPdcCourse
         ? activePromoPdcCourse._pdcKind
@@ -529,7 +530,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const fixedPromoPdcTransmission = activePromoPdcCourse?._fixedTransmission || null;
     const effectivePromoPdcTransmission = fixedPromoPdcTransmission || promoPdcMotorType;
     const showsTransmissionSelector = ['Motorcycle', 'Car', 'CarAT', 'CarMT', 'Tricycle'].includes(activePromoPdcType);
-    const requiresTransmissionChoice = showsTransmissionSelector && !fixedPromoPdcTransmission && (activePromoPdcType === 'Motorcycle' || activePromoPdcType === 'Tricycle');
+    const requiresTransmissionChoice = showsTransmissionSelector && !fixedPromoPdcTransmission;
 
     const getIsPromoPdcComplete = (courseKey) => {
         const sel = promoPdcSelections[courseKey];
@@ -549,9 +550,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     }, [isPromo, promoPdcCourses, activePromoPdcCourseId]);
 
     useEffect(() => {
-        if (!isPromo || !activePromoPdcCourse) return;
+        if (!isPromo || !activePromoPdcCourseKey) return;
         isHydratingPromoPdcRef.current = true;
-        const saved = promoPdcSelections[activePromoPdcCourse._pdcKey];
+        const saved = promoPdcSelections[activePromoPdcCourseKey];
 
         if (!saved) {
             setFormData(prev => ({
@@ -562,7 +563,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             setPromoPdcDate(null);
             setPromoPdcDate2(null);
             setPromoPdcSelectingDay2(false);
-            setPromoPdcMotorType(activePromoPdcCourse?._preferredTransmission || null);
+            setPromoPdcMotorType(null);
             setTimeout(() => { isHydratingPromoPdcRef.current = false; }, 0);
             return;
         }
@@ -581,36 +582,45 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         setPromoPdcDate(saved.scheduleDate ? new Date(`${saved.scheduleDate}T00:00:00`) : null);
         setPromoPdcDate2(saved.promoPdcDate2 ? new Date(`${saved.promoPdcDate2}T00:00:00`) : null);
         setPromoPdcSelectingDay2(saved.selectingDay2 || false);
-        setPromoPdcMotorType(saved.transmission || saved.motorType || activePromoPdcCourse?._preferredTransmission || null);
+        setPromoPdcMotorType(saved.transmission || saved.motorType || null);
         setTimeout(() => { isHydratingPromoPdcRef.current = false; }, 0);
-    }, [isPromo, activePromoPdcCourse, promoPdcSelections, fixedPromoPdcTransmission]);
+    }, [isPromo, activePromoPdcCourseKey, promoPdcSelections, fixedPromoPdcTransmission]);
 
     useEffect(() => {
-        if (!isPromo || !activePromoPdcCourse) return;
+        if (!isPromo || !activePromoPdcCourseKey) return;
         if (isHydratingPromoPdcRef.current) return;
-        const courseKey = activePromoPdcCourse._pdcKey;
-        setPromoPdcSelections(prev => ({
-            ...prev,
-            [courseKey]: {
-                courseId: activePromoPdcCourse.id,
-                courseName: activePromoPdcCourse.name,
-                courseType: activePromoPdcType,
-                transmission: effectivePromoPdcTransmission || null,
-                motorType: effectivePromoPdcTransmission || null,
-                scheduleSlotId: formData.scheduleSlotId2,
-                scheduleDate: formData.scheduleDate2,
-                scheduleSession2: formData.scheduleSession2,
-                scheduleTime2: formData.scheduleTime2,
-                promoPdcSlotId2: formData.promoPdcSlotId2,
-                promoPdcDate2: formData.promoPdcDate2,
-                promoPdcSession2: formData.promoPdcSession2,
-                promoPdcTime2: formData.promoPdcTime2,
-                selectingDay2: promoPdcSelectingDay2,
+        const courseKey = activePromoPdcCourseKey;
+        const nextSelection = {
+            courseId: activePromoPdcCourse?.id,
+            courseName: activePromoPdcCourse?.name,
+            courseType: activePromoPdcType,
+            transmission: effectivePromoPdcTransmission || null,
+            motorType: effectivePromoPdcTransmission || null,
+            scheduleSlotId: formData.scheduleSlotId2,
+            scheduleDate: formData.scheduleDate2,
+            scheduleSession2: formData.scheduleSession2,
+            scheduleTime2: formData.scheduleTime2,
+            promoPdcSlotId2: formData.promoPdcSlotId2,
+            promoPdcDate2: formData.promoPdcDate2,
+            promoPdcSession2: formData.promoPdcSession2,
+            promoPdcTime2: formData.promoPdcTime2,
+            selectingDay2: promoPdcSelectingDay2,
+        };
+        setPromoPdcSelections(prev => {
+            const prevSelection = prev[courseKey];
+            if (prevSelection && JSON.stringify(prevSelection) === JSON.stringify(nextSelection)) {
+                return prev;
             }
-        }));
+            return {
+                ...prev,
+                [courseKey]: nextSelection
+            };
+        });
     }, [
         isPromo,
-        activePromoPdcCourse,
+        activePromoPdcCourseKey,
+        activePromoPdcCourse?.id,
+        activePromoPdcCourse?.name,
         activePromoPdcType,
         effectivePromoPdcTransmission,
         formData.scheduleSlotId2,
@@ -2097,14 +2107,20 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 const slotTx = (slot.transmission || '').toLowerCase().trim();
                 const slotCT = (slot.course_type || '').toLowerCase().trim();
                 
-                const isManual = slotTx.includes('manual') || slotTx === 'mt' || slotCT.includes('manual') || slotCT === 'mt';
-                const isAuto = slotTx.includes('automatic') || slotTx === 'at' || slotCT.includes('automatic') || slotCT === 'at';
-                const isUniversalTx = slotTx === 'both' || slotTx === 'any' || slotTx === 'all' || (!isManual && !isAuto);
+                const isManual = slotTx.includes('manual') || slotTx === 'mt';
+                const isAuto = slotTx.includes('automatic') || slotTx === 'at';
+                // Promo transmission selection should be strict: AT shows AT only, MT shows MT only.
+                const matchesStrictPromoTx = () => {
+                    if (effectivePromoPdcTransmission === 'AT') return isAuto;
+                    if (effectivePromoPdcTransmission === 'MT') return isManual;
+                    return true;
+                };
                 
                 const isMotoSlot = slotCT.includes('motorcycle') || slotCT.includes('moto') || slotCT.includes('bike');
                 const isTricycleSlot = slotCT.includes('tricycle') || slotCT.includes('a1');
                 const isB1B2Slot = slotCT.includes('b1') || slotCT.includes('b2') || slotCT.includes('van') || slotCT.includes('l300');
                 const isCarSlot = slotCT.includes('car') || isB1B2Slot || isTricycleSlot;
+                const isExplicitCarSlot = slotCT.includes('car') || slotCT.includes('sedan');
 
                 if (activePromoPdcType === 'B1B2') {
                     return isB1B2Slot;
@@ -2112,37 +2128,67 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
                 if (activePromoPdcType === 'Tricycle') {
                     if (!isTricycleSlot) return false;
-                    if (effectivePromoPdcTransmission === 'AT') return isUniversalTx || isAuto;
-                    if (effectivePromoPdcTransmission === 'MT') return isUniversalTx || isManual;
+                    if (effectivePromoPdcTransmission === 'AT' || effectivePromoPdcTransmission === 'MT') return matchesStrictPromoTx();
                     return true;
                 }
                 
                 if (activePromoPdcType === 'Motorcycle') {
                     if (isCarSlot) return false;
-                    if (effectivePromoPdcTransmission === 'MT') return isUniversalTx || isManual;
-                    if (effectivePromoPdcTransmission === 'AT') return isUniversalTx || isAuto;
+                    if (effectivePromoPdcTransmission === 'AT' || effectivePromoPdcTransmission === 'MT') return matchesStrictPromoTx();
                     return true;
                 }
-                if (activePromoPdcType === 'CarAT') {
+                if (activePromoPdcType === 'CarAT' || activePromoPdcType === 'CarMT' || activePromoPdcType === 'Car') {
                     if (isMotoSlot || isTricycleSlot || isB1B2Slot) return false;
-                    return isUniversalTx || isAuto;
-                }
-                if (activePromoPdcType === 'CarMT') {
-                    if (isMotoSlot || isTricycleSlot || isB1B2Slot) return false;
-                    return isUniversalTx || isManual;
-                }
-                if (activePromoPdcType === 'Car') {
-                    if (isMotoSlot || isTricycleSlot || isB1B2Slot) return false;
-                    if (effectivePromoPdcTransmission === 'AT') return isUniversalTx || isAuto;
-                    if (effectivePromoPdcTransmission === 'MT') return isUniversalTx || isManual;
+                    if (!isExplicitCarSlot) return false;
+
+                    // Mirror Motorcycle behavior: selected transmission decides what appears.
+                    // For CarAT/CarMT, default to their implied transmission only when no selection is set.
+                    const desiredTx = effectivePromoPdcTransmission || (
+                        activePromoPdcType === 'CarAT' ? 'AT' :
+                        activePromoPdcType === 'CarMT' ? 'MT' :
+                        null
+                    );
+
+                    if (desiredTx === 'AT') return isAuto;
+                    if (desiredTx === 'MT') return isManual;
                     return true;
                 }
                 return true;
             };
-            const promoPdcCalendarSlots = pdcAllSlots.filter(matchPdcSlot);
-            const promoPdcFilteredSlots = promoPdcRawSlots.filter(matchPdcSlot);
+            const normalizePromoSessionKey = (session) => {
+                const s = String(session || '').toLowerCase();
+                if (s.includes('morning')) return 'morning';
+                if (s.includes('afternoon')) return 'afternoon';
+                if (s.includes('whole')) return 'whole';
+                return s.trim();
+            };
+            const isPromoSessionTakenByOtherCourse = (slot) => {
+                if (!slot?.date || !slot?.session || !activePromoPdcCourseKey) return false;
+                const slotSessionKey = normalizePromoSessionKey(slot.session);
+                return Object.entries(promoPdcSelections).some(([courseKey, sel]) => {
+                    if (courseKey === activePromoPdcCourseKey) return false;
+                    const entries = [
+                        { date: sel?.scheduleDate, session: sel?.scheduleSession2 },
+                        { date: sel?.promoPdcDate2, session: sel?.promoPdcSession2 },
+                    ].filter(e => e.date && e.session);
+                    return entries.some(e => {
+                        if (e.date !== slot.date) return false;
+                        const takenSessionKey = normalizePromoSessionKey(e.session);
+                        // Whole day blocks all sessions on that date, and vice versa.
+                        if (takenSessionKey === 'whole' || slotSessionKey === 'whole') return true;
+                        return takenSessionKey === slotSessionKey;
+                    });
+                });
+            };
+            const promoPdcCalendarSlots = pdcAllSlots
+                .filter(matchPdcSlot)
+                .filter(s => !isPromoSessionTakenByOtherCourse(s));
+            const promoPdcFilteredSlots = promoPdcRawSlots
+                .filter(matchPdcSlot)
+                .filter(s => !isPromoSessionTakenByOtherCourse(s));
             const promoPdcDay1Session = formData.scheduleSession2;
             const promoPdcFiltered2Slots = promoPdcRawSlots2.filter(matchPdcSlot)
+                .filter(s => !isPromoSessionTakenByOtherCourse(s))
                 .filter(s => !promoPdcDay1Session || s.session === promoPdcDay1Session);
             // PDC calendar helpers
             const pdcYear = promoPdcCalMonth.getFullYear();
@@ -2160,7 +2206,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     if (tdcSlot) {
                         const tdcEndDate = tdcSlot.end_date || tdcSlot.date;
                         const d = new Date(tdcEndDate + 'T00:00:00');
-                        d.setDate(d.getDate() + 2);
+                        // Keep a full 2-day gap after TDC completion before PDC starts.
+                        // Example: TDC ends Apr 7 -> earliest PDC is Apr 10.
+                        d.setDate(d.getDate() + 3);
                         return formatLocalDate(d);
                     }
                 }
@@ -2179,6 +2227,10 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 showNotification('TDC schedule selected! Please select a PDC schedule.', 'success');
             };
             const handlePromoPdcDay1Select = (slot) => {
+                if (isPromoSessionTakenByOtherCourse(slot)) {
+                    showNotification('This date/session is already used by another selected PDC course.', 'warning');
+                    return;
+                }
                 const pdcDateStr = promoPdcDate
                     ? `${promoPdcDate.getFullYear()}-${String(promoPdcDate.getMonth() + 1).padStart(2, '0')}-${String(promoPdcDate.getDate()).padStart(2, '0')}`
                     : slot.date;
@@ -2199,6 +2251,10 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 }
             };
             const handlePromoPdcDay2Select = (slot) => {
+                if (isPromoSessionTakenByOtherCourse(slot)) {
+                    showNotification('This date/session is already used by another selected PDC course.', 'warning');
+                    return;
+                }
                 if (promoPdcDay1Session && slot.session !== promoPdcDay1Session) {
                     showNotification(`Day 2 must match Day 1 session: ${promoPdcDay1Session}`, 'warning');
                     return;
@@ -2630,19 +2686,21 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 </>
                             )}
 
-                            {promoPdcSelectingDay2 && (
+                            {(promoPdcSelectingDay2 || !!formData.promoPdcSlotId2) && (
                                 <>
-                                    <div className="schedule-banner schedule-banner--info" style={{ marginTop: '16px' }}>
-                                        <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                                        <div className="schedule-banner__body">
-                                            <div className="schedule-banner__title">Day 2 Selection Required</div>
-                                            <div className="schedule-banner__desc">Now pick a date for <strong>Day 2</strong>.</div>
+                                    {!formData.promoPdcSlotId2 && (
+                                        <div className="schedule-banner schedule-banner--info" style={{ marginTop: '16px' }}>
+                                            <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                                            <div className="schedule-banner__body">
+                                                <div className="schedule-banner__title">Day 2 Selection Required</div>
+                                                <div className="schedule-banner__desc">Now pick a date for <strong>Day 2</strong>.</div>
+                                            </div>
                                         </div>
-                                    </div>
+                                    )}
                                     <div style={{ marginTop: '16px' }}>
                                         {renderPromoCalendar(promoPdcDay2CalMonth, setPromoPdcDay2CalMonth, (d) => setPromoPdcDate2(d), promoPdcDate2, formData.scheduleDate2, promoPdcCalendarSlots)}
                                     </div>
-                                    {promoPdcDate2 && (
+                                    {promoPdcDate2 && !formData.promoPdcSlotId2 && (
                                         <div className="slots-section">
                                             <h4 className="slots-header">Day 2 Slots — {promoPdcDate2.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</h4>
                                             {loadingPromoPdc2 ? (
@@ -3330,7 +3388,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                                 zipCode: (branch && !prev.zipCode) ? getZipForBranch(branch.name) : prev.zipCode
                                             }));
                                         }}
-                                        disabled={adminProfile?.rawRole === 'staff' || (adminProfile?.rawRole === 'admin' && !!adminProfile?.branchId)}
+                                        disabled={adminProfile?.rawRole === 'admin' && !!adminProfile?.branchId}
                                     >
                                         {branches.map(b => <option key={b.id} value={b.id}>{formatBranchName(b.name)}</option>)}
                                     </select>
@@ -3531,21 +3589,30 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                     </>
                                 )}
 
-                                <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
-                                <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>PDC{formData.promoPdcSlotId2 ? ' — Day 1' : ''}:</p>
-                                <p><strong>Date:</strong> {fmtDate(formData.scheduleDate2)}</p>
-                                <p><strong>Session:</strong> {formData.scheduleSession2 || 'Not selected'}</p>
-                                <p><strong>Time:</strong> {formData.scheduleTime2 || 'Not selected'}</p>
+                                {(promoPdcCourses.length > 0 ? promoPdcCourses : (formData.course?._pdcCourse ? [formData.course._pdcCourse] : [])).map((course, idx) => {
+                                    const key = getPromoPdcCourseKey(course);
+                                    const sel = promoPdcSelections[key] || {};
+                                    const courseLabel = course?.shortName || course?.name || `PDC ${idx + 1}`;
+                                    return (
+                                        <div key={`sched-${key}-${idx}`}>
+                                            <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
+                                            <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>{courseLabel} — Day 1:</p>
+                                            <p><strong>Date:</strong> {fmtDate(sel.scheduleDate)}</p>
+                                            <p><strong>Session:</strong> {sel.scheduleSession2 || 'Not selected'}</p>
+                                            <p><strong>Time:</strong> {sel.scheduleTime2 || 'Not selected'}</p>
 
-                                {formData.promoPdcSlotId2 && (
-                                    <>
-                                        <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
-                                        <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>PDC — Day 2:</p>
-                                        <p><strong>Date:</strong> {fmtDate(formData.promoPdcDate2)}</p>
-                                        <p><strong>Session:</strong> {formData.promoPdcSession2 || 'Not selected'}</p>
-                                        <p><strong>Time:</strong> {formData.promoPdcTime2 || 'Not selected'}</p>
-                                    </>
-                                )}
+                                            {sel.promoPdcSlotId2 && (
+                                                <>
+                                                    <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
+                                                    <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>{courseLabel} — Day 2:</p>
+                                                    <p><strong>Date:</strong> {fmtDate(sel.promoPdcDate2)}</p>
+                                                    <p><strong>Session:</strong> {sel.promoPdcSession2 || 'Not selected'}</p>
+                                                    <p><strong>Time:</strong> {sel.promoPdcTime2 || 'Not selected'}</p>
+                                                </>
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </>
                         ) : formData.scheduleDate2 ? (
                             <>

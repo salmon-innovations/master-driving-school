@@ -84,18 +84,6 @@ const ADMIN_DEFAULT_PERMISSIONS_BY_ROLE = {
         'accounts.config.tab.emailcontent',
         'accounts.config.tab.settings',
     ],
-    staff: [
-        'operations.schedules.manage',
-        'operations.schedules.tab.schedule',
-        'operations.schedules.tab.summary',
-        'operations.schedules.tab.noshow',
-        'operations.bookings.manage',
-        'operations.walk_in.manage',
-        'operations.sales.manage',
-        'operations.crm.manage',
-        'operations.best_selling_courses.view',
-        'operations.news.manage',
-    ],
 };
 
 const ADMIN_TAB_PERMISSION_MAP = {
@@ -371,8 +359,8 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         gender: user.gender || null,
                         role: user.role === 'super_admin' ? 'Super Admin' :
                               user.role === 'admin' ? 'Admin' :
-                              user.role === 'staff' ? 'Staff' : 'User',
-                        rawRole: user.role || 'staff',
+                            'User',
+                        rawRole: user.role || 'admin',
                         avatar: user.avatar || null,
                     });
                     setUserPermissions(normalizePermissions(user.permissions));
@@ -470,7 +458,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                 
                 // Determine effective branch ID based on role
                 let effectiveBranchId = bestSellingBranchId;
-                if (adminProfile.rawRole === 'admin' || adminProfile.rawRole === 'staff') {
+                if (adminProfile.rawRole === 'admin') {
                     effectiveBranchId = adminProfile.branchId;
                 } else if (!effectiveBranchId) {
                     effectiveBranchId = undefined; // All branches for super_admin
@@ -776,9 +764,29 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
     const formatCourseNameShort = (name) => {
         if (!name) return '';
-        // Try extracting acronyms from parenthesis (e.g., "(TDC)", "(PDC)")
-        const match = name.match(/\(([^)]+)\)/);
-        if (match) return match[1]; // Returns "TDC" or "PDC" etc.
+        const source = String(name);
+        const upper = source.toUpperCase();
+        const parenMatches = [...source.matchAll(/\(([^)]+)\)/g)].map((m) => String(m[1] || '').trim());
+
+        if (upper.includes('TDC')) return 'TDC';
+
+        if (upper.includes('PDC')) {
+            const variant = parenMatches.find((v) => {
+                const vu = v.toUpperCase();
+                return vu !== 'PDC' && /CAR|MOTOR|TRICYCLE|A1|B1|B2|VAN|L300|MANUAL|AUTOMATIC/.test(vu);
+            }) || parenMatches[parenMatches.length - 1] || 'PDC';
+
+            const compactVariant = variant
+                .replace(/\s+/g, ' ')
+                .replace(/^B1\s*-\s*VAN\s*\/\s*B2\s*-\s*L300$/i, 'B1/B2')
+                .replace(/^MOTORCYCLE$/i, 'MOTO')
+                .replace(/^TRICYCLE$/i, 'TRI')
+                .replace(/^AUTOMATIC$/i, 'AT')
+                .replace(/^MANUAL$/i, 'MT');
+
+            return compactVariant.toUpperCase() === 'PDC' ? 'PDC' : `PDC-${compactVariant}`;
+        }
+
         // Fallback: take first 15 chars
         return name.length > 15 ? name.substring(0, 15) + '...' : name;
     };
@@ -786,7 +794,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     const renderBestSellingCoursesSection = () => {
         // Find current branch name for display
         let activeBranchName = 'All Branches';
-        if (adminProfile.rawRole === 'admin' || adminProfile.rawRole === 'staff') {
+        if (adminProfile.rawRole === 'admin') {
             activeBranchName = adminProfile.branch || 'Assigned Branch';
         } else if (bestSellingBranchId) {
             const rawName = adminBranches.find(b => String(b.id) === String(bestSellingBranchId))?.name || 'Selected';
@@ -1144,7 +1152,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                     </div>
 
                     <div className="header-right">
-                        {(adminProfile.rawRole === 'admin' || adminProfile.rawRole === 'staff') && (
+                        {(adminProfile.rawRole === 'admin') && (
                             <div
                                 style={{
                                     display: 'inline-flex',
@@ -1348,7 +1356,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                     <p className="stat-subtitle">Monthly revenue</p>
                                 </div>
                                 <div className="stat-icon green">
-                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="10" y1="1" x2="10" y2="23"></line><line x1="6" y1="6" x2="16" y2="6"></line><line x1="6" y1="9" x2="16" y2="9"></line><path d="M10 4h4a4 4 0 0 1 0 8h-4"></path></svg>
                                 </div>
                             </div>
 

@@ -46,7 +46,7 @@ function Home({ onNavigate, isLoggedIn }) {
           setPromotionalVideos(response.videos || [])
         }
       } catch (error) {
-        console.error('Failed to fetch promotional videos:', error)
+        setPromotionalVideos([])
       }
     }
 

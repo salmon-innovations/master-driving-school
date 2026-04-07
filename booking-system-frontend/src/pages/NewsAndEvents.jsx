@@ -55,9 +55,39 @@ function NewsAndEvents() {
     try {
       if (video.id) {
         await newsAPI.incrementInteraction(video.id)
+        setPromotionalVideos((prev) =>
+          prev.map((item) =>
+            item.id === video.id
+              ? { ...item, interactions: Number(item.interactions || 0) + 1 }
+              : item
+          )
+        )
       }
     } catch (error) {
       console.error('Failed to increment view:', error)
+    }
+  }
+
+  const handleNewsInteraction = async (itemId) => {
+    try {
+      if (!itemId) return
+      await newsAPI.incrementInteraction(itemId)
+      setNewsItems((prev) =>
+        prev.map((item) =>
+          item.id === itemId
+            ? { ...item, interactions: Number(item.interactions || 0) + 1 }
+            : item
+        )
+      )
+      setEvents((prev) =>
+        prev.map((item) =>
+          item.id === itemId
+            ? { ...item, interactions: Number(item.interactions || 0) + 1 }
+            : item
+        )
+      )
+    } catch (error) {
+      console.error('Failed to increment interaction:', error)
     }
   }
 
@@ -190,7 +220,10 @@ function NewsAndEvents() {
                         <p className="text-[10px] sm:text-xs font-bold text-gray-400 mb-2 sm:mb-3">{formatDate(item.published_at || item.created_at)}</p>
                         <h3 className="text-lg sm:text-xl font-black text-gray-900 mb-3 sm:mb-4 line-clamp-2 group-hover:text-[#2157da] transition-colors leading-tight min-h-[3rem]">{item.title}</h3>
                         <p className="text-gray-500 text-xs sm:text-sm leading-relaxed mb-6 sm:mb-8 line-clamp-3 flex-grow">{item.description || item.content}</p>
-                        <button className="flex items-center gap-2 text-[#2157da] font-black text-[10px] sm:text-xs tracking-widest uppercase group/btn mt-auto">
+                        <button
+                          className="flex items-center gap-2 text-[#2157da] font-black text-[10px] sm:text-xs tracking-widest uppercase group/btn mt-auto"
+                          onClick={() => handleNewsInteraction(item.id)}
+                        >
                           Read Story
                           <div className="w-4 sm:w-6 h-[1px] lg:h-[2px] bg-[#2157da] group-hover/btn:w-8 sm:group-hover/btn:w-10 transition-all"></div>
                         </button>
@@ -224,7 +257,10 @@ function NewsAndEvents() {
                         </div>
                         <p className="text-gray-500 text-xs sm:text-sm leading-relaxed max-w-2xl mx-auto md:mx-0">{event.description || event.content}</p>
                       </div>
-                      <button className="w-full md:w-auto px-6 sm:px-8 py-3.5 sm:py-4 bg-gray-900 text-white rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-[11px] tracking-widest uppercase hover:bg-[#2157da] transition-all shadow-lg hover:shadow-xl shadow-gray-200 shrink-0">
+                      <button
+                        className="w-full md:w-auto px-6 sm:px-8 py-3.5 sm:py-4 bg-gray-900 text-white rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-[11px] tracking-widest uppercase hover:bg-[#2157da] transition-all shadow-lg hover:shadow-xl shadow-gray-200 shrink-0"
+                        onClick={() => handleNewsInteraction(event.id)}
+                      >
                         Join Event
                       </button>
                     </div>

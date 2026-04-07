@@ -50,6 +50,7 @@ const NewsEvents = () => {
             if (newsRes.success) {
                 const formattedNews = newsRes.news.map(n => ({
                     ...n,
+                    interactionsCount: Number(n.interactions || 0),
                     date: new Date(n.published_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
                     tagColor: getTagColor(n.tag),
                     image_url: n.media_url || n.image_url
@@ -187,11 +188,13 @@ const NewsEvents = () => {
         });
     }, [newsData, newsSearchTerm, activeNewsCategory]);
 
+    const totalEngagement = newsData.reduce((sum, item) => sum + Number(item.interactionsCount || 0), 0);
+
     const stats = [
         { label: 'Published News', value: newsData.length, icon: '📰', color: '#eff6ff' },
         { label: 'Upcoming Events', value: newsData.filter(n => n.tag === 'EVENT').length, icon: '📅', color: '#f0fdf4' },
         { label: 'Promotional Videos', value: newsData.filter(n => n.type === 'Promotional Video').length, icon: '🎥', color: '#fff7ed' },
-        { label: 'Total Engagement', value: '4.5k', icon: '🔥', color: '#fef2f2' },
+        { label: 'Total Engagement', value: totalEngagement.toLocaleString(), icon: '🔥', color: '#fef2f2' },
     ];
 
     return (
@@ -310,7 +313,7 @@ const NewsEvents = () => {
                                 <h3>{news.title}</h3>
                                 <p>{news.description}</p>
                                 <div className="card-footer-prime">
-                                    <span className="date-meta">{new Date(news.published_at).toLocaleDateString()} • {news.interactions || '0 views'}</span>
+                                    <span className="date-meta">{new Date(news.published_at).toLocaleDateString()} • {Number(news.interactionsCount || 0).toLocaleString()} views</span>
                                     <div style={{ display: 'flex', gap: '15px' }}>
                                         <span className="edit-link" onClick={() => handleBroadcast(news.id)} style={{ color: '#10b981' }}>Email All</span>
                                         <span className="edit-link" onClick={() => handleOpenModal(news)}>Modify</span>
@@ -382,7 +385,7 @@ const NewsEvents = () => {
                                         <h3>{video.title}</h3>
                                         <p>{video.description}</p>
                                         <div className="card-footer-prime" style={{ marginTop: 'auto', paddingTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <span className="date-meta">{new Date(video.published_at).toLocaleDateString()} • {video.interactions || '0 views'}</span>
+                                            <span className="date-meta">{new Date(video.published_at).toLocaleDateString()} • {Number(video.interactionsCount || 0).toLocaleString()} views</span>
                                             <div style={{ display: 'flex', gap: '15px' }}>
                                                 <span className="edit-link" onClick={() => handleBroadcast(video.id)} style={{ color: '#10b981' }}>Email All</span>
                                                 <span className="edit-link" onClick={() => handleOpenModal(video)}>Modify</span>

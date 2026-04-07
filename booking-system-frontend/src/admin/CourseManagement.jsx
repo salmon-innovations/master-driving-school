@@ -18,12 +18,15 @@ const normalizePermissionList = (permissions) => {
 };
 
 const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', currentUserBranchId = null }) => {
+    const COURSES_CACHE_KEY = 'admin_courses_cache_v1';
+    const COURSES_CACHE_TTL_MS = 3 * 60 * 1000;
     const { showNotification } = useNotification();
     const [searchTerm, setSearchTerm] = useState('');
     const [courses, setCourses] = useState([]);
     const [loading, setLoading] = useState(false);
     const [showModal, setShowModal] = useState(false);
     const [editingCourse, setEditingCourse] = useState(null);
+    const [submitLoading, setSubmitLoading] = useState(false);
     const [coursePage, setCoursePage] = useState(1);
     const [courseData, setCourseData] = useState({
         name: '',
@@ -52,7 +55,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
 
     const normalizedRole = String(currentUserRole || '').toLowerCase();
     const isSuperAdmin = normalizedRole === 'super_admin';
-    const isBranchScopedUser = (normalizedRole === 'staff' || normalizedRole === 'admin') && !!currentUserBranchId;
+    const isBranchScopedUser = normalizedRole === 'admin' && !!currentUserBranchId;
     const permissionSet = new Set(normalizePermissionList(currentUserPermissions));
     const canAccessCourseTab = (tabKey) => {
         if (isSuperAdmin) return true;
@@ -84,7 +87,20 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
     }, [isBranchScopedUser, currentUserBranchId]);
 
     const fetchCourses = async () => {
-        setLoading(true);
+        let usedCache = false;
+        try {
+            const cachedRaw = sessionStorage.getItem(COURSES_CACHE_KEY);
+            if (cachedRaw) {
+                const cached = JSON.parse(cachedRaw);
+                if (cached?.ts && Array.isArray(cached?.data) && (Date.now() - cached.ts) < COURSES_CACHE_TTL_MS) {
+                    setCourses(cached.data);
+                    setLoading(false);
+                    usedCache = true;
+                }
+            }
+        } catch (_) {}
+
+        if (!usedCache) setLoading(true);
         try {
             const response = await coursesAPI.getAll();
             // Process courses - parse image_url if it's JSON
@@ -134,9 +150,14 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                 };
             });
             setCourses(processedCourses);
+            try {
+                sessionStorage.setItem(COURSES_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: processedCourses }));
+            } catch (_) {}
         } catch (error) {
             console.error('Error fetching courses:', error);
-            showNotification('Failed to load courses. Please try again.', 'error');
+            if (!usedCache) {
+                showNotification('Failed to load courses. Please try again.', 'error');
+            }
         } finally {
             setLoading(false);
         }
@@ -251,6 +272,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
 
     const handleAddCourse = async (e) => {
         e.preventDefault();
+        if (submitLoading) return;
 
         // Validate main price
         if (!courseData.price || parseFloat(courseData.price) <= 0) {
@@ -281,6 +303,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
         }
 
         try {
+            setSubmitLoading(true);
             // Process pricing variations to ensure prices are numbers
             const processedPricingData = pricingVariations.length > 0
                 ? pricingVariations.map(v => ({
@@ -329,6 +352,8 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
         } catch (error) {
             console.error('Error saving course:', error);
             showNotification(error.message || 'Failed to save course. Please try again.', 'error');
+        } finally {
+            setSubmitLoading(false);
         }
     };
 
@@ -377,6 +402,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
     };
 
     const handleCloseModal = () => {
+        if (submitLoading) return;
         setShowModal(false);
         setEditingCourse(null);
         setCourseData({
@@ -1397,7 +1423,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                 </div>
                             </div>
                             <div className="modal-header-right">
-                                <button className="close-modal" onClick={handleCloseModal}>
+                                <button className="close-modal" onClick={handleCloseModal} disabled={submitLoading}>
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                                 </button>
                             </div>
@@ -1948,6 +1974,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                 <button
                                     type="button"
                                     onClick={handleCloseModal}
+                                    disabled={submitLoading}
                                     style={{
                                         padding: '12px 24px',
                                         background: 'var(--card-bg)',
@@ -1956,13 +1983,15 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                         borderRadius: '10px',
                                         fontSize: '0.95rem',
                                         fontWeight: '600',
-                                        cursor: 'pointer'
+                                        cursor: submitLoading ? 'not-allowed' : 'pointer',
+                                        opacity: submitLoading ? 0.7 : 1
                                     }}
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
+                                    disabled={submitLoading}
                                     style={{
                                         padding: '12px 24px',
                                         background: 'var(--primary-color)',
@@ -1971,10 +2000,11 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                         borderRadius: '10px',
                                         fontSize: '0.95rem',
                                         fontWeight: '600',
-                                        cursor: 'pointer'
+                                        cursor: submitLoading ? 'not-allowed' : 'pointer',
+                                        opacity: submitLoading ? 0.85 : 1
                                     }}
                                 >
-                                    {editingCourse ? 'Update Course' : 'Create Course'}
+                                    {submitLoading ? (editingCourse ? 'Updating Course...' : 'Creating Course...') : (editingCourse ? 'Update Course' : 'Create Course')}
                                 </button>
                             </div>
                         </form>

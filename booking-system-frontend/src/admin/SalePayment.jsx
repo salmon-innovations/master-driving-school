@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './css/sale.css';
 import { adminAPI, coursesAPI, branchesAPI, authAPI } from '../services/api';
-const logo = `${window.location.origin}/images/logo.png`;
+const logo = `${window.location.origin}/images/Master-logo.png`;
 import Pagination from './components/Pagination';
 import {
     BarChart,
@@ -241,7 +241,7 @@ const SalePayment = () => {
     // Auth / role state
     const [userRole, setUserRole] = useState(null);
     const [userBranchId, setUserBranchId] = useState(null);
-    const isBranchScopedUser = userRole === 'staff' || (userRole === 'admin' && !!userBranchId);
+    const isBranchScopedUser = userRole === 'admin' && !!userBranchId;
 
     // Pagination states
     const SP_PAGE_SIZE = 10;
@@ -280,7 +280,7 @@ const SalePayment = () => {
                         date: t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : 'N/A',
                         amount: `P ${parseFloat(t.amount || 0).toLocaleString()}`,
                         rawAmount: parseFloat(t.amount || 0),
-                        method: t.payment_method || 'N/A',
+                        method: t.payment_method || linkedBooking?.payment_method || 'N/A',
                         status: t.status || 'Collectable',
                         branch: t.branch_name || 'Unknown',
                         searchIndex: [
@@ -375,14 +375,14 @@ const SalePayment = () => {
                     const branchId = profileRes.user.branchId;
                     setUserRole(role);
                     setUserBranchId(branchId);
-                    if ((role === 'staff' || (role === 'admin' && branchId)) && branchId) {
-                        // Lock branch filter to assigned branch for staff and branch-assigned admin
+                    if (role === 'admin' && branchId) {
+                        // Lock branch filter to assigned branch for branch-assigned admin
                         const branchRes = await branchesAPI.getAll();
                         if (branchRes.success && branchRes.branches) {
-                            const staffBranch = branchRes.branches.find(b => String(b.id) === String(branchId));
-                            if (staffBranch) {
-                                setBranchesList([staffBranch]);
-                                setBranchFilter(staffBranch.name);
+                            const assignedBranch = branchRes.branches.find(b => String(b.id) === String(branchId));
+                            if (assignedBranch) {
+                                setBranchesList([assignedBranch]);
+                                setBranchFilter(assignedBranch.name);
                             }
                         }
                     }
@@ -578,13 +578,22 @@ const SalePayment = () => {
         { name: 'Cash',    value: 0, color: '#64748b' },
     ];
 
-    const totalPayments = pageFilteredHistory.filter(t => isCompletedPaymentStatus(t.status)).length;
+    const totalPayments = pageFilteredHistory.filter(t => isRecordedPaymentStatus(t.status)).length;
     if (totalPayments > 0) {
         pageFilteredHistory.forEach(t => {
-            if (!isCompletedPaymentStatus(t.status)) return;
-            const method = (t.method || '').trim();
-            const found = paymentMethods.find(pm => pm.name.toLowerCase() === method.toLowerCase());
-            if (found) found.value += 1;
+            if (!isRecordedPaymentStatus(t.status)) return;
+
+            const method = String(t.method || '').trim().toLowerCase();
+            let bucket = null;
+            if (method.includes('cash')) {
+                bucket = paymentMethods.find(pm => pm.name === 'Cash');
+            } else if (method.includes('starpay') || method.includes('star pay')) {
+                bucket = paymentMethods.find(pm => pm.name === 'StarPay');
+            } else {
+                bucket = paymentMethods.find(pm => pm.name.toLowerCase() === method);
+            }
+
+            if (bucket) bucket.value += 1;
         });
         paymentMethods.forEach(pm => {
             pm.value = Math.round((pm.value / totalPayments) * 100);
@@ -717,6 +726,11 @@ const SalePayment = () => {
 
     const handlePrint = (data = transactions, title = "RECENT TRANSACTIONS") => {
         const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+            setReceiptToast({ msg: 'Print popup was blocked. Please allow popups and try again.', type: 'error' });
+            setTimeout(() => setReceiptToast(null), 4000);
+            return;
+        }
         const timestamp = new Date().toLocaleString();
         const isUsers = title.includes('USERS');
         const totalAmount = isUsers
@@ -810,19 +824,35 @@ const SalePayment = () => {
                 <div class="footer">
                     Total Transactions: ${data.length} | Master Driving School Management System
                 </div>
-                <script>
-                    window.onload = () => { window.print(); window.close(); }
-                </script>
             </body>
             </html>
         `;
 
         printWindow.document.write(html);
         printWindow.document.close();
+
+        let didPrint = false;
+        const triggerPrint = () => {
+            if (didPrint || printWindow.closed) return;
+            didPrint = true;
+            printWindow.focus();
+            printWindow.print();
+            setTimeout(() => {
+                if (!printWindow.closed) printWindow.close();
+            }, 250);
+        };
+
+        printWindow.onload = triggerPrint;
+        setTimeout(triggerPrint, 900);
     };
 
     const handlePrintReceipt = (txn) => {
         const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+            setReceiptToast({ msg: 'Print popup was blocked. Please allow popups and try again.', type: 'error' });
+            setTimeout(() => setReceiptToast(null), 4000);
+            return;
+        }
         const timestamp = new Date().toLocaleString();
         const breakdown = computeReceiptBreakdown(txn, coursesList);
         const isCollectable = String(txn?.status || '').toLowerCase() === 'collectable';
@@ -837,32 +867,43 @@ const SalePayment = () => {
             <head>
                 <title>OFFICIAL RECEIPT - ${txn.id}</title>
                 <style>
-                    body { font-family: 'Segoe UI', Arial, sans-serif; padding: 20px; color: #1e293b; max-width: 500px; margin: 0 auto; border: 1px dashed #cbd5e1; }
-                    .header { border-bottom: 2px solid #1a4fba; padding-bottom: 15px; margin-bottom: 20px; display: flex; align-items: center; gap: 15px; }
-                    .header img { width: 55px; height: 55px; border-radius: 8px; }
+                    body { font-family: 'Segoe UI', Arial, sans-serif; padding: 14px; color: #1e293b; max-width: 500px; margin: 0 auto; border: 1px dashed #cbd5e1; }
+                    .header { border-bottom: 2px solid #1a4fba; padding-bottom: 10px; margin-bottom: 12px; display: flex; align-items: center; gap: 12px; }
+                    .header img { width: 48px; height: 48px; border-radius: 8px; }
                     .header-text { text-align: left; }
-                    .header h1 { font-size: 16pt; color: #1a4fba; margin: 0; line-height: 1.2; }
-                    .header p { font-size: 8pt; color: #64748b; margin: 1px 0; }
-                    .receipt-title { text-align: center; font-weight: bold; font-size: 14pt; margin: 15px 0; border-bottom: 1px solid #e2e8f0; padding-bottom: 5px; }
-                    .info-row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 10pt; }
+                    .header h1 { font-size: 14pt; color: #1a4fba; margin: 0; line-height: 1.15; }
+                    .header p { font-size: 7.5pt; color: #64748b; margin: 1px 0; }
+                    .receipt-title { text-align: center; font-weight: bold; font-size: 12pt; margin: 10px 0 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+                    .info-row { display: flex; justify-content: space-between; margin-bottom: 7px; font-size: 9.2pt; }
                     .info-label { color: #64748b; }
                     .info-value { font-weight: 600; color: #1e293b; }
-                    .amount-box { background: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: center; border: 1px solid #e2e8f0; }
-                    .amount-label { font-size: 9pt; color: #64748b; margin-bottom: 5px; }
-                    .amount-value { font-size: 20pt; font-weight: 800; color: #1a4fba; }
-                    .status-tag { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 9pt; font-weight: bold; text-transform: uppercase; }
+                    .amount-box { background: #f8fafc; padding: 10px; border-radius: 8px; margin: 12px 0 8px; text-align: center; border: 1px solid #e2e8f0; }
+                    .amount-label { font-size: 8pt; color: #64748b; margin-bottom: 4px; }
+                    .amount-value { font-size: 16pt; font-weight: 800; color: #1a4fba; }
+                    .status-tag { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 8pt; font-weight: bold; text-transform: uppercase; }
                     .status-success { background: #dcfce7; color: #16a34a; }
                     .status-collectable { background: #ffedd5; color: #ea580c; }
-                    .breakdown { margin-top: 18px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
-                    .breakdown-head { background: #f8fafc; color: #64748b; text-align: center; padding: 8px; font-size: 9pt; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-                    .line { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; font-size: 10pt; border-top: 1px dashed #e2e8f0; }
+                    .breakdown { margin-top: 10px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+                    .breakdown-head { background: #f8fafc; color: #64748b; text-align: center; padding: 6px; font-size: 8pt; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+                    .line { display: flex; justify-content: space-between; gap: 10px; padding: 6px 10px; font-size: 9pt; border-top: 1px dashed #e2e8f0; }
                     .line:first-of-type { border-top: none; }
                     .line-strong { font-weight: 700; }
                     .line-discount { color: #dc2626; background: #fef2f2; }
-                    .line-total { font-weight: 800; font-size: 11pt; }
+                    .line-total { font-weight: 800; font-size: 10pt; }
                     .line-remaining { color: #ea580c; font-weight: 800; }
-                    .footer { text-align: center; margin-top: 30px; font-size: 8pt; color: #94a3b8; line-height: 1.4; }
-                    @media print { body { border: none; } }
+                    .footer { text-align: center; margin-top: 10px; font-size: 7.5pt; color: #94a3b8; line-height: 1.3; }
+                    @media print {
+                        @page { size: A4 portrait; margin: 6mm; }
+                        body { border: none; padding: 8px; max-width: none; }
+                        .header { padding-bottom: 8px; margin-bottom: 8px; }
+                        .info-row { margin-bottom: 5px; font-size: 8.8pt; }
+                        .breakdown { margin-top: 8px; }
+                        .line { padding: 5px 8px; font-size: 8.6pt; }
+                        .amount-box { padding: 8px; margin: 10px 0 6px; }
+                        .amount-value { font-size: 15pt; }
+                        .footer { margin-top: 8px; font-size: 7pt; }
+                        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                    }
                 </style>
             </head>
             <body>
@@ -935,13 +976,26 @@ const SalePayment = () => {
                     Keep this receipt for your enrollment records.<br>
                     Generated on ${timestamp}
                 </div>
-                <script>window.onload = () => { window.print(); window.close(); }</script>
             </body>
             </html>
         `;
 
         printWindow.document.write(html);
         printWindow.document.close();
+
+        let didPrint = false;
+        const triggerPrint = () => {
+            if (didPrint || printWindow.closed) return;
+            didPrint = true;
+            printWindow.focus();
+            printWindow.print();
+            setTimeout(() => {
+                if (!printWindow.closed) printWindow.close();
+            }, 250);
+        };
+
+        printWindow.onload = triggerPrint;
+        setTimeout(triggerPrint, 900);
     };
 
     const handleExport = (data = transactions, title = "SALES REPORT") => {
@@ -972,9 +1026,6 @@ const SalePayment = () => {
                 </style>
             </head>
             <body>
-                <div style="text-align: center; margin-bottom: 20px;">
-                    <img src="${logo}" style="width: 80px; height: 80px; border-radius: 12px; margin-bottom: 10px;">
-                </div>
                 <table>
                     <tr><td colspan="${colCount}" class="title">MASTER DRIVING SCHOOL - ${title}</td></tr>
                     <tr><td colspan="${colCount}" class="meta">Period: ${period} | Generated on: ${timestamp}</td></tr>

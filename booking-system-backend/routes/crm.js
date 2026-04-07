@@ -23,10 +23,10 @@ const {
 } = require('../controllers/crmController');
 const { authenticateToken } = require('../middleware/auth');
 
-// Middleware to check staff privileges
+// Middleware to check admin privileges
 const isAuthorized = (req, res, next) => {
-  if (!req.user || !['admin', 'staff'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Access denied. Staff privileges required.' });
+  if (!req.user || !['admin', 'super_admin'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
   }
   next();
 };

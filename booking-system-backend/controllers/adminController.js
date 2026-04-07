@@ -110,18 +110,6 @@ const ROLE_PERMISSION_PRESETS = {
     'accounts.users.edit',
     'accounts.users.reset_password',
   ],
-  staff: [
-    'operations.schedules.manage',
-    'operations.schedules.tab.schedule',
-    'operations.schedules.tab.summary',
-    'operations.schedules.tab.noshow',
-    'operations.bookings.manage',
-    'operations.walk_in.manage',
-    'operations.sales.manage',
-    'operations.crm.manage',
-    'operations.best_selling_courses.view',
-    'operations.news.manage',
-  ],
 };
 
 const ensureUserPermissionsColumn = async () => {
@@ -167,7 +155,7 @@ const getUserBranchScope = async (user = {}) => {
     return { role, branchId, canViewAll: !branchId };
   }
 
-  // Staff and other roles are always branch-scoped.
+  // Other roles are always branch-scoped.
   return { role, branchId, canViewAll: false };
 };
 
@@ -250,12 +238,14 @@ const getDashboardStats = async (req, res) => {
       `SELECT COUNT(*) as total FROM bookings WHERE status = 'pending'${bookingBranchFilter}`
     );
 
-    // Get today's enrollments
+    // Get today's enrollments as unique students (avoid double-counting multi-slot bookings)
     const todayEnrollmentsResult = await pool.query(
-      `SELECT COUNT(*) as total FROM (
-        SELECT id FROM bookings WHERE created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + INTERVAL '1 day'${bookingBranchFilter}
-        UNION ALL
-        SELECT se.id
+      `SELECT COUNT(DISTINCT student_id) as total FROM (
+        SELECT b.user_id AS student_id
+        FROM bookings b
+        WHERE b.created_at >= CURRENT_DATE AND b.created_at < CURRENT_DATE + INTERVAL '1 day'${bookingBranchFilter ? ` AND b.branch_id = ${parseInt(scope.branchId, 10)}` : ''}
+        UNION
+        SELECT se.student_id AS student_id
         FROM schedule_enrollments se
         JOIN schedule_slots ss ON se.slot_id = ss.id
         WHERE se.created_at >= CURRENT_DATE AND se.created_at < CURRENT_DATE + INTERVAL '1 day'${slotBranchFilter}
@@ -278,6 +268,35 @@ const getDashboardStats = async (req, res) => {
        AND EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)`
     );
 
+    // Retention: % of students with repeat bookings among active enrolled students this year
+    const retentionResult = await pool.query(
+      `SELECT COALESCE(ROUND(
+          100.0 * COUNT(*) FILTER (WHERE booking_count > 1) / NULLIF(COUNT(*), 0),
+          1
+        ), 0) as retention
+       FROM (
+         SELECT user_id, COUNT(*) as booking_count
+         FROM bookings
+         WHERE status IN ('confirmed', 'completed', 'paid', 'collectable')
+           ${bookingBranchFilter}
+           AND created_at >= DATE_TRUNC('year', CURRENT_DATE)
+         GROUP BY user_id
+       ) repeat_stats`
+    );
+
+    // Traffic: monthly page-activity proxy (new users + booking actions this month)
+    const trafficResult = await pool.query(
+      `SELECT (
+          (SELECT COUNT(*) FROM users
+           WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)
+             ${scope.branchId && !scope.canViewAll ? ` AND COALESCE(branch_id, (SELECT branch_id FROM bookings WHERE user_id = users.id ORDER BY created_at DESC LIMIT 1)) = ${parseInt(scope.branchId, 10)}` : ''})
+          +
+          (SELECT COUNT(*) FROM bookings
+           WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)
+             ${bookingBranchFilter})
+        ) as traffic`
+    );
+
     // Calculate Growth Rate
     const currentRevenue = parseFloat(revenueResult.rows[0].total);
     const lastMonthRevenue = parseFloat(lastMonthRevenueResult.rows[0].total);
@@ -298,8 +317,8 @@ const getDashboardStats = async (req, res) => {
 
         // Extended stats for analytics
         growthRate: growthRate.toFixed(1),
-        retention: 95.5, // Mock data
-        traffic: 1250,   // Mock data
+        retention: Number(retentionResult.rows[0].retention || 0),
+        traffic: parseInt(trafficResult.rows[0].traffic || 0, 10),
         addedStudents: parseInt(addedStudentsResult.rows[0].total),
         walkIns: parseInt(walkInsResult.rows[0].total)
       },
@@ -658,22 +677,16 @@ const getEnrollmentData = async (req, res) => {
 
     const result = await pool.query(`
       SELECT 
-        TO_CHAR(created_at, 'Mon') as name,
-        COUNT(*) as students,
-        COUNT(CASE WHEN enrollment_type = 'walk-in' THEN 1 END) as walkins,
-        COUNT(CASE WHEN enrollment_type != 'walk-in' OR enrollment_type IS NULL THEN 1 END) as online
-      FROM (
-        SELECT created_at, enrollment_type FROM bookings
-        WHERE created_at >= DATE_TRUNC('year', CURRENT_DATE)
-        ${bookingBranchClause}
-        UNION ALL
-        SELECT se.created_at, 'online' as enrollment_type FROM schedule_enrollments se
-        JOIN schedule_slots ss ON ss.id = se.slot_id
-        WHERE se.created_at >= DATE_TRUNC('year', CURRENT_DATE)
-        ${slotBranchClause}
-      ) combined
-      GROUP BY TO_CHAR(created_at, 'Mon'), EXTRACT(MONTH FROM created_at)
-      ORDER BY EXTRACT(MONTH FROM created_at)
+        TO_CHAR(b.created_at, 'Mon') as name,
+        COUNT(DISTINCT b.user_id) as students,
+        COUNT(DISTINCT CASE WHEN b.enrollment_type = 'walk-in' THEN b.user_id END) as walkins,
+        COUNT(DISTINCT CASE WHEN b.enrollment_type != 'walk-in' OR b.enrollment_type IS NULL THEN b.user_id END) as online
+      FROM bookings b
+      WHERE b.created_at >= DATE_TRUNC('year', CURRENT_DATE)
+      AND b.status IN ('confirmed', 'completed', 'paid', 'collectable')
+      ${bookingBranchClause}
+      GROUP BY TO_CHAR(b.created_at, 'Mon'), EXTRACT(MONTH FROM b.created_at)
+      ORDER BY EXTRACT(MONTH FROM b.created_at)
     `, params);
 
     // If no data, return placeholder months
@@ -727,18 +740,90 @@ const getBestSellingCourses = async (req, res) => {
     const joinConditions = conditionClauses.length > 0 ? `AND ${conditionClauses.join(' AND ')}` : '';
 
     const result = await pool.query(`
-      SELECT 
+      WITH filtered_bookings AS (
+        SELECT b.id, b.course_id, b.total_amount, b.status, b.notes
+        FROM bookings b
+        WHERE 1=1 ${joinConditions ? ` ${joinConditions.replace(/^AND\s+/i, 'AND ')}` : ''}
+      ),
+      note_items AS (
+        SELECT
+          fb.id AS booking_id,
+          CASE WHEN (item->>'id') ~ '^[0-9]+$' THEN (item->>'id')::int ELSE NULL END AS course_id,
+          NULLIF(TRIM(item->>'name'), '') AS course_name,
+          CASE
+            WHEN (item->>'price') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (item->>'price')::numeric
+            ELSE NULL
+          END AS course_price,
+          fb.total_amount,
+          fb.status
+        FROM filtered_bookings fb
+        CROSS JOIN LATERAL jsonb_array_elements((fb.notes::jsonb)->'courseList') AS item
+        WHERE fb.notes IS NOT NULL
+          AND fb.notes ~ '^\\{'
+          AND jsonb_typeof((fb.notes::jsonb)->'courseList') = 'array'
+          AND jsonb_array_length((fb.notes::jsonb)->'courseList') > 0
+      ),
+      note_totals AS (
+        SELECT
+          booking_id,
+          COALESCE(SUM(COALESCE(course_price, 0)), 0) AS listed_total,
+          COUNT(*) AS item_count
+        FROM note_items
+        GROUP BY booking_id
+      ),
+      expanded_bookings AS (
+        -- Bundle-aware expansion from notes.courseList
+        SELECT
+          COALESCE(ni.course_id, c_by_name.id) AS course_id,
+          CASE
+            WHEN nt.listed_total > 0 AND ni.course_price IS NOT NULL
+              THEN (ni.total_amount * (ni.course_price / nt.listed_total))
+            WHEN nt.item_count > 0
+              THEN (ni.total_amount / nt.item_count)
+            ELSE ni.total_amount
+          END AS allocated_revenue,
+          ni.status
+        FROM note_items ni
+        JOIN note_totals nt ON nt.booking_id = ni.booking_id
+        LEFT JOIN courses c_by_name
+          ON LOWER(TRIM(c_by_name.name)) = LOWER(TRIM(COALESCE(ni.course_name, '')))
+
+        UNION ALL
+
+        -- Legacy fallback: no courseList in notes
+        SELECT
+          fb.course_id,
+          fb.total_amount AS allocated_revenue,
+          fb.status
+        FROM filtered_bookings fb
+        WHERE NOT (
+          fb.notes IS NOT NULL
+          AND fb.notes ~ '^\\{'
+          AND jsonb_typeof((fb.notes::jsonb)->'courseList') = 'array'
+          AND jsonb_array_length((fb.notes::jsonb)->'courseList') > 0
+        )
+      ),
+      course_agg AS (
+        SELECT
+          eb.course_id,
+          COUNT(*) AS total_bookings,
+          COALESCE(SUM(eb.allocated_revenue), 0) AS total_revenue,
+          COUNT(CASE WHEN eb.status IN ('confirmed', 'completed', 'paid') THEN 1 END) AS completed_bookings
+        FROM expanded_bookings eb
+        WHERE eb.course_id IS NOT NULL
+        GROUP BY eb.course_id
+      )
+      SELECT
         c.id,
-        c.name as course_name,
+        c.name AS course_name,
         c.price,
         c.description,
-        COUNT(b.id) as total_bookings,
-        COALESCE(SUM(b.total_amount), 0) as total_revenue,
-        COUNT(CASE WHEN b.status IN ('confirmed', 'completed', 'paid') THEN 1 END) as completed_bookings
+        COALESCE(ca.total_bookings, 0) AS total_bookings,
+        COALESCE(ca.total_revenue, 0) AS total_revenue,
+        COALESCE(ca.completed_bookings, 0) AS completed_bookings
       FROM courses c
-      LEFT JOIN bookings b ON c.id = b.course_id ${joinConditions}
-      GROUP BY c.id, c.name, c.price, c.description
-      ORDER BY total_bookings DESC
+      LEFT JOIN course_agg ca ON ca.course_id = c.id
+      ORDER BY COALESCE(ca.total_bookings, 0) DESC, COALESCE(ca.total_revenue, 0) DESC
       LIMIT 10
     `, queryParams);
 
@@ -752,7 +837,7 @@ const getBestSellingCourses = async (req, res) => {
   }
 };
 
-// Create new user (Admin/Staff only)
+// Create new user (Admin only)
 const createUser = async (req, res) => {
   try {
     await ensureUserPermissionsColumn();
@@ -784,15 +869,10 @@ const createUser = async (req, res) => {
 
     console.log('📋 Extracted values:', { firstName, middleInitial, lastName, email, role, branch, contactNumber });
 
-    // Only allow creating Admin or Staff
-    if (role !== 'admin' && role !== 'staff') {
+    // Only allow creating Admin accounts.
+    if (role !== 'admin') {
       console.log('❌ Invalid role:', role);
-      return res.status(403).json({ error: 'Can only create admin or staff accounts' });
-    }
-
-    // Branch-assigned admin (Branch Manager) can only create staff accounts.
-    if (!scope.canViewAll && scope.role === 'admin' && role !== 'staff') {
-      return res.status(403).json({ error: 'Branch managers can only create staff accounts' });
+      return res.status(403).json({ error: 'Can only create admin accounts' });
     }
 
     // Check if user already exists
@@ -821,9 +901,6 @@ const createUser = async (req, res) => {
       : null;
     if (normalizedBranchValue && normalizedBranchValue !== 'all' && Number.isNaN(branchId)) {
       return res.status(400).json({ error: 'Invalid branch selection' });
-    }
-    if (role === 'staff' && !branchId) {
-      return res.status(400).json({ error: 'Staff accounts must be assigned to a branch' });
     }
     if (!scope.canViewAll) {
       if (!branchId || !isSameBranch(branchId, scope.branchId)) {
@@ -858,7 +935,7 @@ const createUser = async (req, res) => {
         branchId,
         JSON.stringify(normalizedPermissions),
         'active',
-        true, // Auto-verify admin/staff accounts
+        true, // Auto-verify admin accounts
       ]
     );
     console.log('✅ User inserted successfully:', result.rows[0]);
@@ -939,7 +1016,7 @@ const updateUser = async (req, res) => {
       return res.status(403).json({ error: 'Access denied for this branch user' });
     }
 
-    // Keep super_admin role immutable in this admin/staff management flow.
+    // Keep super_admin role immutable in this admin management flow.
     // This prevents creating a second super admin via role changes.
     if (currentRole !== 'super_admin' && role === 'super_admin') {
       return res.status(403).json({ error: 'Cannot assign Super Admin role from this page' });
@@ -954,9 +1031,6 @@ const updateUser = async (req, res) => {
       : null;
     if (normalizedBranchValue && normalizedBranchValue !== 'all' && Number.isNaN(parsedBranchId)) {
       return res.status(400).json({ error: 'Invalid branch selection' });
-    }
-    if (role === 'staff' && !parsedBranchId) {
-      return res.status(400).json({ error: 'Staff accounts must be assigned to a branch' });
     }
     if (!scope.canViewAll) {
       if (!parsedBranchId || !isSameBranch(parsedBranchId, scope.branchId)) {
@@ -1348,18 +1422,97 @@ const walkInEnrollment = async (req, res) => {
     const bookingStatus = paymentStatus === 'Full Payment' ? 'paid' : 'collectable';
     const primaryCourseId = Array.isArray(courseIds) ? courseIds[0] : courseId;
     
-    // Fetch all course names for accurate display in booking table
+    // Fetch all course details for accurate booking display and notes payload
     let combinedCourseNames = '';
+    let notesCourseList = [];
+    let notesPdcSelections = {};
     try {
       const idsToFetch = Array.isArray(courseIds) ? courseIds : [courseId];
-      const namesResult = await client.query('SELECT id, name FROM courses WHERE id = ANY($1)', [idsToFetch]);
-      const nameMap = {};
-      namesResult.rows.forEach(r => nameMap[r.id] = r.name);
-      combinedCourseNames = idsToFetch.map(id => nameMap[id]).filter(Boolean).join(' + ');
+      const courseMetaResult = await client.query(
+        'SELECT id, name, category, course_type, price FROM courses WHERE id = ANY($1)',
+        [idsToFetch]
+      );
+      const courseMetaById = new Map(
+        courseMetaResult.rows.map((row) => [Number(row.id), row])
+      );
+
+      combinedCourseNames = idsToFetch
+        .map((id) => courseMetaById.get(Number(id))?.name)
+        .filter(Boolean)
+        .join(' + ');
+
+      notesCourseList = idsToFetch
+        .map((id) => {
+          const meta = courseMetaById.get(Number(id));
+          if (!meta) return null;
+          return {
+            id: meta.id,
+            name: meta.name,
+            type: meta.course_type || '',
+            category: meta.category || '',
+            price: Number(meta.price || 0),
+          };
+        })
+        .filter(Boolean);
+
+      pdcSchedules.forEach((schedule, idx) => {
+        const resolvedCourseId = Number(schedule?.courseId) || null;
+        const courseMeta = resolvedCourseId ? courseMetaById.get(resolvedCourseId) : null;
+        const selectionKey = String(resolvedCourseId || `pdc_${idx + 1}`);
+
+        notesPdcSelections[selectionKey] = {
+          courseId: resolvedCourseId || schedule?.courseId || null,
+          courseName: courseMeta?.name || `PDC Course ${idx + 1}`,
+          courseType: courseMeta?.course_type || '',
+          scheduleSlotId: schedule?.scheduleSlotId || null,
+          promoPdcSlotId2: schedule?.promoPdcSlotId2 || null,
+          pdcDate: schedule?.scheduleDate || null,
+          pdcDate2: schedule?.promoPdcDate2 || null,
+          pdcSlotDetails: {
+            session: schedule?.scheduleSession || null,
+            time_range: schedule?.scheduleTime || null,
+          },
+          pdcSlotDetails2: {
+            session: schedule?.promoPdcSession2 || null,
+            time_range: schedule?.promoPdcTime2 || null,
+          },
+        };
+      });
+
+      if (Object.keys(notesPdcSelections).length === 0 && (resolvedScheduleDate2 || resolvedPromoPdcDate2)) {
+        const fallbackPdcId = idsToFetch.find((id) => Number(id) !== Number(primaryCourseId));
+        const fallbackMeta = fallbackPdcId ? courseMetaById.get(Number(fallbackPdcId)) : null;
+        notesPdcSelections.legacy = {
+          courseId: fallbackPdcId || null,
+          courseName: fallbackMeta?.name || 'PDC Course',
+          courseType: fallbackMeta?.course_type || '',
+          scheduleSlotId: resolvedScheduleSlotId2 || null,
+          promoPdcSlotId2: resolvedPromoPdcSlotId2 || null,
+          pdcDate: resolvedScheduleDate2 || null,
+          pdcDate2: resolvedPromoPdcDate2 || null,
+          pdcSlotDetails: {
+            session: null,
+            time_range: null,
+          },
+          pdcSlotDetails2: {
+            session: null,
+            time_range: null,
+          },
+        };
+      }
     } catch (e) {
       console.error('Error fetching combined names:', e);
       combinedCourseNames = 'Custom Bundle';
     }
+
+    const hasReviewerAddon = Array.isArray(addons) && addons.some(a =>
+      (typeof a === 'string' && (a === 'addon-reviewer' || a.includes('Reviewer'))) ||
+      (a && typeof a === 'object' && (a.id === 'addon-reviewer' || (a.name && a.name.includes('Reviewer'))))
+    );
+    const hasVehicleTipsAddon = Array.isArray(addons) && addons.some(a =>
+      (typeof a === 'string' && (a === 'addon-tips' || a.includes('Maintenance'))) ||
+      (a && typeof a === 'object' && (a.id === 'addon-tips' || (a.name && a.name.includes('Maintenance'))))
+    );
 
     const bookingResult = await client.query(
       `INSERT INTO bookings (
@@ -1373,6 +1526,18 @@ const walkInEnrollment = async (req, res) => {
         amountPaid, paymentStatus, paymentMethod, bookingStatus,
         'walk-in', courseType || (Array.isArray(courseIds) ? 'Bundle' : null), enrolledBy, 
         JSON.stringify({
+          source: 'walk_in',
+          scheduleSlotId: scheduleSlotId || null,
+          scheduleSlotId2: resolvedScheduleSlotId2 || null,
+          promoPdcSlotId2: resolvedPromoPdcSlotId2 || null,
+          scheduleDate: scheduleDate || null,
+          scheduleDate2: resolvedScheduleDate2 || null,
+          promoPdcDate2: resolvedPromoPdcDate2 || null,
+          pdcSelections: notesPdcSelections,
+          courseList: notesCourseList,
+          paymentType: paymentStatus || null,
+          hasReviewer: hasReviewerAddon,
+          hasVehicleTips: hasVehicleTipsAddon,
           displayNotes: `Walk-In Enrollment: ${combinedCourseNames}`,
           combinedCourseNames,
           addonNames: (addons || []).map(a => typeof a === 'object' ? a.name : a).filter(Boolean).join(', '),
@@ -1495,6 +1660,7 @@ const walkInEnrollment = async (req, res) => {
         pdcDate2,
         pdcSession2,
         pdcTime2,
+        pdcSchedules,
         paymentMethod,
         amountPaid,
         paymentStatus,
@@ -1650,6 +1816,7 @@ const getUnpaidBookings = async (req, res) => {
       `SELECT 
         b.id,
         b.booking_date,
+        b.notes,
         b.total_amount,
         b.payment_type,
         b.payment_method,
@@ -1670,9 +1837,40 @@ const getUnpaidBookings = async (req, res) => {
     );
 
     const bookings = result.rows.map(row => {
-      const coursePrice = parseFloat(row.course_price || 0);
       const amountPaid = parseFloat(row.total_amount || 0);
-      const balanceDue = Math.max(0, coursePrice - amountPaid);
+      let notesJson = null;
+      try {
+        if (typeof row.notes === 'string' && row.notes.trim().startsWith('{')) {
+          notesJson = JSON.parse(row.notes);
+        }
+      } catch (_) {
+        notesJson = null;
+      }
+
+      const noteCourseList = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
+      const noteAddons = Array.isArray(notesJson?.addonsDetailed) ? notesJson.addonsDetailed : [];
+      const noteSubtotal = Number(notesJson?.subtotal || 0);
+      const noteConvenience = Number(notesJson?.convenienceFee || 0);
+      const noteDiscount = Number(notesJson?.promoDiscount || 0);
+
+      const courseListTotal = noteCourseList.reduce((sum, c) => sum + Number(c?.price || 0), 0);
+      const addonsTotal = noteAddons.reduce((sum, a) => sum + Number(a?.price || 0), 0);
+
+      const computedFromNotes =
+        noteSubtotal > 0
+          ? noteSubtotal + noteConvenience - noteDiscount
+          : (courseListTotal + addonsTotal + noteConvenience - noteDiscount);
+
+      const fallbackCoursePrice = parseFloat(row.course_price || 0);
+      const isDownpayment = /down\s*-?\s*payment/i.test(String(row.payment_type || ''));
+      const inferredDownpaymentTotal = isDownpayment && amountPaid > 0 ? amountPaid * 2 : 0;
+
+      const assessedTotal =
+        computedFromNotes > 0
+          ? computedFromNotes
+          : (inferredDownpaymentTotal > 0 ? inferredDownpaymentTotal : fallbackCoursePrice);
+
+      const balanceDue = Math.max(0, Number((assessedTotal - amountPaid).toFixed(2)));
 
       return {
         id: row.id,
@@ -1680,7 +1878,7 @@ const getUnpaidBookings = async (req, res) => {
         student_contact: row.student_contact || row.student_email || 'N/A',
         course_name: row.course_name || 'N/A',
         total_amount: amountPaid,
-        course_price: coursePrice,
+        course_price: assessedTotal,
         balance_due: balanceDue,
         payment_type: row.payment_type || 'N/A',
         status: row.status,
@@ -1703,7 +1901,6 @@ const getFunnelData = async (req, res) => {
     if (isScopedWithoutBranch(scope)) {
       return res.json({ success: true, data: [
         { name: 'Visitors', value: 0, fill: '#8884d8' },
-        { name: 'Inquiries', value: 0, fill: '#83a6ed' },
         { name: 'Enrolled', value: 0, fill: '#8dd1e1' },
         { name: 'Active', value: 0, fill: '#82ca9d' },
         { name: 'Graduates', value: 0, fill: '#a4de6c' },
@@ -1718,24 +1915,39 @@ const getFunnelData = async (req, res) => {
       : '';
     if (!scope.canViewAll && scope.branchId) params.push(scope.branchId);
 
-    // Determine counts for each stage
-    const totalUsersResult = await pool.query(`SELECT COUNT(*) as count FROM users ${userBranchClause}`, params);
-    const totalBookingsResult = await pool.query(`SELECT COUNT(*) as count FROM bookings WHERE 1=1 ${bookingBranchClause}`, params);
-    const activeBookingsResult = await pool.query(`SELECT COUNT(*) as count FROM bookings WHERE status IN ('confirmed', 'paid', 'collectable') ${bookingBranchClause}`, params);
-    const completedBookingsResult = await pool.query(`SELECT COUNT(*) as count FROM bookings WHERE status = 'completed' ${bookingBranchClause}`, params);
+    // Real student journey stages
+    const totalUsersResult = await pool.query(
+      `SELECT COUNT(*) as count
+       FROM users
+       ${userBranchClause}${userBranchClause ? ' AND' : ' WHERE'} role IN ('student', 'walkin_student')`,
+      params
+    );
+    const totalBookingsResult = await pool.query(
+      `SELECT COUNT(DISTINCT user_id) as count
+       FROM bookings
+       WHERE status IN ('confirmed', 'completed', 'paid', 'collectable') ${bookingBranchClause}`,
+      params
+    );
+    const activeBookingsResult = await pool.query(
+      `SELECT COUNT(DISTINCT user_id) as count
+       FROM bookings
+       WHERE status IN ('confirmed', 'paid', 'collectable') ${bookingBranchClause}`,
+      params
+    );
+    const completedBookingsResult = await pool.query(
+      `SELECT COUNT(DISTINCT user_id) as count
+       FROM bookings
+       WHERE status = 'completed' ${bookingBranchClause}`,
+      params
+    );
 
-    const totalUsers = parseInt(totalUsersResult.rows[0].count);
-    const totalBookings = parseInt(totalBookingsResult.rows[0].count);
-    const activeBookings = parseInt(activeBookingsResult.rows[0].count);
-    const completedBookings = parseInt(completedBookingsResult.rows[0].count);
-
-    // Mock Visitors & Inquiries based on Users (placeholder logic)
-    const visitors = Math.max(totalUsers * 5, 100);
-    const inquiries = Math.max(totalUsers * 2, 50);
+    const visitors = parseInt(totalUsersResult.rows[0].count || 0, 10);
+    const totalBookings = parseInt(totalBookingsResult.rows[0].count || 0, 10);
+    const activeBookings = parseInt(activeBookingsResult.rows[0].count || 0, 10);
+    const completedBookings = parseInt(completedBookingsResult.rows[0].count || 0, 10);
 
     const funnelData = [
       { name: 'Visitors', value: visitors, fill: '#8884d8' },
-      { name: 'Inquiries', value: inquiries, fill: '#83a6ed' },
       { name: 'Enrolled', value: totalBookings, fill: '#8dd1e1' },
       { name: 'Active', value: activeBookings, fill: '#82ca9d' },
       { name: 'Graduates', value: completedBookings, fill: '#a4de6c' },
@@ -1762,11 +1974,37 @@ const getCourseDistribution = async (req, res) => {
     if (!scope.canViewAll && scope.branchId) params.push(scope.branchId);
 
     const result = await pool.query(`
-      SELECT c.category, COUNT(b.id) as count
-      FROM bookings b
-      JOIN courses c ON b.course_id = c.id
-      WHERE 1=1 ${branchClause}
-      GROUP BY c.category
+      WITH expanded AS (
+        -- Bundle-aware path: count each course listed in notes.courseList
+        SELECT
+          UPPER(TRIM(COALESCE(item->>'category', ''))) AS category
+        FROM bookings b
+        CROSS JOIN LATERAL jsonb_array_elements((b.notes::jsonb)->'courseList') AS item
+        WHERE b.notes IS NOT NULL
+          AND b.notes ~ '^\\{'
+          AND jsonb_typeof((b.notes::jsonb)->'courseList') = 'array'
+          AND jsonb_array_length((b.notes::jsonb)->'courseList') > 0
+          ${branchClause}
+
+        UNION ALL
+
+        -- Legacy fallback: use primary course_id when courseList is unavailable
+        SELECT
+          UPPER(TRIM(COALESCE(c.category, ''))) AS category
+        FROM bookings b
+        JOIN courses c ON b.course_id = c.id
+        WHERE (
+          b.notes IS NULL
+          OR b.notes !~ '^\\{'
+          OR jsonb_typeof((b.notes::jsonb)->'courseList') IS DISTINCT FROM 'array'
+          OR jsonb_array_length((b.notes::jsonb)->'courseList') = 0
+        )
+        ${branchClause}
+      )
+      SELECT category, COUNT(*) AS count
+      FROM expanded
+      WHERE category <> ''
+      GROUP BY category
       ORDER BY count DESC
     `, params);
 
@@ -2180,7 +2418,7 @@ const sendAllEmailDesignsRoute = async (req, res) => {
 
     await sendVerificationEmail(email, '123456', firstName, 'Email Verification');
     await sendVerificationEmail(email, '654321', firstName, 'Password Reset');
-    await sendPasswordEmail(email, 'Temp#1234', firstName, 'staff');
+    await sendPasswordEmail(email, 'Temp#1234', firstName, 'admin');
     await sendWalkInEnrollmentEmail(email, firstName, lastName, 'Temp#1234', '112233', enrollmentDetails);
     await sendGuestEnrollmentEmail(email, firstName, lastName, enrollmentDetails, true, true);
     await sendNoShowEmail(email, firstName, lastName, {

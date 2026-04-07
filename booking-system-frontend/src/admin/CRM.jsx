@@ -21,7 +21,7 @@ const CRMManagement = () => {
     // Auth / role state
     const [userRole, setUserRole] = useState(null);
     const [userBranchId, setUserBranchId] = useState(null);
-    const isBranchScopedUser = userRole === 'staff' || (userRole === 'admin' && !!userBranchId);
+    const isBranchScopedUser = userRole === 'admin' && !!userBranchId;
 
     // Course Management Modal State
     const [selectedStudent, setSelectedStudent] = useState(null);
@@ -32,19 +32,21 @@ const CRMManagement = () => {
     useEffect(() => {
         const init = async () => {
             try {
-                const profileRes = await authAPI.getProfile();
+                const [profileRes, branchRes] = await Promise.all([
+                    authAPI.getProfile(),
+                    branchesAPI.getAll()
+                ]);
                 if (profileRes.success) {
                     const role = profileRes.user.role;
                     const branchId = profileRes.user.branchId;
                     setUserRole(role);
                     setUserBranchId(branchId || null);
-                    const branchRes = await branchesAPI.getAll();
                     if (branchRes.success && branchRes.branches) {
-                        if ((role === 'staff' || (role === 'admin' && branchId)) && branchId) {
-                            const staffBranch = branchRes.branches.find(b => String(b.id) === String(branchId));
-                            if (staffBranch) {
-                                setBranchesList([staffBranch]);
-                                setBranchFilter(staffBranch.name);
+                        if (role === 'admin' && branchId) {
+                            const assignedBranch = branchRes.branches.find(b => String(b.id) === String(branchId));
+                            if (assignedBranch) {
+                                setBranchesList([assignedBranch]);
+                                setBranchFilter(assignedBranch.name);
                             }
                         } else {
                             setBranchesList(branchRes.branches);
@@ -268,7 +270,7 @@ const CRMManagement = () => {
                                 <th>Student</th>
                                 <th>Contact</th>
                                 <th>Type</th>
-                                {userRole !== 'staff' && <th>Branch</th>}
+                                {userRole !== 'admin' || !userBranchId ? <th>Branch</th> : null}
                                 <th>Status</th>
                                 <th style={{ textAlign: 'center' }}>Actions</th>
                             </tr>
@@ -280,14 +282,14 @@ const CRMManagement = () => {
                                         <td><div className="sale-skeleton-cell" style={{ width: '160px' }}></div></td>
                                         <td><div className="sale-skeleton-cell" style={{ width: '140px' }}></div></td>
                                         <td><div className="sale-skeleton-cell" style={{ width: '70px', borderRadius: '20px' }}></div></td>
-                                        {userRole !== 'staff' && <td><div className="sale-skeleton-cell" style={{ width: '100px' }}></div></td>}
+                                        {userRole !== 'admin' || !userBranchId ? <td><div className="sale-skeleton-cell" style={{ width: '100px' }}></div></td> : null}
                                         <td><div className="sale-skeleton-cell" style={{ width: '60px', borderRadius: '20px' }}></div></td>
                                         <td><div className="sale-skeleton-cell" style={{ width: '90px', margin: '0 auto' }}></div></td>
                                     </tr>
                                 ))
                             ) : filteredStudents.length === 0 ? (
                                 <tr>
-                                    <td colSpan={userRole !== 'staff' ? 6 : 5} className="sale-empty-state">
+                                    <td colSpan={userRole !== 'admin' || !userBranchId ? 6 : 5} className="sale-empty-state">
                                         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>
                                         <p>No students found</p>
                                         <span>Try adjusting your search or filters</span>
@@ -320,11 +322,11 @@ const CRMManagement = () => {
                                             {student.role === 'walkin_student' ? 'Walk-In' : 'Online'}
                                         </span>
                                     </td>
-                                    {userRole !== 'staff' && (
+                                    {userRole !== 'admin' || !userBranchId ? (
                                         <td style={{ fontSize: '13px', color: 'var(--text-secondary, #64748b)' }}>
                                             {student.branch_name ? formatBranchName(student.branch_name) : 'Unassigned'}
                                         </td>
-                                    )}
+                                    ) : null}
                                     <td>
                                         <span className={`status-pill ${(student.status || 'active').toLowerCase() === 'active' ? 'success' : 'collectable'}`}>
                                             {student.status || 'Active'}

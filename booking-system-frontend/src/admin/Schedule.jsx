@@ -197,8 +197,8 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                 const response = await branchesAPI.getAll();
                 let loadedBranches = response.branches || [];
 
-                // Restrict viewing for staff and branch-assigned admins.
-                if ((role === 'staff' || (role === 'admin' && profileBranchId)) && profileBranchId) {
+                // Restrict viewing for branch-assigned admins.
+                if (role === 'admin' && profileBranchId) {
                     loadedBranches = loadedBranches.filter(b => String(b.id) === String(profileBranchId));
                     setSelectedBranch(String(profileBranchId));
                 }
@@ -984,9 +984,9 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                         className="branch-filter-select"
                         value={selectedBranch}
                         onChange={(e) => setSelectedBranch(e.target.value)}
-                        disabled={userRole === 'staff' || (userRole === 'admin' && !!selectedBranch && branches.length === 1)}
+                        disabled={userRole === 'admin' && !!selectedBranch && branches.length === 1}
                     >
-                        {!(userRole === 'staff' || (userRole === 'admin' && branches.length === 1)) && <option value="">All Branches / Default View</option>}
+                        {!(userRole === 'admin' && branches.length === 1) && <option value="">All Branches / Default View</option>}
                         {branches.map(branch => {
                             let formattedName = branch.name;
                             const prefixes = ['Master Driving School ', 'Master Prime Driving School ', 'Masters Prime Holdings Corp. ', 'Master Prime Holdings Corp. '];
@@ -1492,7 +1492,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                             if (!isDisabled) {
                                                 setSelectedDate(dateStr);
                                                 // Admin must select a specific branch before adding a slot
-                                                if (userRole !== 'staff' && !selectedBranch) {
+                                                if (!selectedBranch) {
                                                     showNotification('Please select a specific branch from the filter above before adding a schedule slot.', 'warning');
                                                     return;
                                                 }
@@ -1603,7 +1603,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                             <button
                                 className="add-btn"
                                 onClick={() => {
-                                    if (userRole !== 'staff' && !selectedBranch) {
+                                    if (!selectedBranch) {
                                         showNotification('Please select a specific branch from the filter above before auto-generating slots.', 'warning');
                                         return;
                                     }
@@ -1617,8 +1617,8 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                     borderRadius: '8px',
                                     fontSize: '0.85rem',
                                     fontWeight: '600',
-                                    cursor: userRole !== 'staff' && !selectedBranch ? 'not-allowed' : 'pointer',
-                                    opacity: userRole !== 'staff' && !selectedBranch ? 0.55 : 1
+                                    cursor: !selectedBranch ? 'not-allowed' : 'pointer',
+                                    opacity: !selectedBranch ? 0.55 : 1
                                 }}
                             >
                                 ⚡ Auto-Generate
@@ -1781,7 +1781,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                             <button
                                                 key={i}
                                                 onClick={() => {
-                                                    if (userRole !== 'staff' && !selectedBranch) {
+                                                    if (!selectedBranch) {
                                                         showNotification('Please select a branch before adding a slot.', 'warning');
                                                         return;
                                                     }
