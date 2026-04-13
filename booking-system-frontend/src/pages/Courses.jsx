@@ -606,10 +606,10 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
         <table className="w-full text-left border-collapse min-w-[600px]">
           <thead>
             <tr className="bg-[#2157da] text-white">
-              <th className="py-4 px-6 font-semibold text-sm">Course Details</th>
-              <th className="py-4 px-6 font-semibold text-sm text-center whitespace-nowrap">Duration</th>
-              <th className="py-4 px-6 font-semibold text-sm text-right whitespace-nowrap">Price</th>
-              <th className="py-4 px-6 font-semibold text-sm text-center">Action</th>
+              <th className="py-4 px-6 font-semibold text-sm w-[45%]">Course Details</th>
+              <th className="py-4 px-6 font-semibold text-sm text-center whitespace-nowrap w-[25%]">Duration</th>
+              <th className="py-4 px-6 font-semibold text-sm text-right whitespace-nowrap w-[15%]">Price</th>
+              <th className="py-4 px-6 font-semibold text-sm text-center w-[15%]">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
@@ -842,29 +842,17 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
               )}
 
               {/* Quantity */}
-              <div className="mb-6">
+              <div className="mb-6 hidden">
                 <label className="block text-xs font-bold text-gray-700 mb-3 uppercase tracking-wider text-left">
                   QUANTITY
                 </label>
-                <div className="flex items-center gap-0 w-fit border border-gray-300 rounded-md overflow-hidden">
-                  <button
-                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                    className="w-10 h-10 flex items-center justify-center hover:bg-gray-100 transition-colors text-gray-600 font-medium"
-                  >
-                    −
-                  </button>
+                <div className="flex items-center gap-0 w-fit border border-gray-300 rounded-md overflow-hidden opacity-50 cursor-not-allowed">
                   <input
                     type="text"
-                    value={quantity}
+                    value={1}
                     readOnly
-                    className="w-12 h-10 text-center border-x border-gray-300 font-medium text-gray-800 bg-white"
+                    className="w-12 h-10 text-center font-medium text-gray-800 bg-gray-100 cursor-not-allowed"
                   />
-                  <button
-                    onClick={() => setQuantity(quantity + 1)}
-                    className="w-10 h-10 flex items-center justify-center hover:bg-gray-100 transition-colors text-gray-600 font-medium"
-                  >
-                    +
-                  </button>
                 </div>
               </div>
 

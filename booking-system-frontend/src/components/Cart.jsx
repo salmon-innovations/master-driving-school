@@ -343,20 +343,8 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
 
                         <div className="flex justify-between items-center mt-3">
                           <span className="text-[#2157da] font-bold text-base">₱{(totals.finalItemPrice * (Number(item.quantity) || 1)).toLocaleString()}</span>
-                          <div className="flex items-center gap-2 bg-white rounded-md border border-gray-300">
-                            <button
-                              onClick={() => updateQuantity(item.id, item.type, -1)}
-                              className="w-7 h-7 flex items-center justify-center hover:bg-gray-100 transition-colors text-gray-600"
-                            >
-                              −
-                            </button>
-                            <span className="w-6 text-center text-sm font-semibold">{Number(item.quantity) || 1}</span>
-                            <button
-                              onClick={() => updateQuantity(item.id, item.type, 1)}
-                              className="w-7 h-7 flex items-center justify-center hover:bg-gray-100 transition-colors text-gray-600"
-                            >
-                              +
-                            </button>
+                          <div className="flex items-center gap-2 bg-gray-50 rounded-md border border-gray-200 px-3 py-1 opacity-70 cursor-not-allowed">
+                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Qty: 1</span>
                           </div>
                         </div>
                       </div>

@@ -33,8 +33,25 @@ const resolveApiBaseUrl = () => {
 
 const API_BASE_URL = resolveApiBaseUrl();
 export const MEDIA_BASE_URL = API_BASE_URL.replace(/\/api$/, '');
-const GET_CACHE_TTL_MS = 30 * 1000;
+const GET_CACHE_TTL_MS = 2 * 60 * 1000; // 2-minute cache for authenticated admin GET requests
 const getRequestCache = new Map();
+
+// Invalidate all cached GET responses (call after mutations that affect multiple endpoints)
+export const invalidateApiCache = () => getRequestCache.clear();
+
+// Short-lived in-memory store for expensive shared lookups (profile, branches)
+const _sharedCache = new Map();
+const _SHARED_TTL_MS = 5 * 60 * 1000; // 5 minutes
+export const getCached = (key) => {
+  const entry = _sharedCache.get(key);
+  if (entry && entry.expiresAt > Date.now()) return entry.data;
+  return null;
+};
+export const setCached = (key, data) => {
+  _sharedCache.set(key, { data, expiresAt: Date.now() + _SHARED_TTL_MS });
+};
+export const clearCached = (key) => _sharedCache.delete(key);
+export const clearAllCached = () => _sharedCache.clear();
 
 // Helper function to get auth token
 const getAuthToken = () => {
@@ -47,7 +64,8 @@ const apiRequest = async (endpoint, options = {}) => {
   const url = `${API_BASE_URL}${endpoint}`;
   const token = getAuthToken();
   const method = String(requestOptions.method || 'GET').toUpperCase();
-  const shouldUseCache = method === 'GET' && !token && requestOptions.cache !== false;
+  // Cache authenticated GET requests too — admin pages hit the same endpoints repeatedly on tab switch.
+  const shouldUseCache = method === 'GET' && requestOptions.cache !== false;
   const cacheKey = `${method}:${url}`;
 
   if (shouldUseCache) {

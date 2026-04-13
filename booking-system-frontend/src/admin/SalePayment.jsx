@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './css/sale.css';
-import { adminAPI, coursesAPI, branchesAPI, authAPI } from '../services/api';
+import { adminAPI, coursesAPI, branchesAPI, authAPI, getCached, setCached } from '../services/api';
 import { normalizeNotificationText } from '../utils/notificationText';
 const logo = `${window.location.origin}/images/Master-logo.png`;
 import Pagination from './components/Pagination';
@@ -361,10 +361,11 @@ const SalePayment = () => {
     const fetchTransactions = async () => {
         try {
             setLoading(true);
-            const [response, bookingsResponse, revenueResponse] = await Promise.all([
+            const [response, bookingsResponse, revenueResponse, unpaidResponse] = await Promise.all([
                 adminAPI.getAllTransactions(100),
                 adminAPI.getAllBookings(null, 300),
                 adminAPI.getRevenueData(),
+                adminAPI.getUnpaidBookings(200),
             ]);
             if (revenueResponse && revenueResponse.success) {
                 setRevenueData(revenueResponse);
@@ -441,7 +442,6 @@ const SalePayment = () => {
                 }, { revenue: 0, completed: 0, partialPayment: 0, refunds: 0 });
             }
 
-            const unpaidResponse = await adminAPI.getUnpaidBookings(200); // Fetch more to get accurate total
             if (unpaidResponse.success) {
                 const mappedUnpaid = (unpaidResponse.bookings || []).map((booking) => {
                     const linkedBooking = bookingsById.get(Number(booking.id));
@@ -473,51 +473,68 @@ const SalePayment = () => {
 
     useEffect(() => {
         const fetchCoursesList = async () => {
+            const cached = getCached('sp:courses');
+            if (cached) { setCoursesList(cached); return; }
             try {
                 const response = await coursesAPI.getAll();
                 if (response.success && response.courses) {
                     setCoursesList(response.courses);
+                    setCached('sp:courses', response.courses);
                 }
             } catch (error) {
                 console.error('Error fetching courses:', error);
             }
         };
-        const fetchBranchesList = async () => {
-            try {
-                const response = await branchesAPI.getAll();
-                if (response.success && response.branches) {
-                    setBranchesList(response.branches);
-                }
-            } catch (error) {
-                console.error('Error fetching branches:', error);
-            }
-        };
         const fetchProfile = async () => {
-            try {
-                const profileRes = await authAPI.getProfile();
-                if (profileRes.success) {
-                    const role = profileRes.user.role;
-                    const branchId = profileRes.user.branchId;
-                    setUserRole(role);
-                    setUserBranchId(branchId);
-                    if (role === 'admin' && branchId) {
-                        // Lock branch filter to assigned branch for branch-assigned admin
-                        const branchRes = await branchesAPI.getAll();
-                        if (branchRes.success && branchRes.branches) {
-                            const assignedBranch = branchRes.branches.find(b => String(b.id) === String(branchId));
-                            if (assignedBranch) {
-                                setBranchesList([assignedBranch]);
-                                setBranchFilter(assignedBranch.name);
-                            }
-                        }
+            const cachedProfile = getCached('sp:profile');
+            const cachedBranches = getCached('sp:branches');
+            let role, branchId, branches;
+
+            if (cachedProfile) {
+                role = cachedProfile.role;
+                branchId = cachedProfile.branchId;
+            } else {
+                try {
+                    const profileRes = await authAPI.getProfile();
+                    if (profileRes.success) {
+                        role = profileRes.user.role;
+                        branchId = profileRes.user.branchId;
+                        setCached('sp:profile', { role, branchId });
                     }
+                } catch (error) {
+                    console.error('Error fetching profile:', error);
                 }
-            } catch (error) {
-                console.error('Error fetching profile:', error);
+            }
+
+            if (cachedBranches) {
+                branches = cachedBranches;
+                setBranchesList(branches);
+            } else {
+                try {
+                    const branchRes = await branchesAPI.getAll();
+                    if (branchRes.success && branchRes.branches) {
+                        branches = branchRes.branches;
+                        setBranchesList(branches);
+                        setCached('sp:branches', branches);
+                    }
+                } catch (error) {
+                    console.error('Error fetching branches:', error);
+                }
+            }
+
+            if (role) setUserRole(role);
+            if (branchId) setUserBranchId(branchId);
+
+            // Lock branch filter for branch-restricted admins
+            if (role === 'admin' && branchId && branches) {
+                const assignedBranch = branches.find(b => String(b.id) === String(branchId));
+                if (assignedBranch) {
+                    setBranchesList([assignedBranch]);
+                    setBranchFilter(assignedBranch.name);
+                }
             }
         };
         fetchCoursesList();
-        fetchBranchesList();
         fetchProfile();
         fetchTransactions();
     }, []);
