@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { withCache, bustCache } = require('../config/db');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
@@ -275,196 +276,134 @@ const getBookingAccessInScope = async (bookingId, scope, db = pool) => {
 
 const isScopedWithoutBranch = (scope) => !scope.canViewAll && !scope.branchId;
 
-// Get dashboard statistics
+// Get dashboard statistics  (cached 60 s per role+branch)
 const getDashboardStats = async (req, res) => {
   try {
-    const scope = await getUserBranchScope(req.user);
-    if (isScopedWithoutBranch(scope)) {
-      return res.json({
-        success: true,
-        stats: {
-          totalStudents: 0,
-          monthlyRevenue: 0,
-          pendingBookings: 0,
-          todayEnrollments: 0,
-          growthRate: '0.0',
-          retention: 0,
-          traffic: 0,
-          addedStudents: 0,
-          walkIns: 0,
-        },
-      });
-    }
-    const bookingBranchFilter = scope.branchId && !scope.canViewAll ? ` AND branch_id = ${parseInt(scope.branchId, 10)}` : '';
-    const slotBranchFilter = scope.branchId && !scope.canViewAll ? ` AND ss.branch_id = ${parseInt(scope.branchId, 10)}` : '';
-
-    // Get total enrolled students (from bookings + schedule_enrollments)
-    const studentsResult = await pool.query(
-      `SELECT COUNT(DISTINCT student_id) as total FROM (
-        SELECT user_id as student_id FROM bookings WHERE status IN ('confirmed', 'completed', 'paid', 'partial_payment')${bookingBranchFilter}
-        UNION
-        SELECT se.student_id
-        FROM schedule_enrollments se
-        JOIN schedule_slots ss ON se.slot_id = ss.id
-        WHERE se.enrollment_status IN ('enrolled', 'completed')${slotBranchFilter}
-      ) combined`
-    );
-
-    // Get total revenue this month
+    const cacheKey = `stats:${req.user.role}:${req.user.branchId || 'all'}`;
     const isSuperAdmin = String(req.user.role || '').toLowerCase() === 'super_admin';
-    const rawRevenueResult = await pool.query(
-      `SELECT b.total_amount, b.notes, b.status, b.created_at, b.course_id, c.price as course_price 
-       FROM bookings b 
-       LEFT JOIN courses c ON b.course_id = c.id 
-      WHERE b.status IN ('confirmed', 'completed', 'paid', 'partial_payment') ${bookingBranchFilter}`
-    );
 
-    let currentRevCourse = 0;
-    let currentRevAddons = 0;
-    let currentRevConv = 0;
-    let lastMonthRevenue = 0;
+    const payload = await withCache(cacheKey, async () => {
 
-    const todayDate = new Date();
-    const currentMonth = todayDate.getMonth();
-    const currentYear = todayDate.getFullYear();
-    const lastMonthDate = new Date();
-    lastMonthDate.setMonth(currentMonth - 1);
-    const lastMonth = lastMonthDate.getMonth();
-    const lastMonthYear = lastMonthDate.getFullYear();
-
-    rawRevenueResult.rows.forEach(b => {
-      const d = new Date(b.created_at);
-      const isCurrent = d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-      const isLast =  d.getMonth() === lastMonth && d.getFullYear() === lastMonthYear;
-
-      const tAmt = parseFloat(b.total_amount || 0);
-      let addrev = 0, conv = 0;
-
-      if (b.notes && typeof b.notes === 'string' && b.notes.trim().startsWith('{')) {
-        try {
-          const js = JSON.parse(b.notes);
-          if (js.convenienceFee) conv = parseFloat(js.convenienceFee);
-          if (Array.isArray(js.addonsDetailed)) {
-             addrev = js.addonsDetailed.reduce((sum, a) => sum + parseFloat(a.price || 0), 0);
-          }
-        } catch(e) {}
+      const scope = await getUserBranchScope(req.user);
+      if (isScopedWithoutBranch(scope)) {
+        return {
+          success: true,
+          stats: {
+            totalStudents: 0, monthlyRevenue: 0, pendingBookings: 0,
+            todayEnrollments: 0, growthRate: '0.0', retention: 0,
+            traffic: 0, addedStudents: 0, walkIns: 0,
+          },
+        };
       }
+      const bookingBranchFilter = scope.branchId && !scope.canViewAll ? ` AND branch_id = ${parseInt(scope.branchId, 10)}` : '';
+      const slotBranchFilter = scope.branchId && !scope.canViewAll ? ` AND ss.branch_id = ${parseInt(scope.branchId, 10)}` : '';
 
-      if (isCurrent) {
-        currentRevAddons += addrev;
-        currentRevConv += conv;
-        currentRevCourse += Math.max(0, tAmt - addrev - conv);
-      }
-      if (isLast) {
-        let l_addrev = 0, l_conv = 0;
+      // ── Run all independent queries in parallel ───────────────────────────
+      const [
+        studentsResult, rawRevenueResult, pendingResult,
+        todayEnrollmentsResult, addedStudentsResult, walkInsResult,
+        retentionResult, trafficResult,
+      ] = await Promise.all([
+        pool.query(
+          `SELECT COUNT(DISTINCT student_id) as total FROM (
+            SELECT user_id as student_id FROM bookings WHERE status IN ('confirmed','completed','paid','partial_payment')${bookingBranchFilter}
+            UNION
+            SELECT se.student_id FROM schedule_enrollments se JOIN schedule_slots ss ON se.slot_id = ss.id
+            WHERE se.enrollment_status IN ('enrolled','completed')${slotBranchFilter}
+          ) combined`
+        ),
+        pool.query(
+          `SELECT b.total_amount, b.notes, b.status, b.created_at
+           FROM bookings b
+           WHERE b.status IN ('confirmed','completed','paid','partial_payment')${bookingBranchFilter}
+             AND b.created_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'`
+        ),
+        pool.query(`SELECT COUNT(*) as total FROM bookings WHERE status='pending'${bookingBranchFilter}`),
+        pool.query(
+          `SELECT COUNT(DISTINCT student_id) as total FROM (
+            SELECT b.user_id AS student_id FROM bookings b
+            WHERE b.created_at >= CURRENT_DATE AND b.created_at < CURRENT_DATE + INTERVAL '1 day'${bookingBranchFilter ? ` AND b.branch_id = ${parseInt(scope.branchId, 10)}` : ''}
+            UNION
+            SELECT se.student_id FROM schedule_enrollments se JOIN schedule_slots ss ON se.slot_id = ss.id
+            WHERE se.created_at >= CURRENT_DATE AND se.created_at < CURRENT_DATE + INTERVAL '1 day'${slotBranchFilter}
+          ) combined`
+        ),
+        pool.query(
+          `SELECT COUNT(*) as total FROM bookings WHERE 1=1${bookingBranchFilter}
+           AND EXTRACT(MONTH FROM created_at)=EXTRACT(MONTH FROM CURRENT_DATE)
+           AND EXTRACT(YEAR FROM created_at)=EXTRACT(YEAR FROM CURRENT_DATE)`
+        ),
+        pool.query(
+          `SELECT COUNT(*) as total FROM bookings WHERE enrollment_type='walk-in'${bookingBranchFilter}
+           AND EXTRACT(MONTH FROM created_at)=EXTRACT(MONTH FROM CURRENT_DATE)
+           AND EXTRACT(YEAR FROM created_at)=EXTRACT(YEAR FROM CURRENT_DATE)`
+        ),
+        pool.query(
+          `SELECT COALESCE(ROUND(100.0*COUNT(*) FILTER (WHERE booking_count>1)/NULLIF(COUNT(*),0),1),0) as retention
+           FROM (
+             SELECT user_id, COUNT(*) as booking_count FROM bookings
+             WHERE status IN ('confirmed','completed','paid','partial_payment')${bookingBranchFilter}
+               AND created_at >= DATE_TRUNC('year', CURRENT_DATE)
+             GROUP BY user_id
+           ) s`
+        ),
+        pool.query(
+          `SELECT ((SELECT COUNT(*) FROM users WHERE created_at>=DATE_TRUNC('month',CURRENT_DATE))
+                  +(SELECT COUNT(*) FROM bookings WHERE created_at>=DATE_TRUNC('month',CURRENT_DATE)${bookingBranchFilter})) as traffic`
+        ),
+      ]);
+
+      const todayDate = new Date();
+      const currentMonth = todayDate.getMonth();
+      const currentYear = todayDate.getFullYear();
+      const lastMonthDate = new Date(); lastMonthDate.setMonth(currentMonth - 1);
+      const lastMonth = lastMonthDate.getMonth();
+      const lastMonthYear = lastMonthDate.getFullYear();
+
+      let currentRevCourse = 0, currentRevAddons = 0, currentRevConv = 0, lastMonthRevenue = 0;
+      rawRevenueResult.rows.forEach(b => {
+        const d = new Date(b.created_at);
+        const isCurrent = d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+        const isLast = d.getMonth() === lastMonth && d.getFullYear() === lastMonthYear;
+        const tAmt = parseFloat(b.total_amount || 0);
+        let addrev = 0, conv = 0;
         if (b.notes && typeof b.notes === 'string' && b.notes.trim().startsWith('{')) {
           try {
             const js = JSON.parse(b.notes);
-            if (js.convenienceFee) l_conv = parseFloat(js.convenienceFee);
-            if (Array.isArray(js.addonsDetailed)) {
-               l_addrev = js.addonsDetailed.reduce((sum, a) => sum + parseFloat(a.price || 0), 0);
-            }
-          } catch(e) {}
+            if (js.convenienceFee) conv = parseFloat(js.convenienceFee);
+            if (Array.isArray(js.addonsDetailed)) addrev = js.addonsDetailed.reduce((s, a) => s + parseFloat(a.price || 0), 0);
+          } catch (e) {}
         }
-        let l_courseRev = Math.max(0, tAmt - l_addrev - l_conv);
-        lastMonthRevenue += isSuperAdmin ? tAmt : l_courseRev;
-      }
-    });
+        if (isCurrent) { currentRevAddons += addrev; currentRevConv += conv; currentRevCourse += Math.max(0, tAmt - addrev - conv); }
+        if (isLast) lastMonthRevenue += isSuperAdmin ? tAmt : Math.max(0, tAmt - addrev - conv);
+      });
 
-    let currentRevenue = isSuperAdmin ? (currentRevCourse + currentRevAddons + currentRevConv) : currentRevCourse;
+      const currentRevenue = isSuperAdmin ? (currentRevCourse + currentRevAddons + currentRevConv) : currentRevCourse;
+      let growthRate = 0;
+      if (lastMonthRevenue > 0) growthRate = ((currentRevenue - lastMonthRevenue) / lastMonthRevenue) * 100;
+      else if (currentRevenue > 0) growthRate = 100;
 
-    // Get pending bookings count
-    const pendingResult = await pool.query(
-      `SELECT COUNT(*) as total FROM bookings WHERE status = 'pending'${bookingBranchFilter}`
-    );
+      return {
+        success: true,
+        stats: {
+          totalStudents: parseInt(studentsResult.rows[0].total),
+          monthlyRevenue: currentRevenue,
+          addon_sales_total: isSuperAdmin ? currentRevAddons : 0,
+          convenience_fee_total: isSuperAdmin ? currentRevConv : 0,
+          course_revenue: currentRevCourse,
+          total_sales_with_addons_and_convenience: isSuperAdmin ? (currentRevCourse + currentRevAddons + currentRevConv) : currentRevCourse,
+          pendingBookings: parseInt(pendingResult.rows[0].total),
+          todayEnrollments: parseInt(todayEnrollmentsResult.rows[0].total),
+          growthRate: growthRate.toFixed(1),
+          retention: Number(retentionResult.rows[0].retention || 0),
+          traffic: parseInt(trafficResult.rows[0].traffic || 0, 10),
+          addedStudents: parseInt(addedStudentsResult.rows[0].total),
+          walkIns: parseInt(walkInsResult.rows[0].total),
+        },
+      };
+    }, 60_000); // cache for 60 seconds
 
-    // Get today's enrollments as unique students (avoid double-counting multi-slot bookings)
-    const todayEnrollmentsResult = await pool.query(
-      `SELECT COUNT(DISTINCT student_id) as total FROM (
-        SELECT b.user_id AS student_id
-        FROM bookings b
-        WHERE b.created_at >= CURRENT_DATE AND b.created_at < CURRENT_DATE + INTERVAL '1 day'${bookingBranchFilter ? ` AND b.branch_id = ${parseInt(scope.branchId, 10)}` : ''}
-        UNION
-        SELECT se.student_id AS student_id
-        FROM schedule_enrollments se
-        JOIN schedule_slots ss ON se.slot_id = ss.id
-        WHERE se.created_at >= CURRENT_DATE AND se.created_at < CURRENT_DATE + INTERVAL '1 day'${slotBranchFilter}
-      ) combined`
-    );
-
-    // Get this month's added students (for Analytics Page)
-    const addedStudentsResult = await pool.query(
-      `SELECT COUNT(*) as total FROM bookings 
-       WHERE 1=1${bookingBranchFilter}
-       AND EXTRACT(MONTH FROM created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
-       AND EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)`
-    );
-
-    // Get walk-ins count (total or monthly? Analytics likely wants total or relevant timeframe. Let's do monthly)
-    const walkInsResult = await pool.query(
-      `SELECT COUNT(*) as total FROM bookings 
-       WHERE enrollment_type = 'walk-in'${bookingBranchFilter}
-       AND EXTRACT(MONTH FROM created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
-       AND EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)`
-    );
-
-    // Retention: % of students with repeat bookings among active enrolled students this year
-    const retentionResult = await pool.query(
-      `SELECT COALESCE(ROUND(
-          100.0 * COUNT(*) FILTER (WHERE booking_count > 1) / NULLIF(COUNT(*), 0),
-          1
-        ), 0) as retention
-       FROM (
-         SELECT user_id, COUNT(*) as booking_count
-         FROM bookings
-         WHERE status IN ('confirmed', 'completed', 'paid', 'partial_payment')
-           ${bookingBranchFilter}
-           AND created_at >= DATE_TRUNC('year', CURRENT_DATE)
-         GROUP BY user_id
-       ) repeat_stats`
-    );
-
-    // Traffic: monthly page-activity proxy (new users + booking actions this month)
-    const trafficResult = await pool.query(
-      `SELECT (
-          (SELECT COUNT(*) FROM users
-           WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)
-             ${scope.branchId && !scope.canViewAll ? ` AND COALESCE(branch_id, (SELECT branch_id FROM bookings WHERE user_id = users.id ORDER BY created_at DESC LIMIT 1)) = ${parseInt(scope.branchId, 10)}` : ''})
-          +
-          (SELECT COUNT(*) FROM bookings
-           WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)
-             ${bookingBranchFilter})
-        ) as traffic`
-    );
-
-    // Calculate Growth Rate
-    let growthRate = 0;
-    if (lastMonthRevenue > 0) {
-      growthRate = ((currentRevenue - lastMonthRevenue) / lastMonthRevenue) * 100;
-    } else if (currentRevenue > 0) {
-      growthRate = 100;
-    }
-
-    res.json({
-      success: true,
-      stats: {
-        totalStudents: parseInt(studentsResult.rows[0].total),
-        monthlyRevenue: currentRevenue,
-        addon_sales_total: isSuperAdmin ? currentRevAddons : 0,
-        convenience_fee_total: isSuperAdmin ? currentRevConv : 0,
-        course_revenue: currentRevCourse,
-        total_sales_with_addons_and_convenience: isSuperAdmin ? (currentRevCourse + currentRevAddons + currentRevConv) : currentRevCourse,
-        pendingBookings: parseInt(pendingResult.rows[0].total),
-        todayEnrollments: parseInt(todayEnrollmentsResult.rows[0].total),
-
-        // Extended stats for analytics
-        growthRate: growthRate.toFixed(1),
-        retention: Number(retentionResult.rows[0].retention || 0),
-        traffic: parseInt(trafficResult.rows[0].traffic || 0, 10),
-        addedStudents: parseInt(addedStudentsResult.rows[0].total),
-        walkIns: parseInt(walkInsResult.rows[0].total)
-      },
-    });
+    res.json(payload);
   } catch (error) {
     console.error('Get stats error:', error);
     res.status(500).json({ error: 'Server error while fetching statistics' });
@@ -719,6 +658,9 @@ const updateBookingStatus = async (req, res) => {
       message: 'Booking status updated successfully',
       booking: result.rows[0],
     });
+
+    // Invalidate dashboard stats cache so next load reflects the change
+    bustCache(`stats:super_admin:all`, `stats:admin:${result.rows[0].branch_id}`, `stats:admin:all`);
   } catch (error) {
     console.error('Update booking error:', error);
     res.status(500).json({ error: 'Server error while updating booking' });
@@ -2188,6 +2130,7 @@ const getUnpaidBookings = async (req, res) => {
     const result = await pool.query(
       `SELECT 
         b.id,
+        b.branch_id,
         b.booking_date,
         b.notes,
         b.total_amount,
@@ -2256,7 +2199,8 @@ const getUnpaidBookings = async (req, res) => {
         payment_type: row.payment_type || 'N/A',
         status: row.status,
         booking_date: row.booking_date,
-        created_at: row.created_at
+        created_at: row.created_at,
+        branch_id: row.branch_id || null
       };
     });
 
@@ -2614,6 +2558,9 @@ const markBookingAsPaid = async (req, res) => {
       balance_collected: Number((nextTotalAmount - previousAmount).toFixed(2)),
       remaining_balance: remainingBalance,
     });
+
+    // Bust stats cache so dashboard immediately reflects new revenue/pending counts
+    bustCache(`stats:super_admin:all`, `stats:admin:${result.rows[0].branch_id}`, `stats:admin:all`);
   } catch (error) {
     console.error('Mark as paid error:', error);
     res.status(500).json({ error: 'Server error while marking booking as paid' });

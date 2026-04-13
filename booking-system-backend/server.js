@@ -17,39 +17,40 @@ const pool = require('./config/db'); // Import database connection
 
 app.set('trust proxy', 1);
 
-// Test database connection + auto-migrate branch_prices column
-pool.query('SELECT NOW()', (err, res) => {
+// Test database connection + auto-migrate
+pool.query('SELECT NOW()', (err, _res) => {
   if (err) {
     console.error('❌ Database connection failed:', err);
   } else {
     console.log('✅ Database connected successfully');
-    pool.query('ALTER TABLE courses ADD COLUMN IF NOT EXISTS branch_prices JSONB')
-      .then(() => console.log('✅ branch_prices column ready'))
-      .catch(e => console.warn('⚠️  branch_prices migration skipped:', e.message));
 
-    // Multi-PDC promo bundles can produce long course_type keys; ensure column can store full values.
-    pool.query('ALTER TABLE courses ALTER COLUMN course_type TYPE TEXT')
-      .then(() => console.log('✅ courses.course_type set to TEXT'))
-      .catch(e => console.warn('⚠️  course_type TEXT migration skipped:', e.message));
+    const migrations = [
+      // Column migrations (idempotent)
+      `ALTER TABLE courses ADD COLUMN IF NOT EXISTS branch_prices JSONB`,
+      `ALTER TABLE courses ALTER COLUMN course_type TYPE TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_failed_login_at TIMESTAMP`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS login_lock_until TIMESTAMP`,
+    ];
 
-    // Ensure avatar column exists on users table
-    pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT')
-      .then(() => console.log('✅ avatar column ready'))
-      .catch(e => console.warn('⚠️  avatar migration skipped:', e.message));
+    // Run column migrations sequentially (cheap on startup)
+    migrations.reduce((p, sql) => p.then(() => pool.query(sql)).catch(e => console.warn('⚠️  migration skipped:', e.message)), Promise.resolve())
+      .then(() => console.log('✅ Column migrations done'))
+      // Performance indexes — run async, never block startup
+      .then(() => {
+        const fs   = require('fs');
+        const path = require('path');
+        const idxFile = path.join(__dirname, 'migrations', 'add_performance_indexes.sql');
+        if (fs.existsSync(idxFile)) {
+          const sql = fs.readFileSync(idxFile, 'utf8');
+          return pool.query(sql)
+            .then(() => console.log('✅ Performance indexes applied'))
+            .catch(e => console.warn('⚠️  Index migration skipped:', e.message));
+        }
+      });
 
-    pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0')
-      .then(() => console.log('✅ failed_login_attempts column ready'))
-      .catch(e => console.warn('⚠️  failed_login_attempts migration skipped:', e.message));
-
-    pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_failed_login_at TIMESTAMP')
-      .then(() => console.log('✅ last_failed_login_at column ready'))
-      .catch(e => console.warn('⚠️  last_failed_login_at migration skipped:', e.message));
-
-    pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS login_lock_until TIMESTAMP')
-      .then(() => console.log('✅ login_lock_until column ready'))
-      .catch(e => console.warn('⚠️  login_lock_until migration skipped:', e.message));
-
-    // Expand the role CHECK constraint to include 'super_admin', then promote admin@gmail.com
+    // Role constraint + super_admin promotion
     pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`)
       .then(() => pool.query(`
         ALTER TABLE users ADD CONSTRAINT users_role_check
@@ -60,12 +61,12 @@ pool.query('SELECT NOW()', (err, res) => {
         WHERE (email = 'admin@gmail.com' OR email = 'superadmin@gmail.com') AND role != 'super_admin'
       `))
       .then(r => {
-        if (r.rowCount > 0) console.log('✅ Found global admin account: Promoted to super_admin');
-        else console.log('ℹ️  Global admin accounts are already super_admin or not found');
+        if (r.rowCount > 0) console.log('✅ Promoted global admin to super_admin');
       })
       .catch(e => console.warn('⚠️  super_admin setup skipped:', e.message));
   }
 });
+
 
 
 // Middleware
@@ -99,7 +100,8 @@ app.use(cors({
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
-app.use(compression());
+// Compress all responses ≥ 1 KB — important on Render's shared network
+app.use(compression({ threshold: 1024 }));
 app.use(hpp());
 
 app.use('/api', apiLimiter);
@@ -115,10 +117,14 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 const path = require('path');
+// Static uploads: long cache + ETags so GoDaddy/CloudFlare can cache avatars/images
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   etag: true,
-  maxAge: '7d',
+  lastModified: true,
+  maxAge: '30d',
+  immutable: false, // uploads can change (avatars), so no immutable flag
 }));
+
 
 // Routes
 app.use('/api/news', require('./routes/news'));

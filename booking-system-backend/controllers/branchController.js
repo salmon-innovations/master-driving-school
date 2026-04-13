@@ -1,14 +1,17 @@
 const pool = require('../config/db');
+const { withCache, bustCache } = require('../config/db');
 
-// Get all branches
+// Get all branches  (cached 5 min — branches rarely change)
 const getAllBranches = async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM branches ORDER BY id ASC');
+    const branches = await withCache('branches:all', async () => {
+      const result = await pool.query('SELECT * FROM branches ORDER BY id ASC');
+      return result.rows;
+    }, 5 * 60_000);
 
-    res.json({
-      success: true,
-      branches: result.rows,
-    });
+    // Tell CDN/browser to cache for 5 min — safe, branches change admin-side only
+    res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+    res.json({ success: true, branches });
   } catch (error) {
     console.error('Get branches error:', error);
     res.status(500).json({ error: 'Server error while fetching branches' });
@@ -79,10 +82,8 @@ const updateBranch = async (req, res) => {
       return res.status(404).json({ error: 'Branch not found' });
     }
 
-    res.json({
-      success: true,
-      branch: result.rows[0],
-    });
+    bustCache('branches:all'); // invalidate cached branch list
+    res.json({ success: true, branch: result.rows[0] });
   } catch (error) {
     console.error('Update branch error:', error);
     res.status(500).json({ error: 'Server error while updating branch' });
@@ -94,7 +95,6 @@ const deleteBranch = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if branch is in use (e.g., by users)
     const usersCount = await pool.query('SELECT COUNT(*) FROM users WHERE branch_id = $1', [id]);
     if (parseInt(usersCount.rows[0].count) > 0) {
       return res.status(400).json({ error: 'Cannot delete branch because it is being used by users' });
@@ -106,10 +106,8 @@ const deleteBranch = async (req, res) => {
       return res.status(404).json({ error: 'Branch not found' });
     }
 
-    res.json({
-      success: true,
-      message: 'Branch deleted successfully',
-    });
+    bustCache('branches:all'); // invalidate cached branch list
+    res.json({ success: true, message: 'Branch deleted successfully' });
   } catch (error) {
     console.error('Delete branch error:', error);
     res.status(500).json({ error: 'Server error while deleting branch' });
