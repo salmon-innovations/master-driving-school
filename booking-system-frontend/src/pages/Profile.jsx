@@ -1090,11 +1090,23 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                           {(() => {
                             const rowStatus = String(enrollment.booking_status || rawStatus || '').toLowerCase()
                             const normalizedPaymentType = String(enrollment.payment_status || '').toLowerCase()
-                            const coursePriceNum = Math.max(0, Number(enrollment.course_price || 0))
+                            
+                            const toAmount = (v) => {
+                              const num = Number(String(v || '').replace(/[^0-9.-]/g, ''));
+                              return Number.isFinite(num) ? num : 0;
+                            };
+                            const explicitNotesAssessment = [
+                              bookingMeta?.totalAmount,
+                              bookingMeta?.assessedTotal,
+                              bookingMeta?.grandTotal,
+                              bookingMeta?.finalTotal
+                            ].map(v => Math.max(0, toAmount(v))).find(v => v > 0) || 0;
+                            
+                            const coursePriceNum = Math.max(0, explicitNotesAssessment || Number(enrollment.course_price || 0))
                             const amountPaidNum = Math.max(0, Number(enrollment.amount_paid || 0))
                             const pendingAmountDue = amountPaidNum > 0 ? amountPaidNum : coursePriceNum
                             const balanceDue = Math.max(0, coursePriceNum - amountPaidNum)
-                            const partialPaymentFallbackDue = normalizedPaymentType.includes('downpayment')
+                            const partialPaymentFallbackDue = (normalizedPaymentType.includes('downpayment') || normalizedPaymentType.includes('partial'))
                               ? Math.max(0, amountPaidNum)
                               : coursePriceNum
                             const payableBalanceDue = balanceDue > 0 ? balanceDue : partialPaymentFallbackDue
