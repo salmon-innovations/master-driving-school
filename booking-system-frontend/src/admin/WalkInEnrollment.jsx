@@ -4008,7 +4008,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 <p><strong>Mode:</strong> Online TDC</p>
                                 <p><strong>Branch Slot:</strong> Not required</p>
                                 <p style={{ color: 'var(--secondary-text)', marginTop: '6px' }}>
-                                    Provider onboarding email will be sent by drivetech.ph / OTDC.ph (usually within 30 minutes).
+                                    Please expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.
                                 </p>
                             </>
                         ) : isPromo ? (
@@ -4018,7 +4018,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                         <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>OTDC (TDC):</p>
                                         <p><strong>Mode:</strong> Online TDC</p>
                                         <p><strong>Branch Slot:</strong> Not required</p>
-                                        <p><strong>Note:</strong> Student proceeds to enrollment immediately. OTDC access is provided by drivetech.ph / OTDC.ph.</p>
+                                        <p><strong>Note:</strong> Student proceeds to enrollment immediately. Please expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.</p>
                                     </>
                                 ) : (
                                     <>

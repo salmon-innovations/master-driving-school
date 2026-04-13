@@ -375,7 +375,9 @@ export const starpayAPI = {
   }),
   checkStatus: async (msgId) => {
     try {
-      return await apiRequest(`/starpay/status/${msgId}`);
+      // Append timestamp to bust the 2-min GET cache AND Cloudflare CDN cache.
+      // Using cache:false is invalid for the native fetch API and causes a silent TypeError.
+      return await apiRequest(`/starpay/status/${msgId}?_t=${Date.now()}`);
     } catch (error) {
       if (error?.statusCode === 404 && /order not found/i.test(String(error?.message || ''))) {
         return { success: true, localStatus: 'pending', starpayState: 'UNKNOWN' };

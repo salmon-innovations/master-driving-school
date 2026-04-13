@@ -94,6 +94,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
   const [paymentFailReason, setPaymentFailReason] = useState('cancelled')
   const [receiptCart, setReceiptCart] = useState([])
   const pollRef = useRef(null)
+  const pollActiveRef = useRef(false)
   const [paymentAutoCancelMinutes, setPaymentAutoCancelMinutes] = useState(() => getPaymentAutoCancelMinutes())
 
   const activeCart = showPaymentSuccess ? receiptCart : cart;
@@ -234,8 +235,9 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
   // Ensure polling is always cleaned up when leaving the page
   useEffect(() => {
     return () => {
+      pollActiveRef.current = false
       if (pollRef.current) {
-        clearInterval(pollRef.current)
+        clearTimeout(pollRef.current)
         pollRef.current = null
       }
     }
@@ -266,8 +268,9 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
   const qrSecondsRem = qrSecondsLeft != null ? qrSecondsLeft % 60 : null
 
   const handlePaymentSuccess = () => {
+    pollActiveRef.current = false
     if (pollRef.current) {
-      clearInterval(pollRef.current)
+      clearTimeout(pollRef.current)
       pollRef.current = null
     }
     setStarpayQR(null)
@@ -282,8 +285,9 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
   }
 
   const handlePaymentFailure = (reason = 'failed') => {
+    pollActiveRef.current = false
     if (pollRef.current) {
-      clearInterval(pollRef.current)
+      clearTimeout(pollRef.current)
       pollRef.current = null
     }
     setQrStatus('failed')
@@ -353,6 +357,31 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         type: item?.type || 'standard',
         category: item?.category || null,
       }))
+      const addonsDetailedPayload = [];
+      if (totalsData.reviewerTotal > 0) {
+        addonsDetailedPayload.push({ name: 'LTO Exam Reviewer', price: totalsData.reviewerTotal });
+      }
+      if (totalsData.vehicleTipsTotal > 0) {
+        addonsDetailedPayload.push({ name: 'Vehicle Maintenance Tips', price: totalsData.vehicleTipsTotal });
+      }
+      if (totalsData.customAddonsTotal > 0) {
+        const customAddonMap = {};
+        activeCart.forEach(item => {
+          const qty = item.quantity || 1;
+          if (item.addonsConfig?.customAddons) {
+            item.addonsConfig.customAddons.forEach(addon => {
+              if (item.selectedAddons && item.selectedAddons[addon.id]) {
+                const addPrice = parseFloat(addon.price || 0) * qty;
+                customAddonMap[addon.name] = (customAddonMap[addon.name] || 0) + addPrice;
+              }
+            });
+          }
+        });
+        Object.entries(customAddonMap).forEach(([name, price]) => {
+          addonsDetailedPayload.push({ name, price });
+        });
+      }
+
       const paymentResponse = await starpayAPI.createPayment({
         courseId: activeCart[0]?.id,
         courseName: activeCart[0]?.name,
@@ -379,6 +408,11 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         courseList,
         hasReviewer: totalsData.reviewerTotal > 0,
         hasVehicleTips: totalsData.vehicleTipsTotal > 0,
+        addonsDetailed: addonsDetailedPayload,
+        convenienceFee: totalsData.convenienceTotal,
+        subtotal: totalsData.subtotal,
+        promoDiscount: totalsData.bundleDiscountValue,
+        totalAmount: totalsData.finalTotal,
       })
 
       const msgId = paymentResponse?.msgId
@@ -393,50 +427,66 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       setQrStatus('pending')
       setIsProcessing(false)
 
+      // Stop any previous poll session
+      pollActiveRef.current = false
       if (pollRef.current) {
-        clearInterval(pollRef.current)
+        clearTimeout(pollRef.current)
         pollRef.current = null
       }
 
-      pollRef.current = setInterval(async () => {
+      // Adaptive polling: fires POLL_INTERVAL ms after each response (no drift).
+      // First check is accelerated to FAST_FIRST_MS so we catch instant payments.
+      const FAST_FIRST_MS = 800;
+      const POLL_INTERVAL = 1500;
+
+      pollActiveRef.current = true;
+
+      const schedulePoll = (delayMs) => {
+        if (!pollActiveRef.current) return;
+        pollRef.current = setTimeout(doPoll, delayMs);
+      };
+
+      const doPoll = async () => {
+        if (!pollActiveRef.current) return;
         try {
           const statusRes = await starpayAPI.checkStatus(msgId)
+          if (!pollActiveRef.current) return; // stopped while awaiting
           const localStatus = (statusRes?.localStatus || '').toLowerCase()
           const trxState = (statusRes?.starpayState || '').toUpperCase()
 
-          if (localStatus === 'paid' || trxState === 'SUCCESS') {
-            clearInterval(pollRef.current)
-            pollRef.current = null
+          if (localStatus === 'paid' || localStatus === 'partial_payment' || trxState === 'SUCCESS') {
+            pollActiveRef.current = false
             setQrStatus('success')
-            setTimeout(() => {
-              handlePaymentSuccess()
-            }, 1200)
+            handlePaymentSuccess()
             return
           }
 
           if (localStatus === 'cancelled') {
-            clearInterval(pollRef.current)
-            pollRef.current = null
+            pollActiveRef.current = false
             handlePaymentFailure('cancelled')
             return
           }
 
-          if (['CLOSE'].includes(trxState)) {
-            clearInterval(pollRef.current)
-            pollRef.current = null
+          if (trxState === 'CLOSE') {
+            pollActiveRef.current = false
             handlePaymentFailure('expired')
             return
           }
 
           if (['FAIL', 'REVERSED', 'CANCEL'].includes(trxState)) {
-            clearInterval(pollRef.current)
-            pollRef.current = null
+            pollActiveRef.current = false
             handlePaymentFailure('gateway')
+            return
           }
-        } catch (pollErr) {
-          // Keep polling unless we get explicit paid/failed state.
+        } catch (_pollErr) {
+          // Network hiccup — keep polling
         }
-      }, 4000)
+        // Re-arm for next cycle
+        schedulePoll(POLL_INTERVAL);
+      };
+
+      // First poll fires fast
+      schedulePoll(FAST_FIRST_MS);
     } catch (error) {
       console.error('Checkout error:', error)
       showNotification(error.message || 'Enrollment failed. Please try again.', 'error')
@@ -474,7 +524,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                   <p className="font-bold">Payment Alert</p>
                   {isOnlineTdcNoSchedule ? (
                     <p>
-                      Your Online TDC provider onboarding details are being prepared. Please wait up to 30 minutes for the account email from drivetech.ph / OTDC.ph, then check your inbox, Spam, and Promotions folders.
+                      Please expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.
                     </p>
                   ) : (
                     <p>Your training schedule details were sent to your email. Please check your inbox (and Spam or Promotions folder).</p>
@@ -1107,7 +1157,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                           <div>
                             <p className="text-[10px] font-black text-green-400 uppercase tracking-widest">Online TDC Provider</p>
                             <p className="text-[11px] text-white/85 mt-1">
-                              No branch schedule selection is required. Please wait up to 30 minutes for your provider account email from drivetech.ph / OTDC.ph.
+                              No branch schedule selection is required. Please expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.
                             </p>
                           </div>
                         </div>

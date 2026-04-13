@@ -147,6 +147,34 @@ const buildPdcCourseOptions = (booking, notesJson) => {
         : [{ key: 'pdc_1', courseId: null, courseName: 'PDC Course', courseType: '', requiresDay2: false }];
 };
 
+const sortSlotsFn = (slotsArr) => {
+    return [...slotsArr].sort((a, b) => {
+        // 1. TDC always on top
+        const typeA = (a.type || '').toLowerCase();
+        const typeB = (b.type || '').toLowerCase();
+        if (typeA === 'tdc' && typeB !== 'tdc') return -1;
+        if (typeA !== 'tdc' && typeB === 'tdc') return 1;
+
+        // 2. Put together same Course (course_type)
+        const ctA = (a.course_type || '').toLowerCase();
+        const ctB = (b.course_type || '').toLowerCase();
+        if (ctA < ctB) return -1;
+        if (ctA > ctB) return 1;
+
+        // 3. Put together transmission
+        const transA = (a.transmission || '').toLowerCase();
+        const transB = (b.transmission || '').toLowerCase();
+        if (transA < transB) return -1;
+        if (transA > transB) return 1;
+
+        // 4. Sort by session
+        const sessionOrder = { 'morning': 1, 'afternoon': 2, 'whole day': 3 };
+        const sA = sessionOrder[(a.session || '').toLowerCase()] || 4;
+        const sB = sessionOrder[(b.session || '').toLowerCase()] || 4;
+        return sA - sB;
+    });
+};
+
 const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '', navigationTarget = null }) => {
     const [todayStudents, setTodayStudents] = React.useState({ data: [], total: 0, date: '' });
     const [scheduleView, setScheduleView] = React.useState('schedule'); // 'schedule' | 'tdc_online' | 'pdc_scheduling' | 'summary' | 'noshow'
@@ -665,16 +693,16 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
             const sEnd = s.end_date || s.date;
             return selectedDate >= sStart && selectedDate <= sEnd;
         }) : [];
-        if (!slotSearch.trim()) return base;
+        if (!slotSearch.trim()) return sortSlotsFn(base);
         const q = slotSearch.trim().toLowerCase();
-        return base.filter(s =>
+        return sortSlotsFn(base.filter(s =>
             (s.type || '').toLowerCase().includes(q) ||
             (s.course_type || '').toLowerCase().includes(q) ||
             (s.transmission || '').toLowerCase().includes(q) ||
             (s.session || '').toLowerCase().includes(q) ||
             (s.sessionLabel || '').toLowerCase().includes(q) ||
             (s.time_range || s.time || '').toLowerCase().includes(q)
-        );
+        ));
     })();
 
     // Load slots from database
@@ -2335,13 +2363,14 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                 const isSunday = dayOfWeek === 0; // Sunday = 0
                                 const isPast = dateStr < today; // Disable past dates
                                 const isDisabled = isPast || isSunday; // Disable past dates and Sundays
-                                const daySlots = slots.filter(s => {
+                                let daySlots = slots.filter(s => {
                                     // Skip Sundays entirely
                                     if (dayOfWeek === 0) return false;
                                     const sStart = s.date;
                                     const sEnd = s.end_date || s.date;
                                     return dateStr >= sStart && dateStr <= sEnd;
                                 });
+                                daySlots = sortSlotsFn(daySlots);
                                 const isAllFull = daySlots.length > 0 && daySlots.every(slot => slot.available_slots === 0);
                                 const slotStatus = daySlots.length === 0 ? 'no-slots' : (isAllFull ? 'full-slots' : 'has-slots');
 

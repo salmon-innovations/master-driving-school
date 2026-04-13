@@ -2,6 +2,25 @@ const pool = require('../config/db');
 const { createRepayment, queryRepayment, verifySignature } = require('../utils/starpayService');
 const { sendEnrollmentEmail, sendAddonsEmail } = require('../utils/emailService');
 
+// Short-lived in-memory set of msgIds fulfilled in the last 30 seconds.
+// Lets the very first poll after fulfillment short-circuit without querying StarPay.
+const recentlyFulfilled = new Map(); // msgId -> expireAt timestamp
+const FULFILLED_TTL_MS = 30_000;
+const markFulfilled = (msgId) => {
+    recentlyFulfilled.set(msgId, Date.now() + FULFILLED_TTL_MS);
+    // Clean up stale entries
+    const now = Date.now();
+    for (const [k, exp] of recentlyFulfilled.entries()) {
+        if (exp < now) recentlyFulfilled.delete(k);
+    }
+};
+const wasFulfilled = (msgId) => {
+    const exp = recentlyFulfilled.get(msgId);
+    if (!exp) return false;
+    if (Date.now() > exp) { recentlyFulfilled.delete(msgId); return false; }
+    return true;
+};
+
 /*
 Payment lifecycle (authoritative status rules):
 
@@ -640,7 +659,7 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
 
                 const d = detailsRows[0] || {};
                 if (d.email) {
-                    await sendEnrollmentEmail(d.email, d.first_name || 'Student', d.last_name || '', {
+                    sendEnrollmentEmail(d.email, d.first_name || 'Student', d.last_name || '', {
                         bookingId,
                         courseName: d.course_name || 'N/A',
                         courseList: Array.isArray(meta.courseList) ? meta.courseList : [],
@@ -675,8 +694,8 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
                         paymentMethod: 'StarPay',
                         amountPaid: amountPhp,
                         paymentStatus: meta.paymentType || 'Full Payment',
-                    }, meta.hasReviewer, meta.hasVehicleTips);
-                    console.log(`[StarPay] Enrollment email sent to ${d.email}`);
+                    }, meta.hasReviewer, meta.hasVehicleTips).catch(e => console.error('[StarPay] Async email error:', e.message));
+                    console.log(`[StarPay] Enrollment email initiated in background for ${d.email}`);
                 }
             } catch (emailErr) {
                 console.error('[StarPay] Logged-in enrollment email failed:', emailErr.message);
@@ -687,6 +706,7 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
     }
 
     console.log(`[StarPay] Booking ${bookingId} fulfilled via sync/webhook (₱${amountPhp})`);
+    markFulfilled(originalMsgId);
     return bookingId;
 };
 
@@ -765,6 +785,11 @@ const handleWebhook = async (req, res) => {
 const checkStatus = async (req, res) => {
     const { msgId } = req.params;
 
+    // Prevent Cloudflare / any CDN from caching these polling responses.
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Surrogate-Control', 'no-store');
+
     // Check bookings table first (regular payments)
     const { rows } = await pool.query(
         `SELECT id, status, total_amount, branch_id FROM bookings WHERE transaction_id = $1`,
@@ -783,16 +808,32 @@ const checkStatus = async (req, res) => {
                 amount: booking.total_amount,
             });
         }
+
+        // Was just fulfilled by webhook/fallback? Short-circuit — DB write may still be
+        // committing, but the next poll (1.5s later) will pick it up from the DB.
+        if (wasFulfilled(msgId)) {
+            return res.json({
+                success: true,
+                localStatus: 'paid',
+                starpayState: 'SUCCESS',
+                bookingId: booking.id,
+                amount: booking.total_amount,
+            });
+        }
+
         // booking exists and is still pending — query StarPay
         try {
             const queryMsgId = `QRY${Date.now()}`;
             const spResult = await queryRepayment(queryMsgId, msgId, { branchId: booking.branch_id || null });
             const spResponse = spResult?.response || spResult;
 
-            // FALLBACK: If StarPay says SUCCESS but we are still PENDING, fulfill it now.
+            // FALLBACK: If StarPay says SUCCESS but we are still PENDING, fulfill it now
+            // in the background so the response goes back to the frontend immediately.
             if (spResponse?.trxState === 'SUCCESS' && booking.status === 'pending') {
                 console.log(`[StarPay] Fallback fulfillment triggered via checkStatus for ${msgId}`);
-                await fulfillBookingPayment(msgId, spResponse.trxAmount, spResponse.orderNo);
+                markFulfilled(msgId); // mark now so next poll short-circuits
+                fulfillBookingPayment(msgId, spResponse.trxAmount, spResponse.orderNo)
+                    .catch(e => console.error('[StarPay] Async fulfillment error:', e.message));
             }
 
             return res.json({

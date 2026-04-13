@@ -1197,8 +1197,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
               <div class="requirements" style="background: #ecfeff; border-left: 4px solid #0891b2; margin: 18px 0; border-radius: 8px;">
                 <h4 style="color: #0e7490; margin: 0 0 8px 0;">💻 Online TDC Provider Notice</h4>
                 <p style="margin: 0; font-size: 14px; color: #155e75;">
-                  Your Online TDC is handled by our partner providers <strong>drivetech.ph</strong> and <strong>OTDC.ph</strong>.
-                  Please wait up to <strong>30 minutes</strong> for your account activation email, and check your Inbox, Spam, and Promotions folders.
+                  Please expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.
                 </p>
               </div>
               ${isPdcScheduleLocked ? `
@@ -1359,7 +1358,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
     // Construct plain text version
     let plainText = `Hello ${firstName} ${lastName}!\n\nYour walk-in enrollment has been successfully processed.\n`;
     if (isOnlineTdc) {
-      plainText += `\nONLINE TDC PROVIDER NOTICE:\nYour Online TDC is handled by drivetech.ph / OTDC.ph.\nPlease wait up to 30 minutes for your account activation email and check Inbox, Spam, and Promotions folders.\n`;
+      plainText += `\nONLINE TDC PROVIDER NOTICE:\nPlease expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.\n`;
       if (isPdcScheduleLocked) {
         plainText += `\nPDC SCHEDULING NOTICE:\n${pdcLockReason}\n`;
       }
@@ -1621,8 +1620,7 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
               <div class="requirements" style="background: #ecfeff; border-left: 4px solid #0891b2; margin: 18px 0; border-radius: 8px;">
                 <h4 style="color: #0e7490; margin: 0 0 8px 0;">💻 Online TDC Provider Notice</h4>
                 <p style="margin: 0; font-size: 14px; color: #155e75;">
-                  Your Online TDC is handled by our partner providers <strong>drivetech.ph</strong> and <strong>OTDC.ph</strong>.
-                  Please wait up to <strong>30 minutes</strong> for your account activation email, and check your Inbox, Spam, and Promotions folders.
+                  Please expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.
                 </p>
               </div>
               ${isPdcScheduleLocked ? `
@@ -1725,21 +1723,21 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
         </body>
         </html>
       `,
-      text: `Hello ${firstName} ${lastName}!\n\nYour enrollment has been successfully processed.\n\n${[isOnlineTdc ? `ONLINE TDC PROVIDER NOTICE:\nYour Online TDC is handled by drivetech.ph / OTDC.ph.\nPlease wait up to 30 minutes for your account activation email and check Inbox, Spam, and Promotions folders.${isPdcScheduleLocked ? `\n\nPDC SCHEDULING NOTICE:\n${pdcLockReason}` : ''}` : (hasPrimarySchedule ? `${primaryScheduleLabel}\nDay 1: ${formattedDate}\nSession: ${displayScheduleSession}\nTime: ${scheduleTime || 'N/A'}${effectiveDate2 ? `\nDay 2: ${effectiveDate2}\nSession: ${effectiveSession2 || 'N/A'}\nTime: ${effectiveTime2 || 'N/A'}` : ''}` : ''), hasMultiPdc
+      text: `Hello ${firstName} ${lastName}!\n\nYour enrollment has been successfully processed.\n\n${[isOnlineTdc ? `ONLINE TDC PROVIDER NOTICE:\nPlease expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.${isPdcScheduleLocked ? `\n\nPDC SCHEDULING NOTICE:\n${pdcLockReason}` : ''}` : (hasPrimarySchedule ? `${primaryScheduleLabel}\nDay 1: ${formattedDate}\nSession: ${displayScheduleSession}\nTime: ${scheduleTime || 'N/A'}${effectiveDate2 ? `\nDay 2: ${effectiveDate2}\nSession: ${effectiveSession2 || 'N/A'}\nTime: ${effectiveTime2 || 'N/A'}` : ''}` : ''), hasMultiPdc
         ? normalizedPdcSchedules.map((s, idx) => {
             const d1 = formatDisplayDate(s.scheduleDate);
             const d2 = formatDisplayDate(s.scheduleDate2);
             return `${s.scheduleLabelDisplay || `PDC ${idx + 1}`}\nDay 1: ${d1}\nSession: ${s.scheduleSessionDisplay || 'N/A'}\nTime: ${s.scheduleTime || 'N/A'}${d2 ? `\nDay 2: ${d2}\nSession: ${s.scheduleSession2Display || 'N/A'}\nTime: ${s.scheduleTime2 || 'N/A'}` : ''}`;
           }).join('\n\n')
-        : ''].filter(Boolean).join('\n\n')}\nCourse: ${courseName} (${courseType})\n${hasCourseList ? `Enrolled Courses:\n${normalizedCourseList.map((c, idx) => `${idx + 1}. ${c?.name || `Course ${idx + 1}`} (${(c?.type || 'standard').toUpperCase()})`).join('\n')}\n` : ''}Branch: ${branchName}\n\n${isDownpayment ? `${remainingBalanceDue > 0 ? `Remaining Balance: PHP ${Number(remainingBalanceDue).toLocaleString()}\n` : ''}REMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n\n` : ''}${isB1B2 ? `VEHICLE RENTAL NOTE: For PDC - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}${isTricycle ? `VEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}Thank you for choosing Master Driving School!`,
+        : ''].filter(Boolean).join('\n\n')}\nCourse: ${courseName} (${courseType})\n${hasCourseList ? `Enrolled Courses:\n${normalizedCourseList.map((c, idx) => `${idx + 1}. ${c?.name || `Course ${idx + 1}`} (${(c?.type || 'standard').toUpperCase()})`).join('\n')}\n` : ''}Branch: ${branchName}\n\n${isDownpayment ? `${remainingBalanceDue > 0 ? `Remaining Balance: PHP ${Number(remainingBalanceDue).toLocaleString()}\n` : ''}REMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n\n` : ''}${isTricycle ? `VEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}Thank you for choosing Master Driving School!`,
     };
 
     const info = await sendMailWithFallback(transporter, mailOptions);
-    console.log('✅ Guest enrollment email sent to:', email);
+    console.log('✅ Enrollment email sent to:', email);
     console.log('Message ID:', info.messageId);
     return true;
   } catch (error) {
-    console.error('❌ Guest enrollment email sending failed:', error.message);
+    console.error('❌ Enrollment email sending failed:', error.message);
     throw error;
   }
 };
@@ -1908,7 +1906,7 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
     // Generate PDF attachment
     const pdfBuffer = await generateReceiptPDF(firstName, lastName, receiptData);
     const safeSurname = (lastName || 'Student').replace(/[^a-zA-Z0-9]/g, '_');
-    const pdfFilename = `Receipt-${safeSurname}.pdf`;
+    const pdfFilename = `Service-Invoice-${safeSurname}.pdf`;
 
     const mailOptions = {
       from: getFromAddress(),

@@ -49,8 +49,8 @@ CREATE INDEX IF NOT EXISTS idx_se_created_at
 CREATE INDEX IF NOT EXISTS idx_ss_branch_date
     ON schedule_slots(branch_id, date);
 
-CREATE INDEX IF NOT EXISTS idx_ss_course_id
-    ON schedule_slots(course_id);
+CREATE INDEX IF NOT EXISTS idx_ss_course_type
+    ON schedule_slots(course_type);
 
 -- users ───────────────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_users_email

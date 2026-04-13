@@ -296,7 +296,7 @@ const SalePayment = () => {
         const html = `
             <html>
             <head>
-                <title>OFFICIAL RECEIPT - ${txn.id}</title>
+                <title>Acknowledgement Receipt - ${txn.id}</title>
                 <style>
                     body { font-family: 'Segoe UI', Arial, sans-serif; padding: 20px; color: #1e293b; max-width: 500px; margin: 0 auto; border: 1px dashed #cbd5e1; }
                     .header { border-bottom: 2px solid #1a4fba; padding-bottom: 15px; margin-bottom: 20px; display: flex; align-items: center; gap: 15px; }
@@ -327,7 +327,7 @@ const SalePayment = () => {
                         <p>Official Billing Document</p>
                     </div>
                 </div>
-                <div class="receipt-title">OFFICIAL RECEIPT</div>
+                <div class="receipt-title">Acknowledgement Receipt</div>
                 <div class="info-row">
                     <span class="info-label">Transaction ID:</span>
                     <span class="info-value">${txn.id}</span>

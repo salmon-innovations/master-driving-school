@@ -20,6 +20,7 @@ const {
 
 const EMAIL_CONTENT_PATH = path.join(__dirname, '../config/emailContent.json');
 const ADDONS_CONFIG_PATH = path.join(__dirname, '../config/addonsConfig.json');
+const { parseBookingFinancials } = require('../utils/financeUtils');
 
 let permissionsColumnReady = false;
 
@@ -365,17 +366,14 @@ const getDashboardStats = async (req, res) => {
         const d = new Date(b.created_at);
         const isCurrent = d.getMonth() === currentMonth && d.getFullYear() === currentYear;
         const isLast = d.getMonth() === lastMonth && d.getFullYear() === lastMonthYear;
-        const tAmt = parseFloat(b.total_amount || 0);
-        let addrev = 0, conv = 0;
-        if (b.notes && typeof b.notes === 'string' && b.notes.trim().startsWith('{')) {
-          try {
-            const js = JSON.parse(b.notes);
-            if (js.convenienceFee) conv = parseFloat(js.convenienceFee);
-            if (Array.isArray(js.addonsDetailed)) addrev = js.addonsDetailed.reduce((s, a) => s + parseFloat(a.price || 0), 0);
-          } catch (e) {}
+        const { amount, courseRevenue, addonRevenue, convenienceFee } = parseBookingFinancials(b.total_amount, b.notes);
+
+        if (isCurrent) { 
+          currentRevAddons += addonRevenue; 
+          currentRevConv += convenienceFee; 
+          currentRevCourse += courseRevenue; 
         }
-        if (isCurrent) { currentRevAddons += addrev; currentRevConv += conv; currentRevCourse += Math.max(0, tAmt - addrev - conv); }
-        if (isLast) lastMonthRevenue += isSuperAdmin ? tAmt : Math.max(0, tAmt - addrev - conv);
+        if (isLast) lastMonthRevenue += isSuperAdmin ? amount : courseRevenue;
       });
 
       const currentRevenue = isSuperAdmin ? (currentRevCourse + currentRevAddons + currentRevConv) : currentRevCourse;
@@ -738,30 +736,21 @@ const getRevenueData = async (req, res) => {
       const name = months[m];
       if (!monthData[name]) monthData[name] = 0;
 
-      const tAmt = parseFloat(r.total_amount || 0);
-      let addrev = 0, conv = 0;
+      const { amount, courseRevenue, addonRevenue, convenienceFee, notesJson } = parseBookingFinancials(r.total_amount, r.notes);
 
-      if (r.notes && typeof r.notes === 'string' && r.notes.trim().startsWith('{')) {
-        try {
-          const js = JSON.parse(r.notes);
-          if (js.convenienceFee) conv = parseFloat(js.convenienceFee);
-          if (Array.isArray(js.addonsDetailed)) {
-             js.addonsDetailed.forEach(a => {
-                const aPrice = parseFloat(a.price || 0);
-                addrev += aPrice;
-                if (!addonBreakdownMap[a.name]) addonBreakdownMap[a.name] = { count: 0, revenue: 0 };
-                addonBreakdownMap[a.name].count += 1;
-                addonBreakdownMap[a.name].revenue += aPrice;
-             });
-          }
-        } catch (e) {}
+      if (notesJson && Array.isArray(notesJson.addonsDetailed)) {
+         notesJson.addonsDetailed.forEach(a => {
+            const aPrice = parseFloat(a.price || 0);
+            if (!addonBreakdownMap[a.name]) addonBreakdownMap[a.name] = { count: 0, revenue: 0 };
+            addonBreakdownMap[a.name].count += 1;
+            addonBreakdownMap[a.name].revenue += aPrice;
+         });
       }
       
-      let courseRev = Math.max(0, tAmt - addrev - conv);
-      totalAddonsYear += addrev;
-      totalConvYear += conv;
+      totalAddonsYear += addonRevenue;
+      totalConvYear += convenienceFee;
 
-      monthData[name] += isSuperAdmin ? (courseRev + addrev + conv) : courseRev;
+      monthData[name] += isSuperAdmin ? amount : courseRevenue;
     });
 
     const finalData = [];

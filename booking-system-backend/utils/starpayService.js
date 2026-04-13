@@ -166,7 +166,7 @@ const verifySignature = (rawRequestStr, signature) => {
 };
 
 /* ── HTTP helper ───────────────────────────────────────────────────── */
-const apiPost = async (endpoint, requestObj, starpayConfig = getDefaultConfig()) => {
+const apiPost = async (endpoint, requestObj, starpayConfig = getDefaultConfig(), timeoutMs = 20000) => {
     // Docs require fields sorted alphabetically (mirrors Java TreeMap behaviour)
     const sorted = Object.keys(requestObj).sort().reduce((acc, k) => {
         acc[k] = requestObj[k];
@@ -184,9 +184,12 @@ const apiPost = async (endpoint, requestObj, starpayConfig = getDefaultConfig())
     const headers = { 'Content-Type': 'application/json' };
     if (starpayConfig.bearer) headers['Authorization'] = `Bearer ${starpayConfig.bearer}`;
 
+    // Force IPv4 resolution to mitigate Node.js EAI_AGAIN sporadic errors
+    const https = require('https');
     const response = await axios.post(`${BASE_URL}${endpoint}`, body, {
         headers,
-        timeout: 20000,
+        timeout: timeoutMs,
+        httpsAgent: new https.Agent({ family: 4 })
     });
     return response.data;
 };
@@ -245,7 +248,9 @@ const queryRepayment = async (queryMsgId, originalMsgId, { branchId, branchName 
         originalMsgId,
         service: 'unified.repayment.query',
     };
-    return await apiPost('/v1/repayment/query', requestObj, starpayConfig);
+    // Use a shorter timeout for status queries so slow responses don't block the
+    // polling loop for the full 20s create-payment timeout.
+    return await apiPost('/v1/repayment/query', requestObj, starpayConfig, 8000);
 };
 
 module.exports = {

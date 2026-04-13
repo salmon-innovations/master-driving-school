@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import './css/sale.css';
 import { adminAPI, coursesAPI, branchesAPI, authAPI, getCached, setCached } from '../services/api';
 import { normalizeNotificationText } from '../utils/notificationText';
+import { parseBookingFinancials } from '../utils/financeUtils';
 const logo = `${window.location.origin}/images/Master-logo.png`;
 import Pagination from './components/Pagination';
 import {
@@ -706,20 +707,7 @@ const SalePayment = () => {
         const status = String(t.status || '').toLowerCase();
         if (!isRecordedPaymentStatus(status)) return acc;
 
-        const amount = Number(t.rawAmount || 0);
-        const notesJson = parseNotesJson(t.notes || '');
-
-        let addonRevenue = 0;
-        let convenienceFee = 0;
-
-        if (notesJson) {
-            if (Array.isArray(notesJson.addonsDetailed)) {
-                addonRevenue = notesJson.addonsDetailed.reduce((sum, addon) => sum + Number(addon?.price || 0), 0);
-            }
-            convenienceFee = Number(notesJson.convenienceFee || 0);
-        }
-
-        const courseRevenue = Math.max(0, amount - addonRevenue - convenienceFee);
+        const { amount, courseRevenue, addonRevenue, convenienceFee } = parseBookingFinancials(t.rawAmount, t.notes);
 
         acc.total += amount;
         acc.course += courseRevenue;
@@ -1080,7 +1068,7 @@ const SalePayment = () => {
         const html = `
             <html>
             <head>
-                <title>OFFICIAL RECEIPT - ${txn.id}</title>
+                <title>Acknowledgement Receipt - ${txn.id}</title>
                 <style>
                     body { font-family: 'Segoe UI', Arial, sans-serif; padding: 14px; color: #1e293b; max-width: 500px; margin: 0 auto; border: 1px dashed #cbd5e1; }
                     .header { border-bottom: 2px solid #1a4fba; padding-bottom: 10px; margin-bottom: 12px; display: flex; align-items: center; gap: 12px; }
@@ -1130,7 +1118,7 @@ const SalePayment = () => {
                         <p>Official Billing Document</p>
                     </div>
                 </div>
-                <div class="receipt-title">OFFICIAL RECEIPT</div>
+                <div class="receipt-title">Acknowledgement Receipt</div>
                 <div class="info-row">
                     <span class="info-label">Transaction ID:</span>
                     <span class="info-value">${txn.id}</span>
