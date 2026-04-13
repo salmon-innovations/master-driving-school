@@ -7,7 +7,6 @@ import NationalitySelect from '../components/NationalitySelect';
 
 const logo = '/images/logo.png';
 
-const CONVENIENCE_FEE = 25;
 const DEFAULT_ADDONS = [
     { id: 'addon-reviewer', name: 'Driving School Reviewer', price: 30, icon: '📖' },
     { id: 'addon-tips', name: 'Vehicle Maintenance Tips', price: 20, icon: '🔧' }
@@ -437,11 +436,15 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const promoTdcType = isPromo ? (formData.promoTdcType || promoDerivedTdcType) : null;
     const promoPdcType = isPromo ? (formData.course?.course_type?.split('+')[1] || 'Motorcycle') : null;
     const promoTdcTypeOptions = isPromo ? (() => {
+        const fixedTdcType = String(promoDerivedTdcType || '').toUpperCase();
+        if (fixedTdcType === 'F2F') return ['F2F'];
+        if (fixedTdcType === 'ONLINE') return ['ONLINE'];
+
         const opts = formData.course?._tdcCourse?.typeOptions || [];
-        const hasOnline = opts.some(opt => (opt.label || '').toLowerCase().includes('online'));
+        const hasOnline = opts.some(opt => (opt.label || '').toLowerCase().includes('online') || (opt.value || '').toLowerCase().includes('online'));
         const hasF2f = opts.some(opt => {
-            const label = (opt.label || '').toLowerCase();
-            return label.includes('f2f') || label.includes('face to face') || label.includes('face-to-face');
+            const str = ((opt.label || '') + ' ' + (opt.value || '')).toLowerCase();
+            return str.includes('f2f') || str.includes('face to face') || str.includes('face-to-face');
         });
         const types = [];
         if (hasF2f) types.push('F2F');
@@ -473,7 +476,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         if (isTricycle) {
             return {
                 kind: 'Tricycle',
-                label: `Tricycle${hasAT ? ' (AT)' : hasMT ? ' (MT)' : ''}`,
+                label: 'Tricycle',
                 fixedTransmission: null,
                 preferredTransmission: null,
             };
@@ -482,20 +485,36 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         if (isMotorcycle) {
             return {
                 kind: 'Motorcycle',
-                label: `Motorcycle${hasAT ? ' (AT)' : hasMT ? ' (MT)' : ''}`,
+                label: 'Motorcycle',
                 fixedTransmission: null,
-                preferredTransmission: null,
+                preferredTransmission: hasAT ? 'AT' : hasMT ? 'MT' : null,
             };
         }
 
         if (hasAT) {
-            return { kind: 'CarAT', label: 'Car (AT)', fixedTransmission: null, preferredTransmission: null };
+            return { kind: 'Car', label: 'Car', fixedTransmission: null, preferredTransmission: 'AT' };
         }
         if (hasMT) {
-            return { kind: 'CarMT', label: 'Car (MT)', fixedTransmission: null, preferredTransmission: null };
+            return { kind: 'Car', label: 'Car', fixedTransmission: null, preferredTransmission: 'MT' };
         }
 
         return { kind: 'Car', label: 'Car', fixedTransmission: null, preferredTransmission: null };
+    };
+
+    const getPromoPdcGroupKey = (item) => {
+        const kind = getPromoPdcCourseMeta(item).kind;
+        if (kind === 'CarAT' || kind === 'CarMT') return 'Car';
+        return kind;
+    };
+
+    const getPromoTransmissionCode = (value) => {
+        const label = String(value || '').toLowerCase();
+        if (!label) return null;
+        const hasAT = /(^|\W)(at|a\/t|automatic)($|\W)/i.test(label);
+        const hasMT = /(^|\W)(mt|manual)($|\W)/i.test(label);
+        if (hasAT && !hasMT) return 'AT';
+        if (hasMT && !hasAT) return 'MT';
+        return null;
     };
 
     const isHalfDaySession = (session) => {
@@ -503,22 +522,181 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         return s.includes('morning') || s.includes('afternoon') || s.includes('4 hours');
     };
 
+    const parsePromoPdcParts = (courseTypeValue) => {
+        const raw = String(courseTypeValue || '');
+        const plusIndex = raw.indexOf('+');
+        if (plusIndex < 0) return [];
+        const pdcRaw = raw.slice(plusIndex + 1).trim();
+        if (!pdcRaw) return [];
+
+        const parts = pdcRaw
+            .split('|')
+            .map(part => String(part || '').trim())
+            .filter(Boolean);
+
+        if (parts.length > 0) return parts;
+        return [pdcRaw];
+    };
+
+    const buildFallbackPromoPdcCourse = (promoCourse, part, index) => {
+        const meta = getPromoPdcCourseMeta({ name: part, shortName: part, course_type: part });
+        return {
+            id: `promo-${promoCourse?.id || 'na'}-pdc-${index}`,
+            name: `Practical Driving Course - ${meta.label}`,
+            shortName: meta.label,
+            category: 'PDC',
+            course_type: part,
+            duration: '8 Hours',
+            price: 0,
+            original_price: 0,
+            typeOptions: [],
+        };
+    };
+
+    const enrichSinglePromoCourse = (promoCourse) => {
+        if (!promoCourse || promoCourse.category !== 'Promo') return promoCourse;
+        if (Array.isArray(promoCourse._pdcCourses) && promoCourse._pdcCourses.length > 0) return promoCourse;
+
+        const promoType = String(promoCourse.course_type || '');
+        const tdcPart = promoType.includes('+') ? promoType.split('+')[0].trim().toUpperCase() : '';
+        const parsedPdcParts = parsePromoPdcParts(promoType);
+
+        const allTdcCourses = packages.filter(pkg => pkg.category === 'TDC');
+        const allPdcCourses = packages.filter(pkg => pkg.category === 'PDC');
+
+        const resolvedTdc = allTdcCourses.find((pkg) => {
+            const labels = (pkg.typeOptions || []).map(opt => String(opt.label || '').toLowerCase());
+            if (tdcPart === 'ONLINE') return labels.some(label => label.includes('online'));
+            if (tdcPart === 'F2F') return labels.some(label => label.includes('f2f') || label.includes('face to face') || label.includes('face-to-face'));
+            return false;
+        }) || allTdcCourses[0] || null;
+
+        const usedIds = new Set();
+        const resolvedPdc = parsedPdcParts.map((part, index) => {
+            const desiredMeta = getPromoPdcCourseMeta({ name: part, shortName: part, course_type: part });
+            let best = null;
+            let bestScore = -1;
+
+            allPdcCourses.forEach((pkg) => {
+                if (pkg?.id != null && usedIds.has(pkg.id)) return;
+                const meta = getPromoPdcCourseMeta(pkg);
+
+                let score = 0;
+                if (meta.kind === desiredMeta.kind) score += 5;
+
+                if (score <= 0) return;
+
+                const searchable = `${pkg.name || ''} ${pkg.shortName || ''} ${pkg.course_type || ''}`.toLowerCase();
+                const token = String(part || '').toLowerCase();
+                if (token && searchable.includes(token)) score += 1;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = pkg;
+                }
+            });
+
+            if (best && best.id != null) usedIds.add(best.id);
+            return best || buildFallbackPromoPdcCourse(promoCourse, part, index + 1);
+        }).filter(Boolean);
+
+        const dedupedByGroup = [];
+        const seenGroups = new Set();
+        resolvedPdc.forEach((course) => {
+            const groupKey = getPromoPdcGroupKey(course);
+            if (seenGroups.has(groupKey)) return;
+            seenGroups.add(groupKey);
+            dedupedByGroup.push(course);
+        });
+
+        return {
+            ...promoCourse,
+            _tdcCourse: promoCourse._tdcCourse || resolvedTdc,
+            _pdcCourse: promoCourse._pdcCourse || dedupedByGroup[0] || null,
+            _pdcCourses: dedupedByGroup,
+        };
+    };
+
     const promoPdcCourses = isPromo
-        ? ((formData.course?._pdcCourses && formData.course._pdcCourses.length > 0
-            ? formData.course._pdcCourses
-            : formData.course?._pdcCourse ? [formData.course._pdcCourse] : [])
-            .map(item => {
+        ? (() => {
+            const isManualBundle = !!formData.course?._isManualBundle;
+            const source = (formData.course?._pdcCourses && formData.course._pdcCourses.length > 0
+                ? formData.course._pdcCourses
+                : formData.course?._pdcCourse
+                    ? [formData.course._pdcCourse]
+                    : parsePromoPdcParts(formData.course?.course_type).map((part, index) =>
+                        buildFallbackPromoPdcCourse(formData.course, part, index + 1)
+                    ));
+
+            // Bundle definition is the source of truth for allowed transmissions.
+            const bundleTransmissionsByGroup = new Map();
+            parsePromoPdcParts(formData.course?.course_type).forEach((part) => {
+                const partMeta = getPromoPdcCourseMeta({ name: part, shortName: part, course_type: part });
+                const groupKey = getPromoPdcGroupKey({ name: part, shortName: part, course_type: part });
+                const supportsTransmission = partMeta.kind === 'Car' || partMeta.kind === 'CarAT' || partMeta.kind === 'CarMT' || partMeta.kind === 'Motorcycle';
+                if (!supportsTransmission) return;
+
+                const tx = getPromoTransmissionCode(part) || partMeta.preferredTransmission;
+                if (!tx) return;
+                if (!bundleTransmissionsByGroup.has(groupKey)) {
+                    bundleTransmissionsByGroup.set(groupKey, new Set());
+                }
+                bundleTransmissionsByGroup.get(groupKey).add(tx);
+            });
+
+            const grouped = [];
+            const seenGroups = new Set();
+            const transmissionsByGroup = new Map();
+
+            source.forEach((item) => {
                 const meta = getPromoPdcCourseMeta(item);
-                return {
+                const groupKey = isManualBundle ? getPromoPdcCourseKey(item) : getPromoPdcGroupKey(item);
+                const tx = meta.preferredTransmission || getPromoTransmissionCode(`${item?.course_type || ''} ${item?.name || ''} ${item?.shortName || ''}`);
+                if (!tx) return;
+                if (!transmissionsByGroup.has(groupKey)) {
+                    transmissionsByGroup.set(groupKey, new Set());
+                }
+                transmissionsByGroup.get(groupKey).add(tx);
+            });
+
+            source.forEach((item) => {
+                const meta = getPromoPdcCourseMeta(item);
+                const groupKey = isManualBundle ? getPromoPdcCourseKey(item) : getPromoPdcGroupKey(item);
+                if (seenGroups.has(groupKey)) return;
+                seenGroups.add(groupKey);
+
+                const txSet = transmissionsByGroup.get(groupKey);
+                const hasTxControl = meta.kind === 'Car' || meta.kind === 'CarAT' || meta.kind === 'CarMT' || meta.kind === 'Motorcycle';
+                const txFromBundle = bundleTransmissionsByGroup.get(groupKey);
+                const allowBothForManualBundle = isManualBundle && (meta.kind === 'Car' || meta.kind === 'CarAT' || meta.kind === 'CarMT' || meta.kind === 'Motorcycle');
+                const allowedTransmissions = hasTxControl
+                    ? (allowBothForManualBundle
+                        ? ['MT', 'AT']
+                        : (txFromBundle && txFromBundle.size > 0
+                            ? [...txFromBundle]
+                            : (txSet && txSet.size > 0 ? [...txSet] : ['MT', 'AT'])))
+                    : [];
+                const fixedTransmission = allowBothForManualBundle
+                    ? null
+                    : (hasTxControl && allowedTransmissions.length === 1 ? allowedTransmissions[0] : null);
+
+                grouped.push({
                     ...item,
-                    _pdcKey: getPromoPdcCourseKey(item),
+                    _pdcKey: groupKey,
                     _pdcKind: meta.kind,
                     _pdcLabel: meta.label,
-                    _fixedTransmission: meta.fixedTransmission,
-                    _preferredTransmission: meta.preferredTransmission,
-                };
-            }))
+                    _fixedTransmission: fixedTransmission || meta.fixedTransmission,
+                    _preferredTransmission: meta.preferredTransmission || fixedTransmission,
+                    _allowedTransmissions: allowedTransmissions,
+                });
+            });
+
+            return grouped;
+        })()
         : [];
+    const isPromoOnlineTdcLockedBundle = isPromo
+        && String(promoTdcType || '').toUpperCase() === 'ONLINE'
+        && promoPdcCourses.length > 0;
 
     const activePromoPdcCourse = promoPdcCourses.find(c => c._pdcKey === activePromoPdcCourseId) || promoPdcCourses[0] || null;
     const activePromoPdcCourseKey = activePromoPdcCourse?._pdcKey || null;
@@ -527,10 +705,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         ? activePromoPdcCourse._pdcKind
         : promoPdcType;
 
+    const allowedPromoPdcTransmissions = activePromoPdcCourse?._allowedTransmissions || ['MT', 'AT'];
     const fixedPromoPdcTransmission = activePromoPdcCourse?._fixedTransmission || null;
-    const effectivePromoPdcTransmission = fixedPromoPdcTransmission || promoPdcMotorType;
-    const showsTransmissionSelector = ['Motorcycle', 'Car', 'CarAT', 'CarMT', 'Tricycle'].includes(activePromoPdcType);
-    const requiresTransmissionChoice = showsTransmissionSelector && !fixedPromoPdcTransmission;
+    const effectivePromoPdcTransmission = fixedPromoPdcTransmission || promoPdcMotorType || (allowedPromoPdcTransmissions.length === 1 ? allowedPromoPdcTransmissions[0] : null);
+    const showsTransmissionSelector = ['Motorcycle', 'Car', 'CarAT', 'CarMT'].includes(activePromoPdcType);
+    const requiresTransmissionChoice = showsTransmissionSelector && !fixedPromoPdcTransmission && allowedPromoPdcTransmissions.length > 1;
 
     const getIsPromoPdcComplete = (courseKey) => {
         const sel = promoPdcSelections[courseKey];
@@ -563,7 +742,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             setPromoPdcDate(null);
             setPromoPdcDate2(null);
             setPromoPdcSelectingDay2(false);
-            setPromoPdcMotorType(null);
+            setPromoPdcMotorType(fixedPromoPdcTransmission || activePromoPdcCourse?._preferredTransmission || null);
             setTimeout(() => { isHydratingPromoPdcRef.current = false; }, 0);
             return;
         }
@@ -593,7 +772,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         const nextSelection = {
             courseId: activePromoPdcCourse?.id,
             courseName: activePromoPdcCourse?.name,
-            courseType: activePromoPdcType,
+            courseType: activePromoPdcCourse?.course_type || activePromoPdcType,
+            courseTypeDetailed: activePromoPdcCourse?.course_type || activePromoPdcType,
+            courseLabel: activePromoPdcCourse?.name || activePromoPdcCourse?._pdcLabel || activePromoPdcType || 'PDC',
             transmission: effectivePromoPdcTransmission || null,
             motorType: effectivePromoPdcTransmission || null,
             scheduleSlotId: formData.scheduleSlotId2,
@@ -787,8 +968,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 } else if (cat === 'PDC') {
                     avail[pkg.id] = hasPdcSlot(ct, cn);
                 } else if (cat === 'Promo') {
-                    const [tdcPart, pdcPart] = ct.split('+');
-                    avail[pkg.id] = hasTdcSlot() && hasPdcSlot(pdcPart);
+                    const pdcParts = parsePromoPdcParts(ct);
+                    const partsToCheck = pdcParts.length > 0 ? pdcParts : [ct.split('+')[1] || ''];
+                    avail[pkg.id] = hasTdcSlot() && partsToCheck.every((part) => hasPdcSlot(part, cn));
                 } else {
                     avail[pkg.id] = true;
                 }
@@ -821,7 +1003,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             const checkTdc = (type) => {
                 const t = (type || '').toLowerCase();
                 if (t.includes('online')) {
-                    return tdcSlots.some(s => isSlotOpen(s) && (s.course_type || '').toLowerCase().includes('online'));
+                    // Online TDC is provider-managed; no local slot is required for walk-in encoding.
+                    return true;
                 }
                 return tdcSlots.some(s => isSlotOpen(s) && !(s.course_type || '').toLowerCase().includes('online'));
             };
@@ -833,14 +1016,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 const isMoto = t.includes('motorcycle') || t.includes('moto') || courseName.includes('motorcycle');
                 const isTricycle = t.includes('tricycle') || t.includes('v1') || courseName.includes('tricycle');
                 const isB1B2 = t.includes('b1') || t.includes('b2') || t.includes('van') || t.includes('l300')
-                    || courseName.includes('b1') || courseName.includes('b2');
+                    || courseName.includes('b1') || courseName.includes('b2') || courseName.includes('van') || courseName.includes('l300');
                 if (isTricycle)
                     return pdcSlots.some(s => isSlotOpen(s) && (s.course_type || '').toLowerCase().includes('tricycle'));
                 if (isB1B2)
                     return pdcSlots.some(s => {
                         if (!isSlotOpen(s)) return false;
                         const ct = (s.course_type || '').toLowerCase();
-                        return ct.includes('b1') || ct.includes('b2');
+                        return ct.includes('b1') || ct.includes('b2') || ct.includes('van') || ct.includes('l300');
                     });
                 if (isMoto)
                     return pdcSlots.some(s => isSlotOpen(s) && (s.course_type || '').toLowerCase().includes('motorcycle'));
@@ -1209,16 +1392,24 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         setFormData(prev => {
             const exists = prev.selectedCourses.find(c => c.id === pkg.id);
             let updated;
-            if (exists) {
+
+            // Promo course mode is exclusive: one promo card OR regular TDC/PDC picks.
+            if (pkg.category === 'Promo') {
+                updated = exists ? [] : [pkg];
+            } else if (exists) {
                 updated = prev.selectedCourses.filter(c => c.id !== pkg.id);
             } else if (pkg.category === 'TDC') {
-                updated = [...prev.selectedCourses.filter(c => c.category !== 'TDC'), pkg];
+                updated = [
+                    ...prev.selectedCourses.filter(c => c.category !== 'TDC' && c.category !== 'Promo'),
+                    pkg
+                ];
             } else if (pkg.category === 'PDC') {
                 // Allow multiple PDC selections (like Courses/Cart flow).
-                updated = [...prev.selectedCourses, pkg];
+                updated = [...prev.selectedCourses.filter(c => c.category !== 'Promo'), pkg];
             } else {
-                updated = [...prev.selectedCourses, pkg];
+                updated = [...prev.selectedCourses.filter(c => c.category !== 'Promo'), pkg];
             }
+
             return { ...prev, selectedCourses: updated, course: null, courseType: '',
                 scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
                 scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '',
@@ -1236,19 +1427,16 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         const isBundle = !!(tdcCourse && pdcCourses.length > 0);
         let course, courseType;
         if (isBundle) {
-            const pdcName = (pdcCourse.name || '').toLowerCase();
-            const pdcTypeRaw = (pdcCourse.course_type || '').toLowerCase();
-            let pdcPromoType = 'CarMT';
-            if (pdcName.includes('motorcycle') || pdcTypeRaw.includes('motorcycle')) pdcPromoType = 'Motorcycle';
-            else if (pdcTypeRaw.includes('automatic') || pdcTypeRaw === 'carat') pdcPromoType = 'CarAT';
             const tdcPromoType = (tdcCourse.course_type || '').toLowerCase().includes('online') ? 'ONLINE' : 'F2F';
+            const pdcBundleTypes = pdcCourses.map(pdc => pdc.name).join('|');
+            
             const totalPrice = (tdcCourse.price || 0) + pdcCourses.reduce((sum, item) => sum + (item.price || 0), 0);
             course = {
                 id: `bundle-${tdcCourse.id}-${pdcCourses.map(c => c.id).join('-')}`,
                 name: `Promo Bundle: ${tdcCourse.shortName || tdcCourse.name} + ${pdcCourses.length} PDC course${pdcCourses.length > 1 ? 's' : ''}`,
                 shortName: 'Promo Bundle',
                 category: 'Promo',
-                course_type: `${tdcPromoType}+${pdcPromoType}`,
+                course_type: `${tdcPromoType}+${pdcBundleTypes}`,
                 duration: `TDC ${tdcCourse.duration} + ${pdcCourses.length} PDC`,
                 hasTypeOption: true,
                 typeOptions: [{ value: 'promo-bundle', label: 'PROMO BUNDLE', price: totalPrice, originalPrice: totalPrice, discount: 0 }],
@@ -1261,11 +1449,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             courseType = 'promo-bundle';
         } else {
             course = sel[0];
+            if (course?.category === 'Promo') {
+                course = enrichSinglePromoCourse(course);
+            }
             courseType = '';
         }
         setFormData(prev => ({
             ...prev, course, courseType,
-            promoTdcType: isBundle ? (course.course_type?.split('+')[0] || 'F2F') : '',
+            promoTdcType: (isBundle || course?.category === 'Promo') ? (course.course_type?.split('+')[0] || 'F2F') : '',
             scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
             scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '',
             promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: '',
@@ -1299,12 +1490,26 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
             const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
             const selectedPrice = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType)?.price || dynamicCourse?.price || 0;
+            const isRegularPromoBundle = String(formData.course?.category || '').toLowerCase() === 'promo' && !!formData.course?._isManualBundle;
             const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
             const subtotal = selectedPrice + addonsTotal;
-            
-            const requiredAmount = formData.paymentStatus === 'Downpayment' ? subtotal * 0.5 : subtotal;
-            const changeAmount = formData.amountPaid ? Math.max(0, Number(formData.amountPaid) - requiredAmount) : 0;
-            const actualAmountToRecord = Number(formData.amountPaid) - changeAmount;
+            const promoDiscount = isRegularPromoBundle ? Number((selectedPrice * 0.03).toFixed(2)) : 0;
+            const totalAmountDue = Math.max(0, Number((subtotal - promoDiscount).toFixed(2)));
+
+            const enteredAmount = Number(formData.amountPaid || 0);
+            const changeAmount = Math.max(0, enteredAmount - totalAmountDue);
+            const actualAmountToRecord = Math.max(0, enteredAmount - changeAmount);
+            const isOnlineTdcNoSchedule =
+                ['TDC', 'PROMO'].includes(String(formData.course?.category || '').toUpperCase()) &&
+                (String(formData.courseType || '').toLowerCase().includes('online') ||
+                    String(formData.courseType || '').toLowerCase().includes('otdc') ||
+                    String(formData.course?.name || '').toLowerCase().includes('otdc') ||
+                    String(formData.course?.shortName || '').toLowerCase().includes('otdc'));
+            const isPromoPdcLocked = isPromoOnlineTdcLockedBundle;
+            const submitPdcCourses = formData.course?._isManualBundle
+                ? (formData.course?._pdcCourses || [])
+                : (isPromo ? promoPdcCourses : []);
+            const hasPromoPdcCourses = isPromo && submitPdcCourses.length > 0;
 
             const enrollmentData = {
                 // Student Info
@@ -1337,15 +1542,36 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 courseCategory: formData.course?.category,
                 courseType: formData.courseType,
                 branchId: formData.branchId,
-                ...(formData.course?._isManualBundle ? {
-                    pdcCourseId: formData.course._pdcCourse?.id,
-                    pdcCourseIds: (formData.course._pdcCourses || []).map(c => c.id),
-                    promoPdcSchedules: (formData.course._pdcCourses || []).map((course) => {
-                        const key = getPromoPdcCourseKey(course);
+                ...((formData.course?._isManualBundle || hasPromoPdcCourses) ? {
+                    pdcCourseId: formData.course._pdcCourse?.id || submitPdcCourses?.[0]?.id,
+                    pdcCourseIds: submitPdcCourses.map(c => c.id).filter(Boolean),
+                    promoPdcSchedules: isPromoPdcLocked ? [] : submitPdcCourses.map((course, idx) => {
+                        const key = course?._pdcKey || getPromoPdcCourseKey(course);
                         const sel = promoPdcSelections[key] || null;
                         if (!sel?.scheduleSlotId) return null;
+                        const resolvedCourseName = String(sel.courseName || course?.name || course?.shortName || `PDC ${idx + 1}`).trim();
+                        const resolvedCourseType = String(sel.courseTypeDetailed || course?.course_type || sel.courseType || course?._pdcKind || 'PDC').trim();
+                        const resolvedTransmission = sel.transmission || sel.motorType || null;
+                        const transmissionLabel = resolvedTransmission === 'AT'
+                            ? 'Automatic (AT)'
+                            : resolvedTransmission === 'MT'
+                                ? 'Manual (MT)'
+                                : '';
+                        const mergedLower = `${resolvedCourseName} ${resolvedCourseType}`.toLowerCase();
+                        const withType = resolvedCourseType && !mergedLower.includes(resolvedCourseType.toLowerCase())
+                            ? `${resolvedCourseName} (${resolvedCourseType})`
+                            : resolvedCourseName;
+                        const scheduleLabel = sel.courseLabel
+                            || (transmissionLabel && !mergedLower.includes(String(resolvedTransmission || '').toLowerCase())
+                                ? `${withType} - ${transmissionLabel}`
+                                : withType);
                         return {
                             courseId: course.id,
+                            label: scheduleLabel,
+                            courseName: resolvedCourseName,
+                            courseType: resolvedCourseType,
+                            courseTypeDetailed: resolvedCourseType,
+                            transmission: resolvedTransmission,
                             scheduleSlotId: sel.scheduleSlotId,
                             scheduleDate: sel.scheduleDate,
                             scheduleSession: sel.scheduleSession2,
@@ -1356,20 +1582,24 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             promoPdcTime2: sel.promoPdcTime2 || '',
                         };
                     }).filter(Boolean),
-                    isManualBundle: true,
+                    isManualBundle: !!formData.course?._isManualBundle,
                 } : {}),
 
                 // Schedule (supports 1 or 2 slots; for Promo: slot1=TDC, slot2=PDC Day1, promoPdcSlotId2=PDC Day2)
-                scheduleSlotId: formData.scheduleSlotId,
-                scheduleDate: formData.scheduleDate,
-                ...(formData.scheduleSlotId2 ? {
+                scheduleSlotId: isOnlineTdcNoSchedule ? null : formData.scheduleSlotId,
+                scheduleDate: isOnlineTdcNoSchedule ? null : formData.scheduleDate,
+                ...(!isPromoPdcLocked && formData.scheduleSlotId2 ? {
                     scheduleSlotId2: formData.scheduleSlotId2,
                     scheduleDate2: formData.scheduleDate2,
                 } : {}),
-                ...(formData.promoPdcSlotId2 ? {
+                ...(!isPromoPdcLocked && formData.promoPdcSlotId2 ? {
                     promoPdcSlotId2: formData.promoPdcSlotId2,
                     promoPdcDate2: formData.promoPdcDate2,
                 } : {}),
+                pdcScheduleLockedUntilCompletion: isPromoPdcLocked,
+                pdcScheduleLockReason: isPromoPdcLocked
+                    ? 'Branch Manager will assigns your PDC schedule after OTDC is marked complete.'
+                    : null,
 
                 // Payment
                 paymentMethod: formData.paymentMethod,
@@ -1377,10 +1607,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 paymentStatus: formData.paymentStatus,
                 transactionNo: formData.transactionNo,
                 addons: formData.addons || [],
+                subtotal,
+                promoDiscount,
+                totalAmount: totalAmountDue,
                 convenienceFee: 0,
 
                 // Metadata
                 enrollmentType: 'walk-in',
+                tdcScheduleLabel: `TDC ${String(promoTdcType || formData.courseType || '').toUpperCase()}`.trim(),
                 enrolledBy: adminProfile?.email || 'admin'
             };
 
@@ -1394,7 +1628,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
                 status: formData.paymentStatus,
                 method: formData.paymentMethod,
-                schedule: `${formData.scheduleDate} - ${formData.scheduleSession}`
+                schedule: isOnlineTdcNoSchedule
+                    ? 'Online TDC - No local branch schedule required'
+                    : isPromoPdcLocked
+                        ? 'OTDC selected. PDC schedules are admin-assigned after OTDC is marked complete.'
+                    : `${formData.scheduleDate} - ${formData.scheduleSession}`
             };
 
             if (onEnroll) {
@@ -1795,7 +2033,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             value={formData.email} 
                             onChange={(e) => handleEmailChange(e.target.value)} 
                             required 
-                            placeholder="example@gmail.com"
+                            placeholder="example@domain.com"
                             className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.email ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
                         />
                         {formErrors.email && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.email}</span>}
@@ -1879,84 +2117,151 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 const selectedCourses = formData.selectedCourses || [];
                 const selectedTDC = selectedCourses.find(c => c.category === 'TDC');
                 const selectedPDCs = selectedCourses.filter(c => c.category === 'PDC');
+                const selectedPromoCourse = selectedCourses.find(c => c.category === 'Promo');
                 const isPromoBundle = !!(selectedTDC && selectedPDCs.length > 0);
+                const isPromoCourseMode = !!selectedPromoCourse;
                 const bundleRaw = selectedCourses.reduce((s, c) => s + (c.price || 0), 0);
                 const bundleDiscount = isPromoBundle ? bundleRaw * 0.03 : 0;
-                const bundleNet = bundleRaw - bundleDiscount + CONVENIENCE_FEE;
+                const regularPackages = packages.filter(pkg => pkg.category !== 'Promo');
+                const promoPackages = packages.filter(pkg => pkg.category === 'Promo');
+                const hasRegularSelection = selectedCourses.some(c => c.category !== 'Promo');
+
+                const renderCourseCard = (pkg) => {
+                    const minPrice = Math.min(...pkg.typeOptions.map(opt => opt.price));
+                    const maxPrice = Math.max(...pkg.typeOptions.map(opt => opt.price));
+                    const priceDisplay = minPrice === maxPrice ? `₱${minPrice.toLocaleString()}` : `₱${minPrice.toLocaleString()} - ₱${maxPrice.toLocaleString()}`;
+                    const isAvailable = courseAvailability[pkg.id] !== false;
+                    const availChecked = pkg.id in courseAvailability;
+                    const isSelected = selectedCourses.some(c => c.id === pkg.id);
+                    const blockedByPromoMode = !!selectedPromoCourse && !isSelected && pkg.category !== 'Promo';
+                    const blockedByRegularMode = hasRegularSelection && !isSelected && pkg.category === 'Promo';
+                    const blockedByMode = blockedByPromoMode || blockedByRegularMode;
+                    const canSelect = availChecked && isAvailable && !blockedByMode;
+                    const wouldReplace = pkg.category === 'TDC' && selectedTDC && selectedTDC.id !== pkg.id;
+
+                    return (
+                        <div key={pkg.id} className={`course-card ${isSelected ? 'selected' : ''} ${availChecked && !isAvailable ? 'no-slots-card' : ''}`}
+                            style={availChecked && !isAvailable ? { opacity: 0.55, filter: 'grayscale(40%)', pointerEvents: 'none' } : undefined}>
+                            {isSelected && (
+                                <div className="course-card-check">✓</div>
+                            )}
+                            <div className="course-img">
+                                <img src={pkg.image} alt={pkg.name} onError={(e) => e.target.style.display = 'none'} />
+                                <div className="course-overlay"><span>{priceDisplay}</span></div>
+                                {availChecked && !isAvailable && (
+                                    <div style={{ position: 'absolute', top: '8px', right: '8px', background: '#dc2626', color: '#fff', fontSize: '0.65rem', fontWeight: '800', padding: '3px 8px', borderRadius: '20px', textTransform: 'uppercase' }}>No Slots</div>
+                                )}
+                            </div>
+                            <div className="course-info">
+                                <h4>{pkg.category}</h4>
+                                <h3>{pkg.name}</h3>
+                                <p className="duration">⏱ {pkg.duration}</p>
+                                <ul className="features">
+                                    {pkg.features.slice(0, 3).map((f, i) => <li key={i}>✓ {f}</li>)}
+                                </ul>
+                                <button
+                                    type="button"
+                                    onClick={() => canSelect && handleCourseToggle(pkg)}
+                                    className={`select-pkg-btn${isSelected ? ' select-pkg-btn--selected' : ''}`}
+                                    disabled={!canSelect}
+                                    style={!canSelect ? { background: '#9ca3af', cursor: 'not-allowed', opacity: 0.8 } :
+                                           isSelected ? { background: 'linear-gradient(135deg,#16a34a,#15803d)' } : undefined}
+                                >
+                                    {availChecked && !isAvailable ? 'No Available Slots'
+                                        : !availChecked ? 'Checking...'
+                                        : isSelected ? '✓ Selected — Click to Remove'
+                                        : blockedByPromoMode ? 'Promo Mode Active'
+                                        : blockedByRegularMode ? 'Regular Bundle Mode Active'
+                                        : wouldReplace ? `↩ Replace ${pkg.category}`
+                                        : 'Select Course'}
+                                </button>
+                            </div>
+                        </div>
+                    );
+                };
 
                 return (<>
                     {/* Promo tip */}
-                    {!isPromoBundle && (
+                    {!isPromoBundle && !isPromoCourseMode && (
                         <div className="promo-tip-bar">
                             <span>🎁</span>
                             <span>Select <strong>1 TDC</strong> + <strong>1 PDC</strong> to unlock a <strong style={{color:'#16a34a'}}>3% Promo Bundle discount</strong></span>
                         </div>
                     )}
 
-                    <div className="courses-grid">
-                        {checkingCourseAvail && (
-                            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '12px', fontSize: '0.875rem', color: 'var(--secondary-text)' }}>
-                                Checking slot availability...
-                            </div>
-                        )}
-                        {packages.map((pkg) => {
-                            const minPrice = Math.min(...pkg.typeOptions.map(opt => opt.price));
-                            const maxPrice = Math.max(...pkg.typeOptions.map(opt => opt.price));
-                            const priceDisplay = minPrice === maxPrice ? `₱${minPrice.toLocaleString()}` : `₱${minPrice.toLocaleString()} - ₱${maxPrice.toLocaleString()}`;
-                            const isAvailable = courseAvailability[pkg.id] !== false;
-                            const availChecked = pkg.id in courseAvailability;
-                            const canSelect = availChecked && isAvailable;
-                            const isSelected = selectedCourses.some(c => c.id === pkg.id);
-                            const wouldReplace = pkg.category === 'TDC' && selectedTDC && selectedTDC.id !== pkg.id;
+                    {isPromoCourseMode && (
+                        <div className="promo-tip-bar" style={{ background: '#eff6ff', borderColor: '#93c5fd' }}>
+                            <span>🎫</span>
+                            <span><strong>Promo Course Mode:</strong> Using a single promo bundle card. Regular TDC/PDC picks are disabled until this is removed.</span>
+                        </div>
+                    )}
 
-                            return (
-                                <div key={pkg.id} className={`course-card ${isSelected ? 'selected' : ''} ${availChecked && !isAvailable ? 'no-slots-card' : ''}`}
-                                    style={availChecked && !isAvailable ? { opacity: 0.55, filter: 'grayscale(40%)', pointerEvents: 'none' } : undefined}>
-                                    {isSelected && (
-                                        <div className="course-card-check">✓</div>
-                                    )}
-                                    <div className="course-img">
-                                        <img src={pkg.image} alt={pkg.name} onError={(e) => e.target.style.display = 'none'} />
-                                        <div className="course-overlay"><span>{priceDisplay}</span></div>
-                                        {availChecked && !isAvailable && (
-                                            <div style={{ position: 'absolute', top: '8px', right: '8px', background: '#dc2626', color: '#fff', fontSize: '0.65rem', fontWeight: '800', padding: '3px 8px', borderRadius: '20px', textTransform: 'uppercase' }}>No Slots</div>
-                                        )}
-                                    </div>
-                                    <div className="course-info">
-                                        <h4>{pkg.category}</h4>
-                                        <h3>{pkg.name}</h3>
-                                        <p className="duration">⏱ {pkg.duration}</p>
-                                        <ul className="features">
-                                            {pkg.features.slice(0, 3).map((f, i) => <li key={i}>✓ {f}</li>)}
-                                        </ul>
-                                        <button
-                                            type="button"
-                                            onClick={() => canSelect && handleCourseToggle(pkg)}
-                                            className={`select-pkg-btn${isSelected ? ' select-pkg-btn--selected' : ''}`}
-                                            disabled={!canSelect}
-                                            style={!canSelect ? { background: '#9ca3af', cursor: 'not-allowed', opacity: 0.8 } :
-                                                   isSelected ? { background: 'linear-gradient(135deg,#16a34a,#15803d)' } : undefined}
-                                        >
-                                            {availChecked && !isAvailable ? 'No Available Slots'
-                                                : !availChecked ? 'Checking...'
-                                                : isSelected ? '✓ Selected — Click to Remove'
-                                                : wouldReplace ? `↩ Replace ${pkg.category}`
-                                                : 'Select Course'}
-                                        </button>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                    {checkingCourseAvail && (
+                        <div style={{ textAlign: 'center', padding: '12px', fontSize: '0.875rem', color: 'var(--secondary-text)' }}>
+                            Checking slot availability...
+                        </div>
+                    )}
+
+                    <div style={{
+                        marginBottom: '22px',
+                        border: '2px solid #bfdbfe',
+                        borderRadius: '18px',
+                        background: 'linear-gradient(135deg, #eff6ff 0%, #f8fbff 70%)',
+                        padding: '14px'
+                    }}>
+                        <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                            <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontSize: '1.1rem' }}>🧩</span>
+                                Regular Bundle Selection
+                            </h4>
+                            <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1d4ed8', background: '#dbeafe', border: '1px solid #93c5fd', borderRadius: '999px', padding: '4px 10px', letterSpacing: '0.02em' }}>
+                                TDC + PDC Manual Pairing
+                            </span>
+                        </div>
+                        <div className="courses-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 350px))', justifyContent: 'start' }}>
+                            {regularPackages.map(renderCourseCard)}
+                        </div>
                     </div>
+
+                    {promoPackages.length > 0 && (
+                        <div style={{
+                            marginTop: '4px',
+                            marginBottom: '8px',
+                            border: '2px solid #fdba74',
+                            borderRadius: '18px',
+                            background: 'linear-gradient(135deg, #fff7ed 0%, #fffbeb 70%)',
+                            padding: '14px'
+                        }}>
+                            <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                                <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#7c2d12', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span style={{ fontSize: '1.1rem' }}>🎫</span>
+                                    Promo Bundle Course Selection
+                                </h4>
+                                <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#9a3412', background: '#fed7aa', border: '1px solid #fdba74', borderRadius: '999px', padding: '4px 10px', letterSpacing: '0.02em' }}>
+                                    Single Promo Card Mode
+                                </span>
+                            </div>
+                            <div className="courses-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 350px))', justifyContent: 'start' }}>
+                                {promoPackages.map(renderCourseCard)}
+                            </div>
+                        </div>
+                    )}
 
 
 
                     {/* Single course tip */}
-                    {selectedCourses.length === 1 && !isPromoBundle && (
+                    {selectedCourses.length === 1 && !isPromoBundle && !isPromoCourseMode && (
                         <div className="single-course-hint">
                             <span>✓ <strong>{selectedCourses[0].shortName || selectedCourses[0].name}</strong> selected</span>
                             {selectedCourses[0].category === 'PDC' && <span className="hint-tip">💡 Also pick a TDC for Promo Bundle!</span>}
                             {selectedCourses[0].category === 'TDC' && <span className="hint-tip">💡 Also pick a PDC for Promo Bundle!</span>}
+                        </div>
+                    )}
+
+                    {isPromoCourseMode && (
+                        <div className="single-course-hint" style={{ borderColor: '#93c5fd', background: '#eff6ff' }}>
+                            <span>✓ <strong>{selectedPromoCourse?.shortName || selectedPromoCourse?.name || 'Promo bundle course'}</strong> selected</span>
+                            <span className="hint-tip">Step 3 will use the promo-course scheduling flow.</span>
                         </div>
                     )}
 
@@ -1976,7 +2281,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         </button>
                         {selectedCourses.length > 0 && (
                             <button type="button" className="next-btn" onClick={handleProceedToStep3}>
-                                {isPromoBundle ? '🎁 Next: Select Schedules' : 'Next: Select Schedule'}
+                                {(isPromoBundle || isPromoCourseMode) ? '🎁 Next: Select Schedules' : 'Next: Select Schedule'}
                                 <svg className="ml-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                 </svg>
@@ -2075,8 +2380,15 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         // PROMO BUNDLE: 2-step flow (TDC first, then PDC)
         // =====================================================================
         if (isPromo) {
+            const isManualPromoBundle = !!formData.course?._isManualBundle;
+            const promoFlowTitle = isManualPromoBundle ? 'Regular Bundle — 2-Step Schedule' : 'Promo Course Bundle — 2-Step Schedule';
+            const promoFlowDesc = isManualPromoBundle
+                ? 'Step 1: Select TDC schedule · Step 2: Select selected PDC track schedules'
+                : 'Step 1: Select TDC schedule · Step 2: Select promo PDC schedules';
             const pdcDoneCount = promoPdcCourses.filter(c => getIsPromoPdcComplete(c._pdcKey)).length;
-            const allPromoPdcDone = promoPdcCourses.length > 0
+            const allPromoPdcDone = isPromoOnlineTdcLockedBundle
+                ? true
+                : promoPdcCourses.length > 0
                 ? pdcDoneCount === promoPdcCourses.length
                 : !!formData.scheduleSlotId2;
 
@@ -2219,12 +2531,18 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 promoPdcDay1Session.toLowerCase().includes('afternoon') ||
                 promoPdcDay1Session.toLowerCase().includes('4 hours')
             );
-            const promoCanProceed = !!formData.scheduleSlotId && allPromoPdcDone;
+            const promoCanProceed = isPromoOnlineTdcLockedBundle
+                ? true
+                : (!!formData.scheduleSlotId && allPromoPdcDone);
 
             const handlePromoTdcSelect = (slot) => {
                 setFormData(prev => ({ ...prev, scheduleSlotId: slot.id, scheduleDate: slot.date, scheduleSession: slot.session, scheduleTime: slot.time_range }));
                 setPromoStep(2); // Auto-advance to PDC selection
-                showNotification('TDC schedule selected! Please select a PDC schedule.', 'success');
+                if (isPromoOnlineTdcLockedBundle) {
+                    showNotification('TDC schedule selected. PDC schedules are admin-assigned after OTDC is marked complete.', 'info');
+                } else {
+                    showNotification('TDC schedule selected! Please select a PDC schedule.', 'success');
+                }
             };
             const handlePromoPdcDay1Select = (slot) => {
                 if (isPromoSessionTakenByOtherCourse(slot)) {
@@ -2454,12 +2772,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     <div className="schedule-banner" style={{ marginBottom: '20px', background: 'linear-gradient(135deg, #fef3c780, #fde68a40)', borderColor: '#f59e0b', borderWidth: '1.5px' }}>
                         <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#92400e" strokeWidth="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></svg>
                         <div className="schedule-banner__body">
-                            <div className="schedule-banner__title" style={{ color: '#92400e' }}>Promo Bundle — 2-Step Schedule</div>
-                            <div className="schedule-banner__desc" style={{ color: '#78350f' }}>Step 1: Select TDC schedule · Step 2: Select PDC schedule</div>
+                            <div className="schedule-banner__title" style={{ color: '#92400e' }}>{promoFlowTitle}</div>
+                            <div className="schedule-banner__desc" style={{ color: '#78350f' }}>{promoFlowDesc}</div>
                         </div>
                         <div className="schedule-banner__actions">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                {[{ label: 'TDC', done: !!formData.scheduleSlotId, active: promoStep === 1 }, { label: 'PDC', done: allPromoPdcDone, active: promoStep === 2 }].map((item, idx) => (
+                                {[{ label: 'TDC', done: isPromoOnlineTdcLockedBundle ? true : !!formData.scheduleSlotId, active: promoStep === 1 }, { label: 'PDC', done: allPromoPdcDone, active: promoStep === 2 }].map((item, idx) => (
                                     <React.Fragment key={item.label}>
                                         {idx > 0 && <div style={{ width: '16px', height: '2px', background: '#d97706' }} />}
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -2507,7 +2825,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         </div>
                     )}
 
-                    {promoStep === 1 && !formData.scheduleSlotId && (
+                    {promoStep === 1 && !formData.scheduleSlotId && !isPromoOnlineTdcLockedBundle && (
                         <div className="slots-section">
                             <div className="type-selector-card" style={{ marginBottom: '16px' }}>
                                 <div className="type-selector-title">
@@ -2582,8 +2900,30 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         </div>
                     )}
 
+                    {promoStep === 1 && isPromoOnlineTdcLockedBundle && (
+                        <div className="schedule-banner schedule-banner--info" style={{ marginTop: '16px' }}>
+                            <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 8v4m0 4h.01" /></svg>
+                            <div className="schedule-banner__body">
+                                <div className="schedule-banner__title">Online TDC Selected</div>
+                                <div className="schedule-banner__desc">No branch slot selection is required for Online TDC. You can proceed directly to enrollment.</div>
+                            </div>
+                        </div>
+                    )}
+
                     {promoStep === 2 && (
                         <>
+                            {isPromoOnlineTdcLockedBundle && (
+                                <div className="schedule-banner schedule-banner--info" style={{ marginTop: '16px' }}>
+                                    <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 8v4m0 4h.01" /></svg>
+                                    <div className="schedule-banner__body">
+                                        <div className="schedule-banner__title">PDC Scheduling Is Admin-Controlled</div>
+                                        <div className="schedule-banner__desc">For OTDC promo bundles with PDC courses, PDC schedules are assigned by Admin/Superadmin after OTDC is marked complete.</div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {!isPromoOnlineTdcLockedBundle && (
+                            <>
                             {formData.scheduleSlotId2 && (
                                 <div className="schedule-banner schedule-banner--success" style={{ marginTop: '16px' }}>
                                     <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
@@ -2641,7 +2981,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                     {showsTransmissionSelector && (
                                         <div className="type-selector-card" style={{ marginTop: '16px' }}>
                                             <div className="type-selector-title">
-                                                {fixedPromoPdcTransmission ? 'Transmission (Fixed by Course)' : 'Select Transmission'}
+                                                {fixedPromoPdcTransmission ? (formData.course?._isManualBundle ? 'Selected Transmission' : 'Transmission (Fixed by Course)') : 'Select Transmission'}
                                             </div>
                                             {fixedPromoPdcTransmission ? (
                                                 <div className="type-btn-group">
@@ -2651,8 +2991,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                                 </div>
                                             ) : (
                                                 <div className="type-btn-group">
-                                                    <button type="button" className={`type-btn${effectivePromoPdcTransmission === 'MT' ? ' active' : ''}`} onClick={() => { setPromoPdcMotorType('MT'); setPromoPdcDate(null); }}>Manual (MT)</button>
-                                                    <button type="button" className={`type-btn${effectivePromoPdcTransmission === 'AT' ? ' active' : ''}`} onClick={() => { setPromoPdcMotorType('AT'); setPromoPdcDate(null); }}>Automatic (AT)</button>
+                                                    {allowedPromoPdcTransmissions.includes('MT') && (
+                                                        <button type="button" className={`type-btn${effectivePromoPdcTransmission === 'MT' ? ' active' : ''}`} onClick={() => { setPromoPdcMotorType('MT'); setPromoPdcDate(null); }}>Manual (MT)</button>
+                                                    )}
+                                                    {allowedPromoPdcTransmissions.includes('AT') && (
+                                                        <button type="button" className={`type-btn${effectivePromoPdcTransmission === 'AT' ? ' active' : ''}`} onClick={() => { setPromoPdcMotorType('AT'); setPromoPdcDate(null); }}>Automatic (AT)</button>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>
@@ -2721,6 +3065,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                     )}
                                 </>
                             )}
+                            </>
+                            )}
                         </>
                     )}
 
@@ -2731,7 +3077,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             </svg>
                             Back
                         </button>
-                        {promoStep === 2 && promoCanProceed && (
+                        {(promoCanProceed && (promoStep === 2 || (promoStep === 1 && isPromoOnlineTdcLockedBundle))) && (
                             <button type="button" className="next-btn" onClick={nextStep}>
                                 Next: Enrollment
                                 <svg className="ml-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2782,8 +3128,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 )}
                                 <div className="type-btn-group">
                                     {formData.course.typeOptions.map(opt => {
+                                        const isOnlineTdcType = formData.course?.category === 'TDC' && String(opt.value || '').toLowerCase().includes('online');
                                         const typeChecked = !checkingTypeAvail && (opt.value in typeAvailability);
-                                        const typeDisabled = typeChecked && typeAvailability[opt.value] === false;
+                                        const typeDisabled = !isOnlineTdcType && typeChecked && typeAvailability[opt.value] === false;
                                         const isLoading = checkingTypeAvail;
                                         return (
                                             <button
@@ -2815,6 +3162,16 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                         Please select a type to view available schedules.
                                     </div>
                                 )}
+                            </div>
+                        )}
+
+                        {isTDC && String(formData.courseType || '').toLowerCase().includes('online') && (
+                            <div className="schedule-banner schedule-banner--info">
+                                <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M8 12h8" /></svg>
+                                <div className="schedule-banner__body">
+                                    <div className="schedule-banner__title">Online TDC Selected</div>
+                                    <div className="schedule-banner__desc">No branch slot selection is required for Online TDC. You can proceed directly to Enrollment.</div>
+                                </div>
                             </div>
                         )}
 
@@ -3068,7 +3425,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
 
                     {
-                        formData.courseType && isTDC && (
+                        formData.courseType && isTDC && !String(formData.courseType || '').toLowerCase().includes('online') && (
                             <div className="slots-section">
                                 <div style={{ marginBottom: '24px' }}>
                                     <div className="month-nav-bar">
@@ -3147,14 +3504,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             Back
                         </button>
                         {/* Show Next button when schedule is fully selected */}
-                        {formData.scheduleSlotId && (!isSelectingDay2 || formData.scheduleSlotId2) && (
+                        {(String(formData.courseType || '').toLowerCase().includes('online') && isTDC) || (formData.scheduleSlotId && (!isSelectingDay2 || formData.scheduleSlotId2)) ? (
                             <button type="button" className="next-btn" onClick={nextStep}>
                                 Next: Enrollment
                                 <svg className="ml-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                 </svg>
                             </button>
-                        )}
+                        ) : null}
                     </div>
                 </div>
             );
@@ -3164,8 +3521,25 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
             const selectedTypeOpt = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType);
             const selectedPrice = selectedTypeOpt?.price || dynamicCourse?.price || 0;
-            const originalPrice = selectedTypeOpt?.original_price || dynamicCourse?.original_price || 0;
+            const isRegularPromoBundle = isPromo && !!formData.course?._isManualBundle;
+            const regularBundleCourses = isRegularPromoBundle
+                ? [
+                    ...(formData.course?._tdcCourse ? [formData.course._tdcCourse] : []),
+                    ...((formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
+                        ? formData.course._pdcCourses
+                        : (formData.course?._pdcCourse ? [formData.course._pdcCourse] : []))
+                ]
+                : [];
+            const regularBundleOriginalTotal = regularBundleCourses.reduce((sum, c) => {
+                const itemPrice = Number(c?.price || 0);
+                const itemOriginal = Number(c?.original_price ?? c?.originalPrice ?? itemPrice);
+                return sum + itemOriginal;
+            }, 0);
+            const originalPrice = isRegularPromoBundle
+                ? regularBundleOriginalTotal
+                : (selectedTypeOpt?.original_price || dynamicCourse?.original_price || 0);
             const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
+            const promoDiscount = isRegularPromoBundle ? Number((selectedPrice * 0.03).toFixed(2)) : 0;
             const promoPdcSummaryCourses = isPromo
                 ? ((formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
                     ? formData.course._pdcCourses
@@ -3183,12 +3557,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             
             // Subtotal includes course + addons
             const subtotal = selectedPrice + addonsTotal;
-            // Total amount excluding convenience fee and without discount
-            const totalAmount = subtotal;
-            
-            const requiredAmount = formData.paymentStatus === 'Downpayment' ? totalAmount * 0.5 : totalAmount;
+            // Total amount due after regular promo bundle 3% discount
+            const totalAmount = Math.max(0, Number((subtotal - promoDiscount).toFixed(2)));
+
+            const requiredAmount = formData.paymentStatus === 'Downpayment' ? 1 : totalAmount;
             const balanceDue = totalAmount - (Number(formData.amountPaid) || 0);
-            const change = formData.amountPaid ? Math.max(0, Number(formData.amountPaid) - requiredAmount) : 0;
+            const change = formData.amountPaid ? Math.max(0, Number(formData.amountPaid) - totalAmount) : 0;
 
             return (
                 <div className="step-content animate-fadeIn">
@@ -3243,66 +3617,111 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 </div>
                             )}
 
-                            {formData.course && isPromo && formData.course._tdcCourse && (
+                            {formData.course && isPromo && (
                                 <div className="payment-summary-card">
                                     <div className="payment-summary-card__left">
                                         <div className="payment-summary-card__icon">
                                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
                                         </div>
                                         <div>
-                                            <p className="payment-summary-card__course-name">{formData.course._tdcCourse.name}</p>
+                                            <p className="payment-summary-card__course-name">{formData.course.name}</p>
                                             <div className="payment-summary-card__meta">
-                                                <span className="payment-summary-card__pill">TDC</span>
+                                                <span className="payment-summary-card__pill">PROMO</span>
                                                 <span className="payment-summary-card__dot">·</span>
-                                                <span>{formData.course._tdcCourse.duration}</span>
-                                                <span className="payment-summary-card__dot">·</span>
-                                                <span style={{ fontWeight: '700', color: 'var(--primary-color)' }}>{promoTdcType === 'F2F' ? 'FACE-TO-FACE' : 'ONLINE'}</span>
+                                                <span>{formData.course.duration}</span>
+                                                {courseTypeDisplay && (
+                                                    <>
+                                                        <span className="payment-summary-card__dot">·</span>
+                                                        <span style={{ fontWeight: '700', color: 'var(--primary-color)' }}>{courseTypeDisplay}</span>
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
                                     <div className="payment-summary-card__right">
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                                             <span className="payment-summary-card__type-label" style={{ margin: 0 }}>PROMO</span>
-                                            <span className="payment-summary-card__type-value">SUB-COURSE</span>
+                                            <span className="payment-summary-card__type-value">BUNDLE</span>
                                         </div>
                                         <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                            {originalPrice > selectedPrice && (
+                                                <span className="payment-summary-card__price" style={{ fontSize: '0.9rem', color: '#94a3b8', textDecoration: 'line-through', fontWeight: 'bold' }}>
+                                                    ₱{originalPrice.toLocaleString()}
+                                                </span>
+                                            )}
                                             <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>
-                                                ₱{(formData.course._tdcCourse.price || 0).toLocaleString()}
+                                                ₱{selectedPrice.toLocaleString()}
                                             </span>
                                         </div>
                                     </div>
                                 </div>
                             )}
 
-                            {formData.course && isPromo && promoPdcSummaryCourses.map((pdcCourse) => (
-                                <div className="payment-summary-card" key={`${pdcCourse.id}-${pdcCourse.name}`}>
-                                    <div className="payment-summary-card__left">
-                                        <div className="payment-summary-card__icon">
-                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
-                                        </div>
-                                        <div>
-                                            <p className="payment-summary-card__course-name">{pdcCourse.name}</p>
-                                            <div className="payment-summary-card__meta">
-                                                <span className="payment-summary-card__pill">PDC</span>
-                                                <span className="payment-summary-card__dot">·</span>
-                                                <span>{pdcCourse.duration}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="payment-summary-card__right">
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                                            <span className="payment-summary-card__type-label" style={{ margin: 0 }}>PROMO</span>
-                                            <span className="payment-summary-card__type-value">SUB-COURSE</span>
-                                        </div>
-                                        <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                                            <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>
-                                                ₱{(pdcCourse.price || 0).toLocaleString()}
-                                            </span>
-                                        </div>
+                            {isRegularPromoBundle && regularBundleCourses.length > 0 && (
+                                <div className="payment-form-section" style={{ marginTop: '2px' }}>
+                                    <p className="payment-form-section__title">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 7h18M7 3v4m10-4v4M5 11h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z"/></svg>
+                                        Selected Courses Breakdown (Regular Promo Bundle)
+                                    </p>
+                                    <div style={{ display: 'grid', gap: '10px' }}>
+                                        {regularBundleCourses.map((course, idx) => {
+                                            const itemPrice = Number(course?.price || 0);
+                                            const itemOriginal = Number(course?.original_price ?? course?.originalPrice ?? itemPrice);
+                                            const typeLabel = String(course?.course_type || '').toUpperCase();
+                                            return (
+                                                <div key={`${course?.id || course?.name || 'course'}-${idx}`} className="payment-summary-card" style={{ margin: 0 }}>
+                                                    <div className="payment-summary-card__left">
+                                                        <div className="payment-summary-card__icon">
+                                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
+                                                        </div>
+                                                        <div>
+                                                            <p className="payment-summary-card__course-name">{course?.name || 'Selected course'}</p>
+                                                            <div className="payment-summary-card__meta">
+                                                                <span className="payment-summary-card__pill">{course?.category || 'COURSE'}</span>
+                                                                {course?.duration && (
+                                                                    <>
+                                                                        <span className="payment-summary-card__dot">·</span>
+                                                                        <span>{course.duration}</span>
+                                                                    </>
+                                                                )}
+                                                                {typeLabel && (
+                                                                    <>
+                                                                        <span className="payment-summary-card__dot">·</span>
+                                                                        <span style={{ fontWeight: '700', color: 'var(--primary-color)' }}>{typeLabel}</span>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="payment-summary-card__right">
+                                                        <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                                            {itemOriginal > itemPrice && (
+                                                                <span className="payment-summary-card__price" style={{ fontSize: '0.9rem', color: '#94a3b8', textDecoration: 'line-through', fontWeight: 'bold' }}>
+                                                                    ₱{itemOriginal.toLocaleString()}
+                                                                </span>
+                                                            )}
+                                                            <span className="payment-summary-card__price" style={{ fontSize: '1.2rem' }}>
+                                                                ₱{itemPrice.toLocaleString()}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
-                            ))}
+                            )}
                         </div>
+
+                        {isPromoOnlineTdcLockedBundle && (
+                            <div className="schedule-banner schedule-banner--info" style={{ marginTop: '4px' }}>
+                                <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 8v4m0 4h.01" /></svg>
+                                <div className="schedule-banner__body">
+                                    <div className="schedule-banner__title">Schedule Notes (OTDC + PDC)</div>
+                                    <div className="schedule-banner__desc">OTDC is online and does not require branch slot selection. PDC schedules are assigned by Admin/Superadmin after OTDC is marked complete.</div>
+                                </div>
+                            </div>
+                        )}
 
                         {/* ── Add-ons Selection ── */}
                         <div className="payment-form-section addons-section">
@@ -3350,6 +3769,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 <span style={{ color: '#64748b' }}>Subtotal</span>
                                 <span style={{ color: '#64748b' }}>₱{subtotal.toLocaleString()}</span>
                             </div>
+                            {promoDiscount > 0 && (
+                                <div className="breakdown-row" style={{ color: '#dc2626' }}>
+                                    <span>Promo Discount (3%)</span>
+                                    <span>-₱{promoDiscount.toLocaleString()}</span>
+                                </div>
+                            )}
                             
                             <div className="breakdown-row total">
                                 <span>Total Amount Due</span>
@@ -3360,9 +3785,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 <div className="breakdown-row dpt-badge" style={{ marginTop: '10px', background: '#fffbeb', padding: '10px', borderRadius: '8px', border: '1px solid #fde68a' }}>
                                     <div>
                                         <div style={{ fontWeight: '700', color: '#92400e', fontSize: '0.85rem' }}>DOWNPAYMENT (DPT) MODE</div>
-                                        <div style={{ fontSize: '0.75rem', color: '#b45309' }}>50% of total amount required today</div>
+                                        <div style={{ fontSize: '0.75rem', color: '#b45309' }}>Any amount can be accepted and recorded today</div>
                                     </div>
-                                    <div style={{ fontWeight: '800', color: '#92400e', fontSize: '1.1rem' }}>₱{requiredAmount.toLocaleString()}</div>
+                                    <div style={{ fontWeight: '800', color: '#92400e', fontSize: '1.1rem' }}>Flexible</div>
                                 </div>
                             )}
                         </div>
@@ -3397,20 +3822,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                     <label>Payment Method</label>
                                     <select name="paymentMethod" value={formData.paymentMethod} onChange={handleChange}>
                                         <option value="Cash">Cash</option>
-                                        <option value="Starpay">Starpay</option>
-                                        <option value="MetroBank">MetroBank</option>
+                                        <option value="StarPay">StarPay</option>
                                     </select>
                                 </div>
-                                {['Starpay', 'MetroBank'].includes(formData.paymentMethod) && (
-                                    <div className="form-group">
-                                        <label>
-                                            Transaction No.
-                                            <span style={{ color: 'red', marginLeft: '2px' }}>*</span>
-                                            <span className="field-hint">{formData.paymentMethod} reference</span>
-                                        </label>
-                                        <input type="text" name="transactionNo" value={formData.transactionNo} onChange={handleChange} placeholder={`Enter ${formData.paymentMethod} transaction number`} required />
-                                    </div>
-                                )}
                             </div>
                         </div>
 
@@ -3424,11 +3838,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                     <label>
                                         Amount Paid (₱)
                                         {formData.paymentStatus === 'Downpayment' && (
-                                            <span className="field-hint">50% — ₱{requiredAmount.toLocaleString()} required</span>
+                                            <span className="field-hint">Enter any amount for downpayment</span>
                                         )}
                                     </label>
-                                    <input type="number" name="amountPaid" value={formData.amountPaid} onChange={handleChange} placeholder={`₱${requiredAmount.toLocaleString()}`} required />
-                                    {formData.amountPaid && Number(formData.amountPaid) >= requiredAmount && (
+                                    <input type="number" name="amountPaid" value={formData.amountPaid} onChange={handleChange} placeholder={formData.paymentStatus === 'Downpayment' ? 'Enter any amount' : `₱${requiredAmount.toLocaleString()}`} required />
+                                    {formData.paymentStatus !== 'Downpayment' && formData.amountPaid && Number(formData.amountPaid) >= requiredAmount && (
                                         <div className="amount-required-row">
                                             <span className="amount-required-row__label">Required</span>
                                             <span className="amount-required-row__value">₱{requiredAmount.toLocaleString()}</span>
@@ -3437,7 +3851,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                             )}
                                         </div>
                                     )}
-                                    {formData.amountPaid && Number(formData.amountPaid) > 0 && Number(formData.amountPaid) < requiredAmount && (
+                                    {formData.paymentStatus !== 'Downpayment' && formData.amountPaid && Number(formData.amountPaid) > 0 && Number(formData.amountPaid) < requiredAmount && (
                                         <div className="amount-required-row amount-required-row--short">
                                             <span className="amount-required-row__label">Still needed</span>
                                             <span className="amount-required-row__value">₱{(requiredAmount - Number(formData.amountPaid)).toLocaleString()}</span>
@@ -3459,14 +3873,15 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         const paid = Number(formData.amountPaid);
                         const hasAmount = formData.amountPaid !== '' && !isNaN(paid) && paid > 0;
                         const isEnough = hasAmount && paid >= requiredAmount;
-                        const needsTxn = ['Starpay', 'MetroBank'].includes(formData.paymentMethod);
-                        const hasTxn = !!(formData.transactionNo && formData.transactionNo.trim());
-                        const canProceed = isEnough && (!needsTxn || hasTxn);
+                        const canProceed = isEnough;
 
                         let hint = null;
                         if (!hasAmount) hint = 'Enter the amount paid to continue.';
-                        else if (!isEnough) hint = `Amount is short by ₱${(requiredAmount - paid).toLocaleString()}.`;
-                        else if (needsTxn && !hasTxn) hint = `Enter the ${formData.paymentMethod} transaction number to continue.`;
+                        else if (!isEnough) {
+                            hint = formData.paymentStatus === 'Downpayment'
+                                ? 'Enter any amount greater than ₱0 to continue.'
+                                : `Amount is short by ₱${(requiredAmount - paid).toLocaleString()}.`;
+                        }
 
                         return (
                             <>
@@ -3503,14 +3918,45 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
             // Determine schedule label prefixes
             const isTdcCourse = formData.course?.category === 'TDC';
+            const isOnlineTdcNoSchedule =
+                ['TDC', 'PROMO'].includes(String(formData.course?.category || '').toUpperCase()) &&
+                (String(formData.courseType || '').toLowerCase().includes('online') ||
+                    String(formData.courseType || '').toLowerCase().includes('otdc') ||
+                    String(formData.course?.name || '').toLowerCase().includes('otdc') ||
+                    String(formData.course?.shortName || '').toLowerCase().includes('otdc'));
             const sessionPrefix = isTdcCourse ? 'TDC' : (formData.course?.category === 'PDC' ? 'PDC' : '');
 
             // Recalculate balance for downpayment
             const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
-            const selectedPrice = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType)?.price || dynamicCourse?.price || 0;
+            const selectedTypeOpt = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType);
+            const selectedPrice = selectedTypeOpt?.price || dynamicCourse?.price || 0;
+            const isRegularPromoBundle = String(formData.course?.category || '').toLowerCase() === 'promo' && !!formData.course?._isManualBundle;
             const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
-            const totalAmount = (selectedPrice + addonsTotal);
-            const balanceDue = Math.max(0, totalAmount - (Number(formData.amountPaid) || 0));
+            const promoDiscount = isRegularPromoBundle ? Number((selectedPrice * 0.03).toFixed(2)) : 0;
+            const totalAmount = Math.max(0, Number((selectedPrice + addonsTotal - promoDiscount).toFixed(2)));
+            const balanceDue = Math.max(0, Number((totalAmount - (Number(formData.amountPaid) || 0)).toFixed(2)));
+
+            const promoPdcSummaryCount = (formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
+                ? formData.course._pdcCourses.length
+                : (formData.course?._pdcCourse ? 1 : 0);
+            let courseTypeDisplay = '';
+            if (isPromo) {
+                const tdcDisplay = promoTdcType === 'F2F' ? 'TDC F2F' : `TDC ${promoTdcType || 'F2F'}`;
+                const pdcDisplay = `${promoPdcSummaryCount || 1} PDC course${(promoPdcSummaryCount || 1) > 1 ? 's' : ''}`;
+                courseTypeDisplay = `${tdcDisplay} + ${pdcDisplay}`;
+            } else if (selectedTypeOpt) {
+                courseTypeDisplay = selectedTypeOpt.label;
+            }
+
+            const selectedPromoTdcSlot = isPromo
+                ? promoTdcRawSlots.find((slot) => String(slot.id) === String(formData.scheduleSlotId))
+                : null;
+            const promoTdcDay1Date = formData.scheduleDate || selectedPromoTdcSlot?.date || '';
+            const promoTdcDay2Date = (selectedPromoTdcSlot?.end_date && selectedPromoTdcSlot.end_date !== (selectedPromoTdcSlot?.date || promoTdcDay1Date))
+                ? selectedPromoTdcSlot.end_date
+                : '';
+            const promoTdcSession = formData.scheduleSession || selectedPromoTdcSlot?.session || 'Not selected';
+            const promoTdcTime = formData.scheduleTime || selectedPromoTdcSlot?.time_range || 'Not selected';
 
             return (
             <div className="step-content animate-fadeIn">
@@ -3531,30 +3977,16 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     {/* ── Course & Branch ── */}
                     <div className="review-section">
                         <h4>Course &amp; Branch</h4>
-                        {isPromo && formData.course?._tdcCourse ? (
+                        {isPromo ? (
                             <>
                                 <p>
                                     <strong>Course:</strong>
-                                    {formData.course._tdcCourse.name}
+                                    {formData.course?.name || 'Promo Bundle'}
                                 </p>
                                 <p>
                                     <strong>Type:</strong>
-                                    {promoTdcType === 'F2F' ? 'f2f' : 'online'}
+                                    {courseTypeDisplay || (promoTdcType === 'F2F' ? 'TDC F2F + PDC' : 'TDC Online + PDC')}
                                 </p>
-                                <div style={{ borderTop: '1px solid var(--border-color)', margin: '12px 0' }} />
-                                {(promoPdcCourses.length > 0 ? promoPdcCourses : (formData.course._pdcCourse ? [formData.course._pdcCourse] : [])).map((course) => {
-                                    const key = getPromoPdcCourseKey(course);
-                                    const sel = promoPdcSelections[key];
-                                    return (
-                                        <div key={key} style={{ marginBottom: '10px' }}>
-                                            <p><strong>Course:</strong> {course.name}</p>
-                                            <p><strong>Day 1:</strong> {sel?.scheduleDate ? `${fmtDate(sel.scheduleDate)} · ${sel.scheduleSession2 || ''} ${sel.scheduleTime2 ? `(${sel.scheduleTime2})` : ''}` : 'Not selected'}</p>
-                                            {sel?.promoPdcSlotId2 && (
-                                                <p><strong>Day 2:</strong> {fmtDate(sel.promoPdcDate2)} · {sel.promoPdcSession2 || ''} {sel.promoPdcTime2 ? `(${sel.promoPdcTime2})` : ''}</p>
-                                            )}
-                                        </div>
-                                    );
-                                })}
                             </>
                         ) : (
                             <>
@@ -3571,48 +4003,76 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     {/* ── Schedule ── */}
                     <div className="review-section">
                         <h4>Schedule</h4>
-                        {isPromo ? (
+                        {isOnlineTdcNoSchedule ? (
                             <>
-                                {/* TDC schedule */}
-                                <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 1:</p>
-                                <p><strong>Date:</strong> {fmtDate(formData.scheduleDate)}</p>
-                                <p><strong>Session:</strong> {formData.scheduleSession || 'Not selected'}</p>
-                                <p><strong>Time:</strong> {formData.scheduleTime || 'Not selected'}</p>
-
-                                {formData.scheduleDate2 && !formData.promoPdcSlotId2 && (
+                                <p><strong>Mode:</strong> Online TDC</p>
+                                <p><strong>Branch Slot:</strong> Not required</p>
+                                <p style={{ color: 'var(--secondary-text)', marginTop: '6px' }}>
+                                    Provider onboarding email will be sent by drivetech.ph / OTDC.ph (usually within 30 minutes).
+                                </p>
+                            </>
+                        ) : isPromo ? (
+                            <>
+                                {isPromoOnlineTdcLockedBundle ? (
                                     <>
-                                        <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
-                                        <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 2:</p>
-                                        <p><strong>Date:</strong> {fmtDate(formData.scheduleDate2)}</p>
-                                        <p><strong>Session:</strong> {formData.scheduleSession2 || formData.scheduleSession || 'Not selected'}</p>
-                                        <p><strong>Time:</strong> {formData.scheduleTime2 || formData.scheduleTime || 'Not selected'}</p>
+                                        <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>OTDC (TDC):</p>
+                                        <p><strong>Mode:</strong> Online TDC</p>
+                                        <p><strong>Branch Slot:</strong> Not required</p>
+                                        <p><strong>Note:</strong> Student proceeds to enrollment immediately. OTDC access is provided by drivetech.ph / OTDC.ph.</p>
+                                    </>
+                                ) : (
+                                    <>
+                                        {/* TDC schedule */}
+                                        <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 1:</p>
+                                        <p><strong>Date:</strong> {fmtDate(promoTdcDay1Date)}</p>
+                                        <p><strong>Session:</strong> {promoTdcSession}</p>
+                                        <p><strong>Time:</strong> {promoTdcTime}</p>
+
+                                        {promoTdcDay2Date && (
+                                            <>
+                                                <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
+                                                <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 2:</p>
+                                                <p><strong>Date:</strong> {fmtDate(promoTdcDay2Date)}</p>
+                                                <p><strong>Session:</strong> {promoTdcSession}</p>
+                                                <p><strong>Time:</strong> {promoTdcTime}</p>
+                                            </>
+                                        )}
                                     </>
                                 )}
 
-                                {(promoPdcCourses.length > 0 ? promoPdcCourses : (formData.course?._pdcCourse ? [formData.course._pdcCourse] : [])).map((course, idx) => {
-                                    const key = getPromoPdcCourseKey(course);
-                                    const sel = promoPdcSelections[key] || {};
-                                    const courseLabel = course?.shortName || course?.name || `PDC ${idx + 1}`;
-                                    return (
-                                        <div key={`sched-${key}-${idx}`}>
-                                            <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
-                                            <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>{courseLabel} — Day 1:</p>
-                                            <p><strong>Date:</strong> {fmtDate(sel.scheduleDate)}</p>
-                                            <p><strong>Session:</strong> {sel.scheduleSession2 || 'Not selected'}</p>
-                                            <p><strong>Time:</strong> {sel.scheduleTime2 || 'Not selected'}</p>
+                                {isPromoOnlineTdcLockedBundle ? (
+                                    <>
+                                        <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
+                                        <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>Practical Driving Courses:</p>
+                                        <p><strong>Schedule:</strong> Branch Manager will assigns your PDC schedule after OTDC is marked complete.</p>
+                                    </>
+                                ) : (
+                                    (promoPdcCourses.length > 0 ? promoPdcCourses : (formData.course?._pdcCourse ? [formData.course._pdcCourse] : [])).map((course, idx) => {
+                                        const key = course?._pdcKey || getPromoPdcCourseKey(course);
+                                        const sel = promoPdcSelections[key] || {};
+                                        const courseLabel = course?.shortName || course?.name || `PDC ${idx + 1}`;
+                                        
+                                        return (
+                                            <div key={`sched-${key}-${idx}`}>
+                                                <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
+                                                <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>{courseLabel} — Day 1:</p>
+                                                <p><strong>Date:</strong> {fmtDate(sel.scheduleDate)}</p>
+                                                <p><strong>Session:</strong> {sel.scheduleSession2 || 'Not selected'}</p>
+                                                <p><strong>Time:</strong> {sel.scheduleTime2 || 'Not selected'}</p>
 
-                                            {sel.promoPdcSlotId2 && (
-                                                <>
-                                                    <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
-                                                    <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>{courseLabel} — Day 2:</p>
-                                                    <p><strong>Date:</strong> {fmtDate(sel.promoPdcDate2)}</p>
-                                                    <p><strong>Session:</strong> {sel.promoPdcSession2 || 'Not selected'}</p>
-                                                    <p><strong>Time:</strong> {sel.promoPdcTime2 || 'Not selected'}</p>
-                                                </>
-                                            )}
-                                        </div>
-                                    );
-                                })}
+                                                {sel.promoPdcSlotId2 && (
+                                                    <>
+                                                        <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
+                                                        <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>{courseLabel} — Day 2:</p>
+                                                        <p><strong>Date:</strong> {fmtDate(sel.promoPdcDate2)}</p>
+                                                        <p><strong>Session:</strong> {sel.promoPdcSession2 || 'Not selected'}</p>
+                                                        <p><strong>Time:</strong> {sel.promoPdcTime2 || 'Not selected'}</p>
+                                                    </>
+                                                )}
+                                            </div>
+                                        );
+                                    })
+                                )}
                             </>
                         ) : formData.scheduleDate2 ? (
                             <>
@@ -3640,9 +4100,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         <h4>Payment Summary</h4>
                         <div className="review-payment-grid">
                             <p><strong>Method:</strong> {formData.paymentMethod}</p>
-                            {['GCash', 'Starpay', 'MetroBank'].includes(formData.paymentMethod) && formData.transactionNo && (
-                                <p><strong>Transaction No:</strong> {formData.transactionNo}</p>
-                            )}
                             <p><strong>Payment Status:</strong> {formData.paymentStatus}</p>
                             <p><strong>Amount Paid Today:</strong> ₱{Number(formData.amountPaid).toLocaleString()}</p>
                             {formData.paymentStatus === 'Downpayment' && (

@@ -15,6 +15,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useNotification } from '../context/NotificationContext';
 import { authAPI, adminAPI, notificationsAPI, MEDIA_BASE_URL, branchesAPI } from '../services/api';
 import { resolveAvatar } from '../utils/avatarUtils';
+import { normalizeNotificationText } from '../utils/notificationText';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
 const logo = '/images/logo.png';
@@ -56,6 +57,16 @@ const getAdminTabFromPath = (pathname = '/admin') => {
 };
 
 const getAdminPathForTab = (tab) => ADMIN_TAB_TO_PATH[tab] || '/admin/dashboard';
+const ADMIN_SETTINGS_KEY = 'mds_admin_settings';
+
+const readAdminSettings = () => {
+    try {
+        const saved = localStorage.getItem(ADMIN_SETTINGS_KEY);
+        return saved ? JSON.parse(saved) : {};
+    } catch {
+        return {};
+    }
+};
 
 const ADMIN_DEFAULT_PERMISSIONS_BY_ROLE = {
     admin: [
@@ -63,6 +74,7 @@ const ADMIN_DEFAULT_PERMISSIONS_BY_ROLE = {
         'operations.schedules.tab.schedule',
         'operations.schedules.tab.summary',
         'operations.schedules.tab.noshow',
+        'operations.schedules.tab.tdc_online',
         'operations.bookings.manage',
         'operations.walk_in.manage',
         'operations.sales.manage',
@@ -125,13 +137,29 @@ const getDefaultAdminTab = (allowedTabs) => {
     return priority.find((tab) => allowedTabs.has(tab)) || 'profile';
 };
 
+const getEffectiveBalanceDue = (booking = {}) => {
+    const rawDue = Number(parseFloat(booking?.balance_due || 0).toFixed(2));
+    if (rawDue > 0) return rawDue;
 
+    const paid = Number(parseFloat(booking?.total_amount || 0).toFixed(2));
+    const listedCoursePrice = Number(parseFloat(booking?.course_price || 0).toFixed(2));
+    const isDownpayment = String(booking?.payment_type || '').toLowerCase().includes('down');
+
+    const assessed = isDownpayment
+        ? Math.max(listedCoursePrice, paid * 2, paid)
+        : Math.max(listedCoursePrice, paid);
+
+    return Math.max(0, Number((assessed - paid).toFixed(2)));
+};
 
 const Admin = ({ onNavigate, setIsLoggedIn }) => {
     const { theme, toggleTheme } = useTheme();
     const { showNotification } = useNotification();
     const [activeTab, setActiveTab] = useState(() => getAdminTabFromPath(window.location.pathname) || localStorage.getItem('adminActiveTab') || 'dashboard');
     const hasInitializedAdminPath = useRef(false);
+    const autoOpenedOnlineTdcIdsRef = useRef(new Set());
+    const lastOnlineTdcReminderAtRef = useRef(0);
+    const [tdcOnlineAlertsEnabled, setTdcOnlineAlertsEnabled] = useState(() => readAdminSettings().tdcOnlineAlerts !== false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
     const [loading, setLoading] = useState(true);
     const [userPermissions, setUserPermissions] = useState([]);
@@ -267,6 +295,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     }, [allowedAdminTabs, defaultAllowedAdminTab]);
     const [showProfileModal, setShowProfileModal] = useState(false);
     const [currentTime, setCurrentTime] = useState(new Date());
+    const [scheduleNavigationTarget, setScheduleNavigationTarget] = useState({ view: null, token: 0 });
 
     // Notifications State
     const NOTIF_READ_KEY  = 'admin_notif_read';
@@ -293,6 +322,8 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                 setRawNotifications(
                     res.notifications.map(n => ({
                         ...n,
+                        title: normalizeNotificationText(n.title),
+                        message: normalizeNotificationText(n.message),
                         // Format relative time
                         time: formatRelativeTime(new Date(n.time)),
                     }))
@@ -320,6 +351,17 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         localStorage.setItem(NOTIF_READ_KEY, JSON.stringify(updated));
     };
 
+    const openScheduleFromNotification = (notification, event) => {
+        if (event) event.stopPropagation();
+        if (!notification?.id) return;
+        markAsRead(notification.id);
+        setShowNotifications(false);
+        if (notification.notifType === 'online_tdc_account_setup') {
+            setScheduleNavigationTarget({ view: 'tdc_online', token: Date.now() });
+            setActiveTab('schedules');
+        }
+    };
+
     const deleteNotification = (id) => {
         const updated = [...new Set([...hiddenIds, id])];
         setHiddenIds(updated);
@@ -334,14 +376,92 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     };
 
     const unreadCount = notifications.filter(n => !n.read).length;
+    const onlineTdcUnreadCount = notifications.filter(
+        n => !n.read && n.notifType === 'online_tdc_account_setup'
+    ).length;
     const [showNotifications, setShowNotifications] = useState(false);
 
-    // Fetch notifications on mount and auto-refresh every 60s
+    // Fetch notifications on mount and auto-refresh every 30s.
     useEffect(() => {
         fetchNotifications();
-        const interval = setInterval(fetchNotifications, 60000);
+        const interval = setInterval(fetchNotifications, 30000);
         return () => clearInterval(interval);
     }, []);
+
+    // When notifications dropdown is open, poll faster so urgent items appear quickly.
+    useEffect(() => {
+        if (!showNotifications) return undefined;
+        const interval = setInterval(fetchNotifications, 10000);
+        return () => clearInterval(interval);
+    }, [showNotifications]);
+
+    // Zero-click path: if a new Online TDC alert arrives while on dashboard,
+    // auto-route once to the TDC Online queue so branch/admin can act immediately.
+    useEffect(() => {
+        if (!tdcOnlineAlertsEnabled) return;
+        if (activeTab !== 'dashboard') return;
+        if (!allowedAdminTabs.has('schedules')) return;
+
+        const nextOnlineTdc = notifications.find(
+            (n) => !n.read
+                && n.notifType === 'online_tdc_account_setup'
+                && !autoOpenedOnlineTdcIdsRef.current.has(n.id)
+        );
+
+        if (!nextOnlineTdc) return;
+
+        autoOpenedOnlineTdcIdsRef.current.add(nextOnlineTdc.id);
+        setScheduleNavigationTarget({ view: 'tdc_online', token: Date.now() });
+        setActiveTab('schedules');
+        showNotification('Opened TDC Online queue for new enrollment.', 'info');
+    }, [activeTab, notifications, allowedAdminTabs, tdcOnlineAlertsEnabled]);
+
+    useEffect(() => {
+        const syncAdminSettings = () => {
+            const settings = readAdminSettings();
+            setTdcOnlineAlertsEnabled(settings.tdcOnlineAlerts !== false);
+        };
+
+        window.addEventListener('storage', syncAdminSettings);
+        window.addEventListener('mds-admin-settings-updated', syncAdminSettings);
+
+        return () => {
+            window.removeEventListener('storage', syncAdminSettings);
+            window.removeEventListener('mds-admin-settings-updated', syncAdminSettings);
+        };
+    }, []);
+
+    // Toast alert path: recurring reminder every ~30s while Online TDC onboarding is pending.
+    // Disabled when TDC Online Alerts is turned off in System Settings.
+    useEffect(() => {
+        if (!tdcOnlineAlertsEnabled) {
+            lastOnlineTdcReminderAtRef.current = 0;
+            return;
+        }
+
+        const pendingOnlineTdc = notifications.filter(
+            (n) => n.notifType === 'online_tdc_account_setup'
+        );
+
+        if (pendingOnlineTdc.length === 0) {
+            lastOnlineTdcReminderAtRef.current = 0;
+            return;
+        }
+
+        const now = Date.now();
+        const shouldRemind =
+            lastOnlineTdcReminderAtRef.current === 0
+            || now - lastOnlineTdcReminderAtRef.current >= 30000;
+
+        if (shouldRemind) {
+            lastOnlineTdcReminderAtRef.current = now;
+            showNotification(
+                `Online TDC reminder: ${pendingOnlineTdc.length} enrollment${pendingOnlineTdc.length > 1 ? 's' : ''} pending provider account setup.`,
+                'info',
+                10000
+            );
+        }
+    }, [notifications, showNotification, tdcOnlineAlertsEnabled]);
 
     // Fetch admin profile on mount
     useEffect(() => {
@@ -404,7 +524,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                             }),
                             status: booking.payment_type === 'Full Payment' ? 'Full Payment' :
                                 booking.status === 'pending' ? 'Pending' :
-                                    booking.status === 'collectable' ? 'Downpayment' :
+                                    booking.status === 'partial_payment' ? 'Downpayment' :
                                         booking.status === 'paid' ? 'Full Payment' : 'Pending',
                             method: booking.payment_method || 'N/A',
                             type: booking.enrollment_type || 'online'
@@ -416,7 +536,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         const collectibles = unpaidRes.bookings || [];
                         setPendingCollectibles(collectibles);
                         setPendingCollectiblesTotal(
-                            collectibles.reduce((sum, booking) => sum + Number(booking.balance_due || 0), 0)
+                            collectibles.reduce((sum, booking) => sum + getEffectiveBalanceDue(booking), 0)
                         );
                     } else {
                         setPendingCollectibles([]);
@@ -555,10 +675,9 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
     // ── Session Timeout ────────────────────────────────────────
     useEffect(() => {
-        const SETTINGS_KEY = 'mds_admin_settings';
         const getTimeoutMs = () => {
             try {
-                const saved = localStorage.getItem(SETTINGS_KEY);
+                const saved = localStorage.getItem(ADMIN_SETTINGS_KEY);
                 const parsed = saved ? JSON.parse(saved) : {};
                 const minutes = Number(parsed.sessionTimeout) || 60;
                 return Math.max(5, minutes) * 60 * 1000;
@@ -1177,7 +1296,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         )}
                         <div className="notification-wrapper">
                             <button
-                                className={`notification-btn ${showNotifications ? 'active' : ''}`}
+                                className={`notification-btn ${showNotifications ? 'active' : ''} ${onlineTdcUnreadCount > 0 ? 'has-online-tdc-alert' : ''}`}
                                 title="View Notifications"
                                 onClick={() => setShowNotifications(!showNotifications)}
                             >
@@ -1185,33 +1304,40 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
                                     <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
                                 </svg>
-                                {unreadCount > 0 && <span className="notification-badge"></span>}
+                                {unreadCount > 0 && (
+                                    <span className={`notification-badge ${onlineTdcUnreadCount > 0 ? 'online-tdc-badge' : ''}`}></span>
+                                )}
                             </button>
 
                             {showNotifications && (
                                 <>
                                     <div className="dropdown-overlay" onClick={() => setShowNotifications(false)}></div>
                                     <div className="notification-dropdown animate-dropdown">
-                                        <div className="dropdown-header">
-                                            <h3>
+                                        <div className="dropdown-header" style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', overflow: 'hidden' }}>
+                                            <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', margin: 0, flex: 1 }}>
                                                 Notifications
                                                 {unreadCount > 0 && (
-                                                    <span style={{ marginLeft: 8, background: '#6366f1', color: '#fff', borderRadius: 99, fontSize: '0.65rem', fontWeight: 700, padding: '2px 7px' }}>
+                                                    <span style={{ background: '#6366f1', color: '#fff', borderRadius: 99, fontSize: '0.65rem', fontWeight: 700, padding: '2px 7px' }}>
                                                         {unreadCount}
                                                     </span>
                                                 )}
+                                                {onlineTdcUnreadCount > 0 && (
+                                                    <span className="online-tdc-pill" title="Online TDC enrollments waiting for provider account setup" style={{ whiteSpace: 'nowrap' }}>
+                                                        Online TDC: {onlineTdcUnreadCount}
+                                                    </span>
+                                                )}
                                             </h3>
-                                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
                                                 <button
                                                     className="clear-all-btn"
                                                     title="Refresh"
                                                     onClick={fetchNotifications}
-                                                    style={{ padding: '2px 6px', fontSize: '0.75rem' }}
+                                                    style={{ padding: '4px 8px', fontSize: '1rem', lineHeight: 1 }}
                                                 >
                                                     {notifLoading ? '…' : '↻'}
                                                 </button>
                                                 {notifications.length > 0 && (
-                                                    <button className="clear-all-btn" onClick={clearAllNotifications}>Clear All</button>
+                                                    <button className="clear-all-btn" onClick={clearAllNotifications} style={{ whiteSpace: 'nowrap' }}>Clear All</button>
                                                 )}
                                             </div>
                                         </div>
@@ -1223,14 +1349,32 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                                 </div>
                                             ) : notifications.length > 0 ? (
                                                 notifications.map(n => (
-                                                    <div key={n.id} className={`notification-item ${n.read ? 'read' : 'unread'}`} onClick={() => markAsRead(n.id)}>
-                                                        <div className={`status-dot ${n.type}`}></div>
+                                                    <div
+                                                        key={n.id}
+                                                        className={`notification-item ${n.read ? 'read' : 'unread'} ${n.notifType === 'online_tdc_account_setup' ? 'online-tdc-notif' : ''}`}
+                                                        onClick={() => {
+                                                            if (n.notifType === 'online_tdc_account_setup') {
+                                                                openScheduleFromNotification(n);
+                                                            } else {
+                                                                markAsRead(n.id);
+                                                            }
+                                                        }}
+                                                    >
+                                                        <div className={`status-dot ${n.type} ${n.notifType === 'online_tdc_account_setup' ? 'online-tdc' : ''}`}></div>
                                                         <div className="notify-content">
                                                             <div className="notify-title-row">
                                                                 <h4>{n.title}</h4>
                                                                 <span className="notify-time">{n.time}</span>
                                                             </div>
                                                             <p>{n.message}</p>
+                                                            {n.notifType === 'online_tdc_account_setup' && (
+                                                                <button
+                                                                    className="quick-open-link"
+                                                                    onClick={(e) => openScheduleFromNotification(n, e)}
+                                                                >
+                                                                    Open TDC Online Queue
+                                                                </button>
+                                                            )}
                                                         </div>
                                                         <button
                                                             className="delete-notify"
@@ -1359,6 +1503,31 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="10" y1="1" x2="10" y2="23"></line><line x1="6" y1="6" x2="16" y2="6"></line><line x1="6" y1="9" x2="16" y2="9"></line><path d="M10 4h4a4 4 0 0 1 0 8h-4"></path></svg>
                                 </div>
                             </div>
+                            
+                            {String(adminProfile?.rawRole || '').toLowerCase() === 'super_admin' && (
+                                <>
+                                    <div className="stat-card">
+                                        <div className="stat-info">
+                                            <span>Add-ons (This Month)</span>
+                                            <h2>{loading ? <span className="skeleton-text">---</span> : formatCurrency(stats.addon_sales_total || 0)}</h2>
+                                            <p className="stat-subtitle">Add-on revenue</p>
+                                        </div>
+                                        <div className="stat-icon purple" style={{ background: 'rgba(156, 39, 176, 0.1)', color: '#9c27b0' }}>
+                                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path><path d="M22 12A10 10 0 0 0 12 2v10z"></path></svg>
+                                        </div>
+                                    </div>
+                                    <div className="stat-card">
+                                        <div className="stat-info">
+                                            <span>Convenience Fees (This Month)</span>
+                                            <h2>{loading ? <span className="skeleton-text">---</span> : formatCurrency(stats.convenience_fee_total || 0)}</h2>
+                                            <p className="stat-subtitle">Convenience fee revenue</p>
+                                        </div>
+                                        <div className="stat-icon orange" style={{ background: 'rgba(255, 152, 0, 0.1)', color: '#ff9800' }}>
+                                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="M7 15h0M12 15h0M17 15h0M7 11h.01M12 11h.01M17 11h.01M7 7h.01M12 7h.01M17 7h.01"></path></svg>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
 
                             <div className="stat-card">
                                 <div className="stat-info">
@@ -1422,7 +1591,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                                                         fontWeight: 700,
                                                         fontSize: '0.85rem'
                                                     }}>
-                                                        {formatCurrency(item.balance_due)}
+                                                        {formatCurrency(getEffectiveBalanceDue(item))}
                                                     </span>
                                                 </td>
                                                 <td>
@@ -1561,6 +1730,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         onNavigate={setActiveTab}
                         currentUserPermissions={effectiveAdminPermissions}
                         currentUserRole={adminProfile.rawRole}
+                        navigationTarget={scheduleNavigationTarget}
                     />
                 ) : activeTab === 'bookings' ? (
                     <Booking />
@@ -1686,6 +1856,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         markAsRead={markAsRead}
                         deleteNotification={deleteNotification}
                         clearAll={clearAllNotifications}
+                        openScheduleFromNotification={openScheduleFromNotification}
                     />
                 ) : null}
                 {/* Unified Edit Profile & Settings Modal */}
@@ -1819,13 +1990,20 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     );
 };
 
-const NotificationPage = ({ notifications, markAsRead, deleteNotification, clearAll }) => {
+const NotificationPage = ({ notifications, markAsRead, deleteNotification, clearAll, openScheduleFromNotification }) => {
     const unreadOnly = notifications.filter(n => !n.read);
     const [filter, setFilter] = React.useState('all');
 
     const filtered = filter === 'unread' ? unreadOnly : notifications;
 
     const notifIcon = (notifType) => {
+        if (notifType === 'online_tdc_account_setup') return (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+        );
         if (notifType === 'payment_full') return (
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="1" x2="12" y2="23"></line>
@@ -1857,6 +2035,7 @@ const NotificationPage = ({ notifications, markAsRead, deleteNotification, clear
     };
 
     const notifIconClass = (notifType) => {
+        if (notifType === 'online_tdc_account_setup') return 'online-tdc';
         if (notifType === 'payment_full') return 'success';
         if (notifType === 'payment_down') return 'warning';
         if (notifType === 'reschedule')   return 'reschedule';
@@ -1893,7 +2072,7 @@ const NotificationPage = ({ notifications, markAsRead, deleteNotification, clear
             <div className="notifications-container-lux">
                 {filtered.length > 0 ? (
                     filtered.map(n => (
-                            <div key={n.id} className={`notify-card-lux ${n.read ? 'read' : 'unread'}`}>
+                            <div key={n.id} className={`notify-card-lux ${n.read ? 'read' : 'unread'} ${n.notifType === 'online_tdc_account_setup' ? 'online-tdc' : ''}`}>
                                 <div className="card-indicator"></div>
                                 <div className={`card-icon-box ${notifIconClass(n.notifType)}`}>
                                     {notifIcon(n.notifType)}
@@ -1904,6 +2083,14 @@ const NotificationPage = ({ notifications, markAsRead, deleteNotification, clear
                                     <span className="card-time">{n.time}</span>
                                 </div>
                                 <p>{n.message}</p>
+                                {n.notifType === 'online_tdc_account_setup' && (
+                                    <button
+                                        className="mark-read-link"
+                                        onClick={(e) => openScheduleFromNotification(n, e)}
+                                    >
+                                        Open TDC Online Queue
+                                    </button>
+                                )}
                                 {!n.read && (
                                     <button className="mark-read-link" onClick={() => markAsRead(n.id)}>
                                         Mark as read

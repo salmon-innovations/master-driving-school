@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './css/schedule.css';
+import './css/walkInEnrollment.css';
 import './css/branch.css';
 import { schedulesAPI, branchesAPI, authAPI, coursesAPI, adminAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
@@ -7,6 +8,8 @@ import { ConfirmModal } from './config/Modals';
 
 const SCHEDULE_TAB_PERMISSION_MAP = {
     schedule: ['operations.schedules.manage', 'operations.schedules.tab.schedule'],
+    tdc_online: ['operations.schedules.manage', 'operations.schedules.tab.tdc_online'],
+    pdc_scheduling: ['operations.schedules.manage', 'operations.schedules.tab.tdc_online'],
     summary: ['operations.schedules.manage', 'operations.schedules.tab.summary'],
     noshow: ['operations.schedules.manage', 'operations.schedules.tab.noshow'],
 };
@@ -16,10 +19,140 @@ const normalizePermissionList = (permissions) => {
     return permissions.filter((permission) => typeof permission === 'string' && permission.trim().length > 0);
 };
 
-const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '' }) => {
+const parseNotesJson = (rawNotes) => {
+    if (!rawNotes || typeof rawNotes !== 'string' || !rawNotes.startsWith('{')) return null;
+    try {
+        return JSON.parse(rawNotes);
+    } catch {
+        return null;
+    }
+};
+
+const toInputDate = (value) => {
+    if (!value) return '';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const addDaysToDate = (dateStr, days = 0) => {
+    if (!dateStr) return '';
+    const d = new Date(`${dateStr}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return '';
+    d.setDate(d.getDate() + Number(days || 0));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const isTwoDayPdcVariant = (course = {}) => {
+    const src = `${course?.courseName || ''} ${course?.courseType || ''}`.toUpperCase();
+    // If it's a PDC course, it's almost always an 8-hour course split into 2 days
+    if (src.includes('PDC') || src.includes('PRACTICAL')) return true;
+    if (src.includes('AUTOMATIC') || src.includes('MANUAL')) return true;
+    if (src.includes('MOTOR') || src.includes('MOTORCYCLE')) return true;
+    if (src.includes('CAR') || src.includes('B1') || src.includes('B2') || src.includes('VAN') || src.includes('L300')) return true;
+    if (src.includes('TRICYCLE') || src.includes('V1') || src.includes('A1')) return true;
+    return false;
+};
+
+const buildPdcCourseOptions = (booking, notesJson) => {
+    const fromSelections = Object.entries(notesJson?.pdcSelections || {}).map(([key, value], idx) => ({
+        key: String(key || `pdc_${idx + 1}`),
+        courseId: value?.courseId || null,
+        courseName: value?.courseName || `PDC Course ${idx + 1}`,
+        courseType: value?.courseType || '',
+        requiresDay2: Boolean(value?.pdcDate2 || value?.pdcSlot2 || value?.pdcSlotDetails2) || isTwoDayPdcVariant({
+            courseName: value?.courseName,
+            courseType: value?.courseType,
+        }),
+    }));
+
+    // If pdcCourseIds is stored in notes, use it to filter courseList to only enrolled PDC courses.
+    // This prevents a promo bundle's full courseList (e.g. 4 PDC types) from all appearing
+    // when the student only enrolled in one specific PDC.
+    const pdcCourseIdSet = (() => {
+        const ids = Array.isArray(notesJson?.pdcCourseIds) ? notesJson.pdcCourseIds : [];
+        const nums = ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0);
+        return nums.length > 0 ? new Set(nums) : null;
+    })();
+
+    const fromCourseList = (Array.isArray(notesJson?.courseList) ? notesJson.courseList : [])
+        .filter((item) => String(item?.category || '').toUpperCase() === 'PDC')
+        // When we know exactly which PDC courses were enrolled, filter to only those.
+        .filter((item) => !pdcCourseIdSet || pdcCourseIdSet.has(Number(item?.id)))
+        .map((item, idx) => ({
+            key: String(item?.id || `${item?.name || 'pdc'}_${idx + 1}`).toLowerCase().replace(/\s+/g, '_'),
+            courseId: item?.id || null,
+            courseName: item?.name || `PDC Course ${idx + 1}`,
+            courseType: item?.type || '',
+            requiresDay2: isTwoDayPdcVariant({ courseName: item?.name, courseType: item?.type }),
+        }));
+
+    const fromCombinedNames = String(notesJson?.combinedCourseNames || booking?.course_name || '')
+        .split('+')
+        .map((name) => String(name || '').trim())
+        .filter(Boolean)
+        .filter((name) => {
+            const src = name.toUpperCase();
+            if (src.includes('TDC') || src.includes('OTDC') || src.includes('THEORETICAL')) return false;
+            if (src.includes('PROMO') || src.includes('BUNDLE')) return false;
+            return (
+                src.includes('PDC')
+                || src.includes('A1')
+                || src.includes('TRICYCLE')
+                || src.includes('B1')
+                || src.includes('B2')
+                || src.includes('VAN')
+                || src.includes('L300')
+                || src.includes('CAR')
+                || src.includes('MOTOR')
+            );
+        })
+        .map((name, idx) => ({
+            key: `combined_pdc_${idx + 1}_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+            courseId: null,
+            courseName: name,
+            courseType: '',
+            requiresDay2: isTwoDayPdcVariant({ courseName: name, courseType: '' }),
+        }));
+
+    // Strict waterfall priority: use the first source that produces results.
+    // This prevents the full courseList (which may contain all 4 PDC variants for a promo bundle)
+    // from appearing when a student only enrolled in one course (already in pdcSelections).
+    let merged;
+    if (fromSelections.length > 0) {
+        merged = fromSelections;
+    } else if (fromCourseList.length > 0) {
+        merged = fromCourseList;
+    } else {
+        merged = fromCombinedNames;
+    }
+
+    const seenKeys = new Set();
+    const seenNames = new Set();
+    const unique = [];
+    merged.forEach((item) => {
+        const dedupeKey = `${String(item.key)}::${String(item.courseName).toLowerCase()}`;
+        const nameKey = String(item.courseName).toLowerCase().trim()
+            .replace(/\s+/g, ' ')
+            .replace(/^practical driving course\s*\(pdc\)\s*-?\s*/i, '')
+            .replace(/\s*-\s*(automatic|manual|mt|at|v1-tricycle|b1-van\/b2-l300)\s*$/i, '');
+        if (seenKeys.has(dedupeKey) || seenNames.has(nameKey)) return;
+        seenKeys.add(dedupeKey);
+        seenNames.add(nameKey);
+        unique.push(item);
+    });
+
+    return unique.length > 0
+        ? unique
+        : [{ key: 'pdc_1', courseId: null, courseName: 'PDC Course', courseType: '', requiresDay2: false }];
+};
+
+const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '', navigationTarget = null }) => {
     const [todayStudents, setTodayStudents] = React.useState({ data: [], total: 0, date: '' });
-    const [scheduleView, setScheduleView] = React.useState('schedule'); // 'schedule' | 'summary' | 'noshow'
+    const [scheduleView, setScheduleView] = React.useState('schedule'); // 'schedule' | 'tdc_online' | 'pdc_scheduling' | 'summary' | 'noshow'
     const [noShowStudents, setNoShowStudents] = React.useState({ data: [], loading: false });
+    const [tdcOnlineStudents, setTdcOnlineStudents] = React.useState({ data: [], loading: false });
+    const [pdcSchedulingQueue, setPdcSchedulingQueue] = React.useState({ data: [], loading: false });
     const [summaryDate, setSummaryDate] = React.useState(() => {
         const d = new Date();
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -27,6 +160,15 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
     const [summaryCourseFilter, setSummaryCourseFilter] = React.useState('');
 
     const [summaryStudentModal, setSummaryStudentModal] = React.useState(null); // { student: {}, scheduleInfo: {}, bookings: [], loading: true }
+    const [showPdcAssignModal, setShowPdcAssignModal] = React.useState(false);
+    const [pdcAssignTarget, setPdcAssignTarget] = React.useState(null);
+    const [pdcAssignRows, setPdcAssignRows] = React.useState([]);
+    const [pdcAssignLoading, setPdcAssignLoading] = React.useState(false);
+    const [pdcAssignActiveCourseKey, setPdcAssignActiveCourseKey] = React.useState(null);
+    const [pdcAssignDayMode, setPdcAssignDayMode] = React.useState('day1');
+    const [pdcAssignCalendarMonth, setPdcAssignCalendarMonth] = React.useState(new Date());
+    const [pdcAssignMonthSlotsMap, setPdcAssignMonthSlotsMap] = React.useState({});
+    const [pdcAssignMonthLoading, setPdcAssignMonthLoading] = React.useState(false);
 
     const { showNotification } = useNotification();
 
@@ -73,7 +215,341 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         if (permissionSet.size === 0) return true;
         return requiredPermissions.some((permission) => permissionSet.has(permission));
     };
-    const allowedScheduleTabs = ['schedule', 'summary', 'noshow'].filter((tabKey) => canAccessScheduleTab(tabKey));
+    const allowedScheduleTabs = ['schedule', 'tdc_online', 'pdc_scheduling', 'summary', 'noshow'].filter((tabKey) => canAccessScheduleTab(tabKey));
+
+    const fetchTdcOnlineStudents = React.useCallback(async ({ branchId } = {}) => {
+        const candidate = adminAPI?.getTdcOnlineStudents;
+        if (typeof candidate === 'function') {
+            return await candidate({ branchId });
+        }
+
+        // Fallback path prevents UI crash if stale bundle/mismatch lacks this method.
+        const fallback = schedulesAPI?.getTdcOnlineStudents;
+        if (typeof fallback === 'function') {
+            return await fallback({ branchId });
+        }
+
+        return { success: false, data: [] };
+    }, []);
+
+    const fetchPdcSchedulingQueue = React.useCallback(async ({ branchId } = {}) => {
+        setPdcSchedulingQueue((prev) => ({ ...prev, loading: true }));
+        try {
+            if (typeof adminAPI?.getPdcSchedulingQueue === 'function') {
+                const direct = await adminAPI.getPdcSchedulingQueue({ branchId: branchId || undefined });
+                const directQueue = Array.isArray(direct?.data) ? direct.data : [];
+                setPdcSchedulingQueue({ data: directQueue, loading: false });
+                return;
+            }
+
+            const res = await adminAPI.getAllBookings('completed', 200, branchId || undefined);
+            const rows = Array.isArray(res?.bookings) ? res.bookings : [];
+
+            const queue = rows.map((booking) => {
+                const notesJson = parseNotesJson(booking.notes || '');
+                const locked = !!notesJson?.pdcScheduleLockedUntilCompletion;
+                const courseList = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
+                const hasOnlineTdc = courseList.some((item) => {
+                    const category = String(item?.category || '').toUpperCase();
+                    const type = String(item?.type || '').toLowerCase();
+                    return category === 'TDC' && (type.includes('online') || type.includes('otdc'));
+                })
+                    || String(booking?.course_type || '').toLowerCase().includes('online')
+                    || String(booking?.course_type || '').toLowerCase().includes('otdc')
+                    || String(booking?.course_name || '').toLowerCase().includes('otdc')
+                    || Boolean(notesJson?.isOnlineTdcNoSchedule);
+                const hasPdc = courseList.some((item) => String(item?.category || '').toUpperCase() === 'PDC') || locked;
+
+                const completedDate = toInputDate(booking?.updated_at || booking?.created_at || null);
+                const minScheduleDate = addDaysToDate(completedDate, 2);
+
+                return {
+                    id: booking.id,
+                    student_name: booking.student_name,
+                    student_email: booking.student_email,
+                    student_contact: booking.student_contact,
+                    branch_name: booking.branch_name,
+                    branch_id: booking.branch_id,
+                    course_name: booking.course_name,
+                    course_type: booking.course_type,
+                    completedDate,
+                    minScheduleDate,
+                    notesJson,
+                    pdcCourses: buildPdcCourseOptions(booking, notesJson || {}),
+                    locked,
+                    hasOnlineTdc,
+                    hasPdc,
+                };
+            }).filter((entry) => entry.locked && entry.hasPdc);
+
+            setPdcSchedulingQueue({ data: queue, loading: false });
+        } catch (error) {
+            console.error('Failed to load PDC scheduling queue:', error);
+            setPdcSchedulingQueue({ data: [], loading: false });
+            showNotification('Failed to load PDC scheduling queue.', 'error');
+        }
+    }, [showNotification]);
+
+    const normalizeText = React.useCallback((value) => String(value || '').toLowerCase().trim(), []);
+
+    const resolveDesiredTransmission = React.useCallback((rowCourse) => {
+        const src = `${rowCourse?.courseType || ''} ${rowCourse?.courseName || ''}`.toLowerCase();
+        if (src.includes('automatic') || src.includes(' at') || src.endsWith('at')) return 'AT';
+        if (src.includes('manual') || src.includes(' mt') || src.endsWith('mt')) return 'MT';
+
+        // Bundle-level fallback: for promo bundle OTDC/F2F + 4 PDC, infer fixed tx for Car/Motor tabs.
+        const rowSrc = normalizeText(`${rowCourse?.courseName || ''} ${rowCourse?.courseType || ''}`);
+        const isCarOrMotor = rowSrc.includes('car') || rowSrc.includes('motor') || rowSrc.includes('motorcycle');
+        if (!isCarOrMotor) return null;
+
+        const bundleSrc = normalizeText(`${pdcAssignTarget?.course_name || ''} ${pdcAssignTarget?.course_type || ''} ${pdcAssignTarget?.notesJson?.combinedCourseNames || ''}`);
+        if (bundleSrc.includes('otdc') || bundleSrc.includes('online')) return 'AT';
+        if (bundleSrc.includes('f2f')) return 'MT';
+
+        return null;
+    }, [normalizeText, pdcAssignTarget]);
+
+    const matchesPdcSlotForCourse = React.useCallback((slot, rowCourse) => {
+        if (!rowCourse) return true;
+
+        const slotCourseType = normalizeText(slot?.course_type || slot?.courseType || '');
+        const slotTransmission = normalizeText(slot?.transmission || '');
+        const rowSrc = normalizeText(`${rowCourse?.courseName || ''} ${rowCourse?.courseType || ''}`);
+
+        const desiredTx = resolveDesiredTransmission(rowCourse);
+        if (desiredTx === 'AT') {
+            const isAuto = slotTransmission.includes('automatic') || slotTransmission === 'at' || slotCourseType.includes('automatic') || slotCourseType.includes('at');
+            if (!isAuto) return false;
+        }
+        if (desiredTx === 'MT') {
+            const isManual = slotTransmission.includes('manual') || slotTransmission === 'mt' || slotCourseType.includes('manual') || slotCourseType.includes('mt');
+            if (!isManual) return false;
+        }
+
+        // If slot course type is generic/empty, transmission match above is sufficient.
+        if (!slotCourseType) return true;
+
+        const wantsTricycle = rowSrc.includes('a1') || rowSrc.includes('tricycle');
+        const wantsB1B2 = rowSrc.includes('b1') || rowSrc.includes('b2') || rowSrc.includes('van') || rowSrc.includes('l300');
+        const wantsCar = rowSrc.includes('car') && !wantsTricycle;
+        const wantsMotor = rowSrc.includes('motor') || rowSrc.includes('motorcycle');
+
+        if (wantsTricycle) {
+            return slotCourseType.includes('a1') || slotCourseType.includes('tricycle');
+        }
+        if (wantsB1B2) {
+            return slotCourseType.includes('b1') || slotCourseType.includes('b2') || slotCourseType.includes('van') || slotCourseType.includes('l300');
+        }
+        if (wantsCar) {
+            return slotCourseType.includes('car');
+        }
+        if (wantsMotor) {
+            return slotCourseType.includes('motor') || slotCourseType.includes('motorcycle');
+        }
+
+        return true;
+    }, [normalizeText, resolveDesiredTransmission]);
+
+    const fetchPdcSlotsForDate = React.useCallback(async (dateValue, branchId, rowCourse = null) => {
+        if (!dateValue) return [];
+        const res = await schedulesAPI.getSlotsByDate(dateValue, branchId || undefined, 'PDC');
+        const rows = Array.isArray(res) ? res : (Array.isArray(res?.slots) ? res.slots : []);
+        return rows
+            .filter((slot) => String(slot?.type || '').toLowerCase() === 'pdc')
+            .filter((slot) => Number(slot?.available_slots || 0) > 0)
+            .filter((slot) => matchesPdcSlotForCourse(slot, rowCourse))
+            .map((slot) => ({
+                id: Number(slot.id),
+                session: String(slot.session || 'Session'),
+                timeRange: String(slot.time_range || ''),
+                availableSlots: Number(slot.available_slots || 0),
+                courseType: String(slot.course_type || ''),
+                transmission: String(slot.transmission || ''),
+                label: `${slot.session || 'Session'}${slot.time_range ? ` · ${slot.time_range}` : ''}${slot.available_slots != null ? ` · ${slot.available_slots} slots` : ''}`,
+            }));
+    }, [matchesPdcSlotForCourse]);
+
+    const loadPdcAssignRowSlots = React.useCallback(async (rowIndex, dayKey, dateValue, branchIdOverride = null, rowModel = null) => {
+        const branchId = branchIdOverride || pdcAssignTarget?.branch_id || selectedBranch || null;
+        const loadingKey = dayKey === 'day2' ? 'loadingDay2' : 'loadingDay1';
+        const slotsKey = dayKey === 'day2' ? 'slotsDay2' : 'slotsDay1';
+        const targetRow = rowModel || pdcAssignRows[rowIndex] || null;
+
+        setPdcAssignRows((prev) => prev.map((row, idx) => (
+            idx === rowIndex ? { ...row, [loadingKey]: true } : row
+        )));
+
+        try {
+            const options = await fetchPdcSlotsForDate(dateValue, branchId, targetRow);
+            setPdcAssignRows((prev) => prev.map((row, idx) => (
+                idx === rowIndex ? { ...row, [slotsKey]: options, [loadingKey]: false } : row
+            )));
+        } catch {
+            setPdcAssignRows((prev) => prev.map((row, idx) => (
+                idx === rowIndex ? { ...row, [slotsKey]: [], [loadingKey]: false } : row
+            )));
+        }
+    }, [fetchPdcSlotsForDate, pdcAssignRows, pdcAssignTarget?.branch_id, selectedBranch]);
+
+    const fetchPdcSlotsForMonth = React.useCallback(async (monthDate, branchIdOverride = null, rowModel = null) => {
+        const monthBase = monthDate instanceof Date ? monthDate : new Date();
+        const y = monthBase.getFullYear();
+        const m = monthBase.getMonth();
+        const daysInMonth = new Date(y, m + 1, 0).getDate();
+        const branchId = branchIdOverride || pdcAssignTarget?.branch_id || selectedBranch || null;
+
+        const startDate = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+        const endDate = `${y}-${String(m + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+
+        setPdcAssignMonthLoading(true);
+        try {
+            const res = await schedulesAPI.getSlotsByDate(null, branchId, 'PDC', startDate, endDate);
+            const rawSlots = Array.isArray(res) ? res : (Array.isArray(res?.slots) ? res.slots : []);
+            
+            const map = {};
+            for (let day = 1; day <= daysInMonth; day += 1) {
+                const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                
+                // Keep the exact same filtering applied in fetchPdcSlotsForDate per day
+                const daySlots = rawSlots
+                    .filter((slot) => {
+                        if (String(slot?.type || '').toLowerCase() !== 'pdc') return false;
+                        if (Number(slot?.available_slots || 0) <= 0) return false;
+                        
+                        const sStart = slot.date?.split('T')[0];
+                        const sEnd = slot.end_date ? slot.end_date.split('T')[0] : sStart;
+                        return dateStr >= sStart && dateStr <= sEnd;
+                    })
+                    .filter((slot) => matchesPdcSlotForCourse(slot, rowModel))
+                    .map((slot) => ({
+                        id: Number(slot.id),
+                        session: String(slot.session || 'Session'),
+                        timeRange: String(slot.time_range || ''),
+                        availableSlots: Number(slot.available_slots || 0),
+                        courseType: String(slot.course_type || ''),
+                        transmission: String(slot.transmission || ''),
+                        label: `${slot.session || 'Session'}${slot.time_range ? ` · ${slot.time_range}` : ''}${slot.available_slots != null ? ` · ${slot.available_slots} slots` : ''}`,
+                    }));
+                
+                if (daySlots.length > 0) {
+                    map[dateStr] = daySlots;
+                }
+            }
+            setPdcAssignMonthSlotsMap(map);
+        } catch {
+            setPdcAssignMonthSlotsMap({});
+        } finally {
+            setPdcAssignMonthLoading(false);
+        }
+    }, [pdcAssignTarget?.branch_id, selectedBranch, matchesPdcSlotForCourse]);
+
+    const openPdcAssignModal = React.useCallback(async (queueItem) => {
+        if (!queueItem) return;
+        const minDate = queueItem.minScheduleDate || toInputDate(new Date());
+        const initialRows = (Array.isArray(queueItem.pdcCourses) ? queueItem.pdcCourses : []).map((course) => ({
+            courseKey: course.key,
+            courseId: course.courseId,
+            courseName: course.courseName,
+            courseType: course.courseType,
+            requiresDay2: !!course.requiresDay2,
+            date1: minDate,
+            slot1: '',
+            slotsDay1: [],
+            loadingDay1: false,
+            date2: '',
+            session1: '',
+            slot2: '',
+            slotsDay2: [],
+            loadingDay2: false,
+            session2: '',
+        }));
+
+        setPdcAssignTarget(queueItem);
+        setPdcAssignRows(initialRows);
+        setPdcAssignActiveCourseKey(initialRows[0]?.courseKey || null);
+        setPdcAssignDayMode('day1');
+        setPdcAssignCalendarMonth(minDate ? new Date(`${minDate}T00:00:00`) : new Date());
+        setShowPdcAssignModal(true);
+
+        for (let idx = 0; idx < initialRows.length; idx += 1) {
+            await loadPdcAssignRowSlots(idx, 'day1', minDate, queueItem.branch_id, initialRows[idx]);
+        }
+    }, [loadPdcAssignRowSlots]);
+
+    const activeRowModelContext = React.useMemo(() => {
+        if (!showPdcAssignModal || !pdcAssignTarget) return null;
+        const activeRow = pdcAssignRows.find((row) => row.courseKey === pdcAssignActiveCourseKey) || pdcAssignRows[0] || null;
+        // Only include fields that actually affect the slot filtering process
+        return activeRow ? { courseName: activeRow.courseName, courseType: activeRow.courseType } : null;
+    }, [pdcAssignRows, pdcAssignActiveCourseKey, showPdcAssignModal, pdcAssignTarget]);
+
+    const activeRowModelContextStr = JSON.stringify(activeRowModelContext);
+
+    React.useEffect(() => {
+        if (!showPdcAssignModal || !pdcAssignTarget) return;
+        const activeRowMock = activeRowModelContextStr ? JSON.parse(activeRowModelContextStr) : null;
+        fetchPdcSlotsForMonth(pdcAssignCalendarMonth, pdcAssignTarget.branch_id, activeRowMock);
+    }, [fetchPdcSlotsForMonth, pdcAssignCalendarMonth, pdcAssignTarget, activeRowModelContextStr, showPdcAssignModal]);
+
+    const handleConfirmPdcAssignments = React.useCallback(async () => {
+        if (!pdcAssignTarget) return;
+        if (!Array.isArray(pdcAssignRows) || pdcAssignRows.length === 0) {
+            showNotification('No PDC courses found for assignment.', 'error');
+            return;
+        }
+
+        const isHalf = (session) => {
+            const s = String(session || '').toLowerCase();
+            return s.includes('morning') || s.includes('afternoon') || s.includes('4 hours');
+        };
+
+        for (const row of pdcAssignRows) {
+            // Skip courses with no assignment yet (partial submit allowed)
+            if (!row.slot1) continue;
+            const hasPartialDay2 = (row.date2 && !row.slot2) || (!row.date2 && row.slot2);
+            if (hasPartialDay2) {
+                showNotification(`Please complete both Day 2 date and slot for ${row.courseName}.`, 'error');
+                return;
+            }
+            if ((row.needsDay2 || (row.requiresDay2 && isHalf(row.session1))) && (!row.date2 || !row.slot2)) {
+                showNotification(`${row.courseName} requires Day 2 assignment.`, 'error');
+                return;
+            }
+        }
+
+        const rowsWithSlot = pdcAssignRows.filter((row) => !!row.slot1);
+        if (rowsWithSlot.length === 0) {
+            showNotification('Please assign at least one PDC course schedule.', 'error');
+            return;
+        }
+
+        try {
+            setPdcAssignLoading(true);
+            const payload = rowsWithSlot.map((row) => ({
+                courseKey: row.courseKey,
+                courseId: row.courseId,
+                courseName: row.courseName,
+                courseType: row.courseType,
+                pdcDate: row.date1,
+                scheduleSlotId: Number(row.slot1),
+                ...(row.date2 && row.slot2 ? {
+                    pdcDate2: row.date2,
+                    promoPdcSlotId2: Number(row.slot2),
+                } : {}),
+            }));
+
+            await adminAPI.assignPdcSchedule(pdcAssignTarget.id, payload);
+            setShowPdcAssignModal(false);
+            setPdcAssignTarget(null);
+            setPdcAssignRows([]);
+            await fetchPdcSchedulingQueue({ branchId: selectedBranch || undefined });
+            showNotification('PDC schedule assigned successfully. Confirmation email sent to student.', 'success');
+        } catch (err) {
+            showNotification(err?.message || 'Failed to assign PDC schedules.', 'error');
+        } finally {
+            setPdcAssignLoading(false);
+        }
+    }, [fetchPdcSchedulingQueue, pdcAssignRows, pdcAssignTarget, selectedBranch, showNotification]);
 
     // Always fetch both tab counts so badges show on initial load
     React.useEffect(() => {
@@ -88,7 +564,16 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         schedulesAPI.getNoShowStudents({ branchId: selectedBranch || undefined })
             .then(res => { setNoShowStudents({ data: res?.data || [], loading: false }); })
             .catch(() => setNoShowStudents({ data: [], loading: false }));
-    }, [summaryDate, selectedBranch]);
+
+        setTdcOnlineStudents(prev => ({ ...prev, loading: true }));
+        fetchTdcOnlineStudents({ branchId: selectedBranch || undefined })
+            .then(res => { setTdcOnlineStudents({ data: res?.data || [], loading: false }); })
+            .catch(() => {
+                setTdcOnlineStudents({ data: [], loading: false });
+                showNotification('Failed to load TDC Online queue.', 'error');
+            });
+        fetchPdcSchedulingQueue({ branchId: selectedBranch || undefined });
+    }, [summaryDate, selectedBranch, fetchTdcOnlineStudents, fetchPdcSchedulingQueue]);
 
     // Re-fetch when switching to a tab to get fresh data
     React.useEffect(() => {
@@ -106,7 +591,19 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                 .then(res => { setNoShowStudents({ data: res?.data || [], loading: false }); })
                 .catch(() => setNoShowStudents({ data: [], loading: false }));
         }
-    }, [scheduleView]);
+        if (scheduleView === 'tdc_online') {
+            setTdcOnlineStudents(prev => ({ ...prev, loading: true }));
+            fetchTdcOnlineStudents({ branchId: selectedBranch || undefined })
+                .then(res => { setTdcOnlineStudents({ data: res?.data || [], loading: false }); })
+                .catch(() => {
+                    setTdcOnlineStudents({ data: [], loading: false });
+                    showNotification('Failed to load TDC Online queue.', 'error');
+                });
+        }
+        if (scheduleView === 'pdc_scheduling') {
+            fetchPdcSchedulingQueue({ branchId: selectedBranch || undefined });
+        }
+    }, [scheduleView, fetchTdcOnlineStudents, fetchPdcSchedulingQueue, selectedBranch, showNotification]);
 
     React.useEffect(() => {
         if (allowedScheduleTabs.length === 0) return;
@@ -114,6 +611,14 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
             setScheduleView(allowedScheduleTabs[0]);
         }
     }, [allowedScheduleTabs, scheduleView]);
+
+    React.useEffect(() => {
+        const targetView = navigationTarget?.view;
+        if (!targetView) return;
+        if (allowedScheduleTabs.includes(targetView) && scheduleView !== targetView) {
+            setScheduleView(targetView);
+        }
+    }, [navigationTarget, allowedScheduleTabs, scheduleView]);
 
     const [formData, setFormData] = useState({
         type: 'tdc',
@@ -184,7 +689,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
             try {
                 // Fetch profile first to determine restrictions
                 const profileRes = await authAPI.getProfile();
-                let role = 'guest';
+                let role = 'student';
                 let profileBranchId = null;
 
                 if (profileRes.success) {
@@ -301,6 +806,11 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         return available;
     };
 
+    const isGlobalB1B2Course = (courseName) => {
+        const normalized = String(courseName || '').toLowerCase();
+        return ['b1', 'b2', 'van', 'l300'].some(token => normalized.includes(token));
+    };
+
     const handleInputChange = (e) => {
         const { name, value } = e.target;
         if (name === 'slots' && value < 1 && value !== '') return;
@@ -322,11 +832,16 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                 setFormData({ ...formData, [name]: value, session: '', time: '', course_type: '', transmission: '' });
             }
         } else if (name === 'course_type') {
+            if (formData.type === 'tdc' && String(value).toLowerCase() === 'online') {
+                showNotification('TDC Online slot creation is disabled. Please use Face-to-Face (F2F).', 'warning');
+                return;
+            }
             const transmissions = getAvailableTransmissions(value);
+            const isB1B2Global = formData.type === 'pdc' && isGlobalB1B2Course(value);
             setFormData({
                 ...formData,
                 [name]: value,
-                slots: 15,
+                slots: isB1B2Global ? 2 : 15,
                 transmission: transmissions.length > 0 ? (transmissions.includes(formData.transmission) ? formData.transmission : transmissions[0]) : ''
             });
         } else {
@@ -362,11 +877,16 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                 setAutoData({ ...autoData, [name]: value, session: '', time: '', course_type: '', transmission: '' });
             }
         } else if (name === 'course_type') {
+            if (autoData.type === 'tdc' && String(value).toLowerCase() === 'online') {
+                showNotification('TDC Online slot auto-generation is disabled. Please use Face-to-Face (F2F).', 'warning');
+                return;
+            }
             const transmissions = getAvailableTransmissions(value);
+            const isB1B2Global = autoData.type === 'pdc' && isGlobalB1B2Course(value);
             setAutoData({
                 ...autoData,
                 [name]: value,
-                slots: 15,
+                slots: isB1B2Global ? 2 : 15,
                 transmission: transmissions.length > 0 ? (transmissions.includes(autoData.transmission) ? autoData.transmission : transmissions[0]) : ''
             });
         } else {
@@ -378,6 +898,12 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         e.preventDefault();
         setIsGenerating(true);
         try {
+            if (autoData.type === 'tdc' && String(autoData.course_type).toLowerCase() === 'online') {
+                showNotification('TDC Online slot auto-generation is disabled.', 'error');
+                setIsGenerating(false);
+                return;
+            }
+
             if (!autoData.startDate || !autoData.endDate) {
                 showNotification("Please select both start and end dates.", "error");
                 setIsGenerating(false);
@@ -417,7 +943,9 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                         type: autoData.type,
                         session: autoData.session,
                         time_range: autoData.time,
-                        total_capacity: parseInt(autoData.slots),
+                        total_capacity: autoData.type === 'pdc' && isGlobalB1B2Course(autoData.course_type)
+                            ? 2
+                            : parseInt(autoData.slots),
                         branch_id: selectedBranch || null,
                         course_type: autoData.course_type,
                         transmission: autoData.transmission
@@ -481,7 +1009,14 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
     const handleSaveSlot = async (e) => {
         e.preventDefault();
         try {
-            const baseCapacity = parseInt(formData.slots);
+            if (formData.type === 'tdc' && String(formData.course_type).toLowerCase() === 'online') {
+                showNotification('TDC Online slot creation is disabled.', 'error');
+                return;
+            }
+
+            const baseCapacity = formData.type === 'pdc' && isGlobalB1B2Course(formData.course_type)
+                ? 2
+                : parseInt(formData.slots);
 
             const slotData = {
                 date: selectedDate,
@@ -912,6 +1447,62 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
 
     const handleSummaryMarkFeePaid = (enrollmentId) => openFeePayModal(enrollmentId, 'summary', summaryStudentModal.scheduleInfo?.type);
 
+    const openStudentSummaryModal = (scheduleInfo) => {
+        setSummaryStudentModal({ loading: true, scheduleInfo });
+        setSummaryRescheduleInfo(null);
+        adminAPI.getStudentDetail(scheduleInfo.student_id)
+            .then(res => {
+                if (res?.success) {
+                    setSummaryStudentModal({ loading: false, scheduleInfo, student: res.student, bookings: res.bookings });
+                } else {
+                    setSummaryStudentModal(null);
+                }
+            })
+            .catch(() => setSummaryStudentModal(null));
+    };
+
+    const handleTdcOnlineMarkComplete = async (bookingId, currentStatus) => {
+        try {
+            if (!bookingId) return;
+            if (String(currentStatus || '').toLowerCase() === 'completed') {
+                showNotification('This enrollment is already marked as completed.', 'info');
+                return;
+            }
+
+            await adminAPI.updateBookingStatus(bookingId, 'completed');
+            showNotification('TDC Online enrollment marked as completed.', 'success');
+
+            // Remove it from active OTDC queue and refresh both queues so badges/tables stay accurate.
+            setTdcOnlineStudents(prev => ({
+                ...prev,
+                data: prev.data.filter((row) => row.booking_id !== bookingId),
+            }));
+
+            await Promise.all([
+                fetchTdcOnlineStudents({ branchId: selectedBranch || undefined })
+                    .then(res => setTdcOnlineStudents({ data: res?.data || [], loading: false }))
+                    .catch(() => setTdcOnlineStudents({ data: [], loading: false })),
+                fetchPdcSchedulingQueue({ branchId: selectedBranch || undefined }),
+            ]);
+
+            setSummaryStudentModal(prev => prev ? {
+                ...prev,
+                scheduleInfo: {
+                    ...prev.scheduleInfo,
+                    booking_status: 'completed',
+                    status: 'completed',
+                },
+                bookings: Array.isArray(prev.bookings)
+                    ? prev.bookings.map((booking) => (
+                        booking.id === bookingId ? { ...booking, status: 'completed' } : booking
+                    ))
+                    : prev.bookings,
+            } : null);
+        } catch (err) {
+            showNotification(err?.message || 'Failed to mark TDC Online enrollment as completed.', 'error');
+        }
+    };
+
     // Calculate day offset for display (e.g. Day 2 of 2)
     // Calculate day offset for display (e.g. Day 2 of 2)
     // Calculate day offset for display (e.g. Day 2 of 2), skipping Sundays
@@ -1021,6 +1612,48 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                         </span>
                         <span className="tab-label">Schedule</span>
+                    </button>
+                )}
+                {canAccessScheduleTab('tdc_online') && (
+                    <button
+                        className={`cfg-tab-btn${scheduleView === 'tdc_online' ? ' active' : ''}`}
+                        onClick={() => setScheduleView('tdc_online')}
+                        style={{ marginBottom: '-2px' }}
+                    >
+                        <span className="cfg-tab-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                        </span>
+                        <span className="tab-label">TDC Online</span>
+                        {!tdcOnlineStudents.loading && tdcOnlineStudents.data.length > 0 && (
+                            <span style={{
+                                marginLeft: '6px',
+                                background: scheduleView === 'tdc_online' ? 'var(--primary-color, #1a56db)' : '#e0e7ff',
+                                color: scheduleView === 'tdc_online' ? '#fff' : 'var(--primary-color, #1a56db)',
+                                borderRadius: '20px', padding: '1px 8px',
+                                fontSize: '0.72rem', fontWeight: 700, lineHeight: '1.5',
+                            }}>{tdcOnlineStudents.data.length}</span>
+                        )}
+                    </button>
+                )}
+                {canAccessScheduleTab('pdc_scheduling') && (
+                    <button
+                        className={`cfg-tab-btn${scheduleView === 'pdc_scheduling' ? ' active' : ''}`}
+                        onClick={() => setScheduleView('pdc_scheduling')}
+                        style={{ marginBottom: '-2px' }}
+                    >
+                        <span className="cfg-tab-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg>
+                        </span>
+                        <span className="tab-label">PDC Scheduling</span>
+                        {!pdcSchedulingQueue.loading && pdcSchedulingQueue.data.length > 0 && (
+                            <span style={{
+                                marginLeft: '6px',
+                                background: scheduleView === 'pdc_scheduling' ? 'var(--primary-color, #1a56db)' : '#e0e7ff',
+                                color: scheduleView === 'pdc_scheduling' ? '#fff' : 'var(--primary-color, #1a56db)',
+                                borderRadius: '20px', padding: '1px 8px',
+                                fontSize: '0.72rem', fontWeight: 700, lineHeight: '1.5',
+                            }}>{pdcSchedulingQueue.data.length}</span>
+                        )}
                     </button>
                 )}
                 {canAccessScheduleTab('summary') && (
@@ -1191,6 +1824,246 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                                         Reschedule
                                                     </button>
                                                 </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            ) : scheduleView === 'tdc_online' ? (
+                <div style={{
+                    background: 'var(--card-bg, #fff)',
+                    borderRadius: '0 0 16px 16px',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                    padding: '24px 28px 30px',
+                    border: '1px solid var(--border-color, #e2e8f0)',
+                    borderTop: 'none',
+                }}>
+                    <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        marginBottom: '16px', gap: '10px', flexWrap: 'wrap',
+                    }}>
+                        <div>
+                            <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-color)' }}>TDC Online Enrollees</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--secondary-text)', marginTop: '2px' }}>
+                                Students waiting for online provider account setup
+                            </div>
+                        </div>
+                        <button
+                            className="noshow-refresh-btn"
+                            onClick={() => {
+                                setTdcOnlineStudents(prev => ({ ...prev, loading: true }));
+                                fetchTdcOnlineStudents({ branchId: selectedBranch || undefined })
+                                    .then(res => setTdcOnlineStudents({ data: res?.data || [], loading: false }))
+                                    .catch(() => {
+                                        setTdcOnlineStudents({ data: [], loading: false });
+                                        showNotification('Failed to load TDC Online queue.', 'error');
+                                    });
+                            }}
+                        >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                            Refresh
+                        </button>
+                    </div>
+
+                    <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        marginBottom: '18px', padding: '12px 14px',
+                        border: '1px solid var(--border-color, #e2e8f0)',
+                        borderRadius: '10px', background: 'var(--hover-bg, #f8fafc)'
+                    }}>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--secondary-text)' }}>
+                            {selectedBranch ? (branches.find(b => String(b.id) === String(selectedBranch))?.name || 'Selected Branch') : 'All Branches'}
+                        </div>
+                        <div style={{
+                            padding: '3px 11px', borderRadius: '20px',
+                            background: '#e0e7ff', color: '#1d4ed8',
+                            fontSize: '0.78rem', fontWeight: 700,
+                        }}>
+                            {tdcOnlineStudents.data.length} record{tdcOnlineStudents.data.length !== 1 ? 's' : ''}
+                        </div>
+                    </div>
+
+                    {tdcOnlineStudents.loading ? (
+                        <div className="noshow-loading">
+                            <div className="noshow-loading-spinner" />
+                            <div className="noshow-loading-text">Loading TDC Online students…</div>
+                        </div>
+                    ) : tdcOnlineStudents.data.length === 0 ? (
+                        <div className="noshow-empty">
+                            <div className="noshow-empty-icon">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2.2"><path d="M20 6L9 17l-5-5"/></svg>
+                            </div>
+                            <div className="noshow-empty-title">No active TDC Online enrollments</div>
+                            <div className="noshow-empty-text">New online enrollments will appear here for provider onboarding.</div>
+                        </div>
+                    ) : (
+                        <div className="table-wrapper">
+                            <table className="custom-table">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Student Name</th>
+                                        <th>Contact</th>
+                                        <th>Course</th>
+                                        <th>Enrolled On</th>
+                                        <th>Branch</th>
+                                        <th>Status</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {tdcOnlineStudents.data.map((row, index) => (
+                                        <tr key={row.booking_id} className="table-row-hover">
+                                            <td style={{ width: '40px', color: 'var(--secondary-text)', fontWeight: 600 }}>{index + 1}</td>
+                                            <td>
+                                                <div className="student-cell">
+                                                    <div className="student-avatar">{row.student_name?.charAt(0)?.toUpperCase() || '?'}</div>
+                                                    <div>
+                                                        <span className="student-name">{row.student_name || '—'}</span>
+                                                        {row.email && <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', marginTop: '1px' }}>{row.email}</div>}
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td style={{ fontSize: '0.82rem' }}>{row.contact_numbers || '—'}</td>
+                                            <td style={{ fontSize: '0.82rem' }}>{row.course_name || 'TDC'} {row.course_type ? `(${row.course_type})` : ''}</td>
+                                            <td style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+                                                {row.created_at ? new Date(row.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                                            </td>
+                                            <td style={{ fontSize: '0.82rem' }}>{row.branch_name || '—'}</td>
+                                            <td>
+                                                <span className={`status-badge ${String(row.booking_status || '').toLowerCase() === 'completed' ? 'full' : 'down'}`}>
+                                                    {String(row.booking_status || '').toLowerCase() === 'completed' ? 'Completed' : 'In Progress'}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                                    <button
+                                                        onClick={() => openStudentSummaryModal({
+                                                            source: 'tdc_online',
+                                                            student_id: row.student_id,
+                                                            booking_id: row.booking_id,
+                                                            status: row.booking_status,
+                                                            booking_status: row.booking_status,
+                                                            course_type: row.course_type || 'TDC Online',
+                                                            type: 'tdc',
+                                                            branch_id: row.branch_id,
+                                                            branch_name: row.branch_name,
+                                                            created_at: row.created_at,
+                                                            payment_type: row.payment_type,
+                                                            payment_method: row.payment_method,
+                                                            total_amount: row.total_amount,
+                                                            name: row.student_name,
+                                                            email: row.email,
+                                                            contact: row.contact_numbers,
+                                                        })}
+                                                        style={{
+                                                            background: 'var(--primary-color, #1a56db)', color: '#fff',
+                                                            border: 'none', borderRadius: '7px', padding: '5px 14px',
+                                                            fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+                                                            display: 'inline-flex', alignItems: 'center', gap: '5px',
+                                                        }}
+                                                    >
+                                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                                        View
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            ) : scheduleView === 'pdc_scheduling' ? (
+                <div style={{
+                    background: 'var(--card-bg, #fff)',
+                    borderRadius: '0 0 16px 16px',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                    padding: '24px 28px 30px',
+                    border: '1px solid var(--border-color, #e2e8f0)',
+                    borderTop: 'none',
+                }}>
+                    <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        marginBottom: '16px', gap: '10px', flexWrap: 'wrap',
+                    }}>
+                        <div>
+                            <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-color)' }}>PDC Scheduling Queue</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--secondary-text)', marginTop: '2px' }}>
+                                OTDC-completed students waiting for Admin/Superadmin PDC schedule assignment
+                            </div>
+                        </div>
+                        <button
+                            className="noshow-refresh-btn"
+                            onClick={() => fetchPdcSchedulingQueue({ branchId: selectedBranch || undefined })}
+                        >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                            Refresh
+                        </button>
+                    </div>
+
+                    {pdcSchedulingQueue.loading ? (
+                        <div className="noshow-loading">
+                            <div className="noshow-loading-spinner" />
+                            <div className="noshow-loading-text">Loading PDC scheduling queue…</div>
+                        </div>
+                    ) : pdcSchedulingQueue.data.length === 0 ? (
+                        <div className="noshow-empty">
+                            <div className="noshow-empty-icon">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2.2"><path d="M20 6L9 17l-5-5"/></svg>
+                            </div>
+                            <div className="noshow-empty-title">No students in PDC scheduling queue</div>
+                            <div className="noshow-empty-text">Students will appear here after OTDC is marked complete.</div>
+                        </div>
+                    ) : (
+                        <div className="table-wrapper">
+                            <table className="custom-table">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Student</th>
+                                        <th>Bundle</th>
+                                        <th>PDC Courses</th>
+                                        <th>OTDC Completed</th>
+                                        <th>Earliest PDC Date</th>
+                                        <th>Branch</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {pdcSchedulingQueue.data.map((row, index) => (
+                                        <tr key={row.id} className="table-row-hover">
+                                            <td style={{ width: '40px', color: 'var(--secondary-text)', fontWeight: 600 }}>{index + 1}</td>
+                                            <td>
+                                                <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-color)' }}>{row.student_name || '—'}</div>
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)' }}>{row.student_email || '—'}</div>
+                                            </td>
+                                            <td style={{ fontSize: '0.82rem' }}>{row.course_name || 'Promo Bundle'} {row.course_type ? `(${row.course_type})` : ''}</td>
+                                            <td style={{ fontSize: '0.82rem' }}>{row.pdcCourses.map((c) => c.courseName).join(', ')}</td>
+                                            <td style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}>{row.completedDate || '—'}</td>
+                                            <td style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+                                                <span style={{
+                                                    display: 'inline-flex', alignItems: 'center', gap: '4px',
+                                                    fontSize: '0.75rem', fontWeight: 700, padding: '3px 10px',
+                                                    borderRadius: '20px', background: '#eef2ff', color: '#3730a3', border: '1px solid #c7d2fe',
+                                                }}>{row.minScheduleDate || '—'}</span>
+                                            </td>
+                                            <td style={{ fontSize: '0.82rem' }}>{row.branch_name || '—'}</td>
+                                            <td>
+                                                <button
+                                                    onClick={() => openPdcAssignModal(row)}
+                                                    style={{
+                                                        background: 'var(--primary-color, #1a56db)', color: '#fff', border: 'none',
+                                                        borderRadius: '7px', padding: '5px 14px', fontSize: '0.8rem', fontWeight: 600,
+                                                        cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
+                                                    }}
+                                                >
+                                                    Set Schedule
+                                                </button>
                                             </td>
                                         </tr>
                                     ))}
@@ -1397,19 +2270,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                                     </td>
                                                     <td>
                                                         <button
-                                                            onClick={() => {
-                                                                setSummaryStudentModal({ loading: true, scheduleInfo: { ...group, ...s } });
-                                                                setSummaryRescheduleInfo(null);
-                                                                adminAPI.getStudentDetail(s.student_id)
-                                                                    .then(res => {
-                                                                        if (res?.success) {
-                                                                            setSummaryStudentModal({ loading: false, scheduleInfo: { ...group, ...s }, student: res.student, bookings: res.bookings });
-                                                                        } else {
-                                                                            setSummaryStudentModal(null);
-                                                                        }
-                                                                    })
-                                                                    .catch(() => setSummaryStudentModal(null));
-                                                            }}
+                                                            onClick={() => openStudentSummaryModal({ ...group, ...s })}
                                                             style={{
                                                                 background: 'var(--primary-color, #1a56db)', color: '#fff',
                                                                 border: 'none', borderRadius: '7px', padding: '5px 14px',
@@ -1675,21 +2536,23 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                 </div>
 
                                 {/* Capacity Column */}
-                                <div className={`slot-capacity ${slot.available_slots === 0 ? 'full' : ''}`}>
+                                <div className={`slot-capacity ${Number(slot.available_slots || 0) <= 0 ? 'full' : ''}`}>
                                     <div className="progress-bar">
                                         <div
                                             className="progress-fill"
                                             style={{
-                                                width: `${((slot.total_capacity - slot.available_slots) / slot.total_capacity) * 100}%`,
-                                                background: slot.available_slots === 0 ? '#ef4444' : ''
+                                                width: `${Math.max(0, Math.min(100, ((Math.max(0, Number(slot.total_capacity || 0)) - Math.min(Math.max(0, Number(slot.total_capacity || 0)), Math.max(0, Number(slot.available_slots || 0)))) / Math.max(1, Math.max(0, Number(slot.total_capacity || 0)))) * 100))}%`,
+                                                background: Number(slot.available_slots || 0) <= 0 ? '#ef4444' : ''
                                             }}
                                         ></div>
                                     </div>
                                     <span className="capacity-text">
-                                        {slot.available_slots === 0 ? (
+                                        {Number(slot.available_slots || 0) <= 0 ? (
                                             <span className="status-full">FULLY BOOKED</span>
                                         ) : (
-                                            <>{slot.total_capacity - slot.available_slots} / {slot.total_capacity} Booked ({slot.available_slots} left)</>
+                                            <>
+                                                {Math.max(0, Number(slot.total_capacity || 0)) - Math.min(Math.max(0, Number(slot.total_capacity || 0)), Math.max(0, Number(slot.available_slots || 0)))} / {Math.max(0, Number(slot.total_capacity || 0))} Booked ({Math.min(Math.max(0, Number(slot.total_capacity || 0)), Math.max(0, Number(slot.available_slots || 0)))} left)
+                                            </>
                                         )}
                                     </span>
                                 </div>
@@ -1731,8 +2594,8 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                             'Whole Day': '08:00 AM - 05:00 PM',
                         };
                         const expected = [];
-                        // TDC: F2F and Online, always Whole Day
-                        ['F2F', 'Online'].forEach(ct => {
+                        // TDC: F2F only, always Whole Day
+                        ['F2F'].forEach(ct => {
                             expected.push({ type: 'tdc', course_type: ct, session: 'Whole Day', transmission: '' });
                         });
                         // PDC: each active course × its transmissions × all 3 sessions
@@ -1864,7 +2727,6 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                             {formData.type === 'tdc' ? (
                                                 <>
                                                     <option value="F2F">Face-to-Face (F2F)</option>
-                                                    <option value="Online">Online</option>
                                                 </>
                                             ) : (
                                                 courses.filter(c => c.category?.toLowerCase() === formData.type).map(c => (
@@ -2465,7 +3327,6 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                             {autoData.type === 'tdc' ? (
                                                 <>
                                                     <option value="F2F">Face-to-Face (F2F)</option>
-                                                    <option value="Online">Online</option>
                                                 </>
                                             ) : (
                                                 courses.filter(c => c.category?.toLowerCase() === autoData.type).map(c => (
@@ -2680,6 +3541,370 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                 </div>
             )}
 
+            {showPdcAssignModal && pdcAssignTarget && (
+                <div style={{
+                    position: 'fixed', inset: 0, zIndex: 1100,
+                    background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(2px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '18px',
+                }} onClick={() => !pdcAssignLoading && setShowPdcAssignModal(false)}>
+                    <div style={{
+                        width: '100%', maxWidth: '980px', background: 'var(--card-bg, #fff)', borderRadius: '14px',
+                        boxShadow: '0 18px 46px rgba(0,0,0,0.2)', overflow: 'hidden',
+                    }} onClick={(e) => e.stopPropagation()}>
+                        <div style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '16px 18px', borderBottom: '1px solid var(--border-color, #e2e8f0)',
+                            background: 'linear-gradient(135deg,#eff6ff,#eef2ff)',
+                        }}>
+                            <div>
+                                <div style={{ fontWeight: 800, fontSize: '1rem', color: '#1e293b' }}>Assign PDC Schedules</div>
+                                <div style={{ fontSize: '0.8rem', color: '#475569' }}>{pdcAssignTarget.student_name || 'Student'} • Earliest date: {pdcAssignTarget.minScheduleDate || '—'}</div>
+                            </div>
+                            <button
+                                onClick={() => !pdcAssignLoading && setShowPdcAssignModal(false)}
+                                style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '1.3rem', lineHeight: 1 }}
+                            >×</button>
+                        </div>
+
+                        <div style={{ maxHeight: '70vh', overflowY: 'auto', padding: '14px 16px' }}>
+                            {(() => {
+                                const isHalf = (session) => {
+                                    const s = String(session || '').toLowerCase();
+                                    return s.includes('morning') || s.includes('afternoon') || s.includes('4 hours');
+                                };
+                                // Session normalization helper to detect overlaps accurately
+                                const normalizeSessionKey = (session) => {
+                                    const s = String(session || '').toLowerCase().trim();
+                                    if (s.includes('morning')) return 'morning';
+                                    if (s.includes('afternoon')) return 'afternoon';
+                                    if (s.includes('whole') || s.includes('4 hours') || s.includes('8 hours') || !s || s === 'session') return 'whole';
+                                    return s;
+                                };
+
+                                // Checks if a specific session on a date is already taken by the current student
+                                // (either by another day of this course or by another course in this bundle)
+                                const isSessionTaken = (slotDate, slotSession) => {
+                                    if (!slotDate || !slotSession || !pdcAssignActiveCourseKey) return false;
+                                    const slotKey = normalizeSessionKey(slotSession);
+                                    
+                                    return pdcAssignRows.some(row => {
+                                        const isCurrentCourse = row.courseKey === pdcAssignActiveCourseKey;
+                                        const entries = [];
+                                        
+                                        // If it's another course, check both days.
+                                        // If it's the current course, only check the "other" day.
+                                        if (row.date1 && row.session1 && (!isCurrentCourse || pdcAssignDayMode === 'day2')) {
+                                            entries.push({ d: row.date1, s: row.session1 });
+                                        }
+                                        if (row.date2 && row.session2 && (!isCurrentCourse || pdcAssignDayMode === 'day1')) {
+                                            entries.push({ d: row.date2, s: row.session2 });
+                                        }
+                                        
+                                        return entries.some(e => {
+                                            if (e.d !== slotDate) return false;
+                                            const takenKey = normalizeSessionKey(e.s);
+                                            return (takenKey === 'whole' || slotKey === 'whole' || takenKey === slotKey);
+                                        });
+                                    });
+                                };
+
+                                const activeIndex = pdcAssignRows.findIndex((row) => row.courseKey === pdcAssignActiveCourseKey);
+                                const fallbackIndex = activeIndex >= 0 ? activeIndex : 0;
+                                const activeRow = pdcAssignRows[fallbackIndex] || null;
+
+                                const monthBase = pdcAssignCalendarMonth instanceof Date ? pdcAssignCalendarMonth : new Date();
+                                const year = monthBase.getFullYear();
+                                const month = monthBase.getMonth();
+                                const firstDayWeek = new Date(year, month, 1).getDay();
+                                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                                const calendarCells = [];
+                                for (let i = 0; i < firstDayWeek; i += 1) calendarCells.push(null);
+                                for (let day = 1; day <= daysInMonth; day += 1) calendarCells.push(day);
+                                while (calendarCells.length % 7 !== 0) calendarCells.push(null);
+
+                                const activeDay1Date = activeRow?.date1 || '';
+                                const activeDay2Date = activeRow?.date2 || '';
+                                const activeDateForMode = pdcAssignDayMode === 'day2' ? activeDay2Date : activeDay1Date;
+                                const selectedSlotForMode = pdcAssignDayMode === 'day2' ? activeRow?.slot2 : activeRow?.slot1;
+
+                                return (
+                                    <>
+                                        <div style={{
+                                            border: '1px solid #bfdbfe', borderRadius: '12px', padding: '10px 12px',
+                                            background: '#eff6ff', marginBottom: '12px',
+                                        }}>
+                                            <div style={{ fontSize: '0.78rem', color: '#1d4ed8', fontWeight: 800 }}>PDC Schedule Progress</div>
+                                            <div style={{ fontSize: '0.78rem', color: '#1e3a8a', marginTop: '2px' }}>
+                                                Completed {pdcAssignRows.filter((r) => !!r.slot1).length} of {pdcAssignRows.length} PDC course schedules
+                                            </div>
+                                        </div>
+
+                                        <div style={{
+                                            border: '1px solid #bbf7d0', borderRadius: '12px', padding: '10px 12px',
+                                            background: '#f0fdf4', marginBottom: '12px',
+                                        }}>
+                                            <div style={{ fontSize: '0.78rem', color: '#15803d', fontWeight: 800 }}>TDC Schedule Selected</div>
+                                            <div style={{ fontSize: '0.78rem', color: '#166534', marginTop: '2px' }}>
+                                                OTDC completed on {pdcAssignTarget.completedDate || 'N/A'} — Earliest PDC date: {pdcAssignTarget.minScheduleDate || 'N/A'}
+                                            </div>
+                                        </div>
+
+                                        <div className="walk-in-container" style={{ padding: 0 }}>
+                                            <div className="type-selector-card" style={{ marginBottom: '12px', '--accent': '#3b82f6', '--card-bg': '#fff' }}>
+                                                <div className="type-selector-title">Select PDC Course To Schedule</div>
+                                                <div className="type-selector-sub">Each selected PDC course needs its own schedule.</div>
+                                                <div className="type-btn-group" style={{ flexWrap: 'wrap' }}>
+                                                    {pdcAssignRows.map((row) => {
+                                                        const active = row.courseKey === (activeRow?.courseKey || null);
+                                                        // done = slot1 selected AND (no day2 needed, OR slot2 also selected)
+                                                        const done = !!row.slot1 && (!row.needsDay2 || !!row.slot2);
+                                                        return (
+                                                            <button
+                                                                key={row.courseKey}
+                                                                type="button"
+                                                                className={`type-btn${active ? ' active' : ''}`}
+                                                                onClick={() => {
+                                                                    setPdcAssignActiveCourseKey(row.courseKey);
+                                                                    setPdcAssignDayMode('day1');
+                                                                }}
+                                                            >
+                                                                {done ? '✓ ' : ''}{row.courseName || `PDC Course ${pdcAssignRows.findIndex((x) => x.courseKey === row.courseKey) + 1}`}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+
+                                        {activeRow && (
+                                            <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '12px' }}>
+                                                {activeRow.slot1 && (!activeRow.needsDay2 || activeRow.slot2) && (
+                                                    <div style={{ display: 'flex', gap: '12px', padding: '14px 16px', borderRadius: '10px', background: '#f0fdf4', border: '1px solid #bbf7d0', marginBottom: '16px' }}>
+                                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2" style={{ flexShrink: 0, marginTop: '2px' }}><polyline points="20 6 9 17 4 12" /></svg>
+                                                        <div style={{ flex: 1 }}>
+                                                            <div style={{ color: '#15803d', fontWeight: 800, fontSize: '0.9rem', marginBottom: '4px' }}>Schedule Complete</div>
+                                                            <div style={{ color: '#166534', fontSize: '0.8rem' }}>
+                                                                Day 1: <strong>{new Date(activeRow.date1 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>
+                                                                {activeRow.slot2 && <> · Day 2: <strong>{new Date(activeRow.date2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong></>}
+                                                            </div>
+                                                        </div>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                            {activeRow.requiresDay2 && (
+                                                                <button style={{ border: '1px solid #bbf7d0', background: '#dcfce7', color: '#15803d', borderRadius: '6px', padding: '4px 10px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }} onClick={() => { setPdcAssignRows((prev) => prev.map((r, ridx) => ridx === fallbackIndex ? { ...r, date2: '', slot2: '' } : r)); setPdcAssignDayMode('day2'); }}>
+                                                                    Change Day 2
+                                                                </button>
+                                                            )}
+                                                            <button style={{ border: '1px solid #e2e8f0', background: '#f8fafc', color: '#475569', borderRadius: '6px', padding: '4px 10px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }} onClick={() => { setPdcAssignRows((prev) => prev.map((r, ridx) => ridx === fallbackIndex ? { ...r, date1: '', slot1: '', date2: '', slot2: '' } : r)); setPdcAssignDayMode('day1'); }}>
+                                                                    Change Day 1
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {activeRow.slot1 && !activeRow.slot2 && activeRow.requiresDay2 && (
+                                                    <div style={{ display: 'flex', gap: '12px', padding: '14px 16px', borderRadius: '10px', background: '#eff6ff', border: '1px solid #bfdbfe', marginBottom: '16px' }}>
+                                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" strokeWidth="2" style={{ flexShrink: 0, marginTop: '2px' }}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                                                        <div style={{ flex: 1 }}>
+                                                            <div style={{ color: '#1d4ed8', fontWeight: 800, fontSize: '0.9rem', marginBottom: '4px' }}>Day 2 Selection Required</div>
+                                                            <div style={{ color: '#1e3a8a', fontSize: '0.8rem' }}>
+                                                                Day 1: <strong>{new Date(activeRow.date1 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>.<br/>Now pick a date for <strong>Day 2</strong>.
+                                                            </div>
+                                                        </div>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', justifyContent: 'flex-start' }}>
+                                                            <button style={{ border: '1px solid #bfdbfe', background: '#dbeafe', color: '#1d4ed8', borderRadius: '6px', padding: '4px 10px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }} onClick={() => { setPdcAssignRows((prev) => prev.map((r, ridx) => ridx === fallbackIndex ? { ...r, date1: '', slot1: '', date2: '', slot2: '' } : r)); setPdcAssignDayMode('day1'); }}>
+                                                                Change Day 1
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {!(activeRow.slot1 && (!activeRow.needsDay2 || activeRow.slot2)) && (
+                                                <>
+                                                <div className="schedule-calendar-wrap">
+                                                    <div className="month-nav-bar">
+                                                        <button type="button" className="month-nav-btn-icon" disabled={pdcAssignLoading || pdcAssignMonthLoading} onClick={() => setPdcAssignCalendarMonth(new Date(year, month - 1, 1))}>
+                                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
+                                                        </button>
+                                                        <h3 className="month-label">{monthBase.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h3>
+                                                        <button type="button" className="month-nav-btn-icon" disabled={pdcAssignLoading || pdcAssignMonthLoading} onClick={() => setPdcAssignCalendarMonth(new Date(year, month + 1, 1))}>
+                                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
+                                                        </button>
+                                                    </div>
+                                                    <div className="cal-legend-row">
+                                                        <div className="cal-legend-item morning-legend">
+                                                            <span className="cal-legend-dot morning-dot"></span>
+                                                            Morning
+                                                        </div>
+                                                        <div className="cal-legend-item afternoon-legend">
+                                                            <span className="cal-legend-dot afternoon-dot"></span>
+                                                            Afternoon
+                                                        </div>
+                                                        <div className="cal-legend-item whole-legend">
+                                                            <span className="cal-legend-dot whole-dot"></span>
+                                                            Whole Day
+                                                        </div>
+                                                    </div>
+                                                    <div className="calendar-grid-7">
+                                                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d} className="cal-day-header">{d}</div>)}
+                                                        {Array.from({ length: firstDayWeek }).map((_, i) => <div key={`pad-${i}`} className="cal-day cal-day--pad" />)}
+                                                        
+                                                        {Array.from({ length: daysInMonth }).map((_, i) => {
+                                                            const d = i + 1;
+                                                            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                                                            const daySlots = Array.isArray(pdcAssignMonthSlotsMap[dateStr]) ? pdcAssignMonthSlotsMap[dateStr] : [];
+                                                            const hasSlots = daySlots.length > 0;
+                                                            
+                                                            const targetDate = new Date();
+                                                            const isToday = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}` === dateStr;
+                                                            
+                                                            const isDay2Active = pdcAssignDayMode === 'day2' && activeRow?.slot1;
+                                                            const effectiveMinDate = [
+                                                                pdcAssignTarget.minScheduleDate,
+                                                                isDay2Active ? activeRow?.date1 : null
+                                                            ].filter(Boolean).sort().pop();
+                                                            const beforeMin = !!effectiveMinDate && dateStr < effectiveMinDate;
+                                                            
+                                                            const isSunday = new Date(year, month, d).getDay() === 0;
+                                                            const isDisabled = beforeMin || isSunday || pdcAssignMonthLoading || pdcAssignLoading;
+                                                            
+                                                            // A day is considered disabled if it's generally disabled (Sunday, before min date)
+                                                            // OR if all available sessions on that day are already taken by the student.
+                                                            const allSessionsTaken = daySlots.length > 0 && daySlots.every(s => isSessionTaken(dateStr, s.session));
+                                                            
+                                                            const slotStatus = isDisabled ? '' : daySlots.length === 0 ? ' no-slots' : daySlots.every(s => Number(s.availableSlots || 0) === 0) ? ' full-slots' : ' has-slots';
+                                                            let cls = 'cal-day' + slotStatus;
+                                                            if (isDisabled || allSessionsTaken) cls += ' cal-day--disabled';
+                                                            if (isToday) cls += ' cal-day--today';
+
+                                                            return (
+                                                                <div key={d} className={cls}>
+                                                                    <div className="cal-day-header-mini">
+                                                                        <span className="cal-day-num">{d}</span>
+                                                                        {isToday && <span className="cal-day--today-dot" />}
+                                                                    </div>
+                                                                    {!isDisabled && (
+                                                                        <div className="day-slots-container">
+                                                                            {(() => {
+                                                                                const morningSlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('morning'));
+                                                                                const afternoonSlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('afternoon'));
+                                                                                const wholeDaySlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('whole'));
+
+                                                                                // When selecting Day 2, enforce the same session type as Day 1.
+                                                                                const day1SessionKey = pdcAssignDayMode === 'day2' ? normalizeSessionKey(activeRow?.session1 || '') : null;
+
+                                                                                const renderSubBox = (label, slots, type) => {
+                                                                                    if (!slots || slots.length === 0) return null;
+                                                                                    const anySelected = slots.some(s => String(selectedSlotForMode || '') === String(s.id));
+                                                                                    const isFull = slots.every(s => Number(s.availableSlots || 0) <= 0);
+                                                                                    const isTaken = isSessionTaken(dateStr, type);
+
+                                                                                    // For Day 2: disable any session that doesn't exactly match Day 1's session type.
+                                                                                    // e.g. if Day 1 = Morning → only Morning allowed for Day 2 (Afternoon & Whole Day disabled).
+                                                                                    const isWrongSession = day1SessionKey !== null
+                                                                                        && day1SessionKey !== 'whole'
+                                                                                        && normalizeSessionKey(type) !== day1SessionKey;
+
+                                                                                    const effectivelyDisabled = isFull || isTaken || isWrongSession;
+                                                                                    const disabledTitle = isWrongSession
+                                                                                        ? `Day 2 must use the same session as Day 1 (${day1SessionKey}).`
+                                                                                        : isTaken
+                                                                                            ? 'Session overlaps with your other scheduled course.'
+                                                                                            : undefined;
+
+                                                                                    return (
+                                                                                        <div
+                                                                                            key={type}
+                                                                                            className={`session-sub-box ${type}${anySelected ? ' selected' : ''}${isFull ? ' full' : ''}${(isTaken || isWrongSession) ? ' type-btn--disabled' : ''}`}
+                                                                                            onClick={async (e) => {
+                                                                                                e.stopPropagation();
+                                                                                                if (effectivelyDisabled || pdcAssignLoading || pdcAssignMonthLoading) return;
+                                                                                                
+                                                                                                const slot = slots[0];
+                                                                                                
+                                                                                                if (pdcAssignDayMode === 'day2') {
+                                                                                                    setPdcAssignRows((prev) => prev.map((r, ridx) => (
+                                                                                                        ridx === fallbackIndex ? { ...r, date2: dateStr, slot2: String(slot.id), session2: slot.session } : r
+                                                                                                    )));
+                                                                                                    if (activeDay2Date !== dateStr) {
+                                                                                                        await loadPdcAssignRowSlots(fallbackIndex, 'day2', dateStr, null, activeRow);
+                                                                                                    }
+                                                                                                } else {
+                                                                                                    const isSplitDay = activeRow.requiresDay2 || isTwoDayPdcVariant(activeRow);
+                                                                                                    const needsDay2 = isSplitDay && isHalf(slot.session);
+                                                                                                    
+                                                                                                    setPdcAssignRows((prev) => prev.map((r, ridx) => (
+                                                                                                        ridx === fallbackIndex ? { ...r, date1: dateStr, slot1: String(slot.id), session1: slot.session, needsDay2, requiresDay2: isSplitDay } : r
+                                                                                                    )));
+                                                                                                    if (needsDay2) {
+                                                                                                        setPdcAssignDayMode('day2');
+                                                                                                    }
+                                                                                                    if (activeDay1Date !== dateStr) {
+                                                                                                        await loadPdcAssignRowSlots(fallbackIndex, 'day1', dateStr, null, activeRow);
+                                                                                                    }
+                                                                                                }
+                                                                                            }}
+                                                                                            title={disabledTitle}
+                                                                                        >
+                                                                                            <div className="session-sub-content">
+                                                                                                <div className="flex items-center justify-between gap-1 leading-none mb-1">
+                                                                                                    <span className="session-sub-label-text text-[9px] font-black">{label} Class</span>
+                                                                                                    <span className="session-sub-count-tag text-[8px] font-bold px-1 rounded bg-white/20">
+                                                                                                        {isWrongSession ? 'N/A' : isFull ? 'FULL' : `${Number(slots[0].availableSlots || 0)} Slots`}
+                                                                                                    </span>
+                                                                                                </div>
+                                                                                                <div className="session-sub-time-mini text-[7px] font-medium opacity-80" style={{ marginTop: '2px' }}>{isWrongSession ? `Match Day 1` : slots[0].timeRange || 'Time not set'}</div>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    );
+                                                                                };
+
+                                                                                return (
+                                                                                    <>
+                                                                                        {renderSubBox('Morning', morningSlots, 'morning')}
+                                                                                        {renderSubBox('Afternoon', afternoonSlots, 'afternoon')}
+                                                                                        {renderSubBox('Whole Day', wholeDaySlots, 'whole')}
+                                                                                    </>
+                                                                                );
+                                                                            })()}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                                </>
+                                                )}
+                                            </div>
+                                        )}
+                                        </div>
+                                    </>
+                                );
+                            })()}
+                        </div>
+
+                        <div style={{
+                            display: 'flex', justifyContent: 'flex-end', gap: '10px',
+                            padding: '12px 16px 14px', borderTop: '1px solid var(--border-color, #e2e8f0)', background: '#f8fafc',
+                        }}>
+                            <button
+                                onClick={() => !pdcAssignLoading && setShowPdcAssignModal(false)}
+                                disabled={pdcAssignLoading}
+                                style={{ background: '#fff', color: '#334155', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '8px 14px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleConfirmPdcAssignments}
+                                disabled={pdcAssignLoading}
+                                style={{ background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 14px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                {pdcAssignLoading ? 'Assigning...' : 'Confirm Assignment'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* ── Student Summary Detail Modal ─────────────────────────── */}
             {summaryStudentModal && (
                 <div style={{
@@ -2745,8 +3970,11 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                         {/* ── Quick Actions ── */}
                         {!summaryStudentModal.loading && (() => {
                             const si = summaryStudentModal.scheduleInfo;
+                            const isTdcOnline = si?.source === 'tdc_online';
                             const isNoShow = si?.status === 'no-show';
-                            const isCompleted = si?.status === 'completed';
+                            const isCompleted = (isTdcOnline
+                                ? si?.booking_status
+                                : si?.status) === 'completed';
                             const feePaid = si?.reschedule_fee_paid;
                             const canReschedule = isNoShow && feePaid;
                             return (
@@ -2758,6 +3986,27 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                 }}>
                                     <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Actions</div>
                                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                        {isTdcOnline ? (
+                                            <>
+                                                <button
+                                                    onClick={() => handleTdcOnlineMarkComplete(si?.booking_id, si?.booking_status)}
+                                                    disabled={isCompleted}
+                                                    style={{
+                                                        display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                        padding: '7px 16px', borderRadius: '8px', border: 'none',
+                                                        background: isCompleted ? '#dcfce7' : '#dbeafe',
+                                                        color: isCompleted ? '#166534' : '#1d4ed8',
+                                                        cursor: isCompleted ? 'default' : 'pointer',
+                                                        fontSize: '0.82rem', fontWeight: 700,
+                                                        opacity: isCompleted ? 0.9 : 1,
+                                                    }}
+                                                >
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+                                                    {isCompleted ? 'Completed' : 'Mark Complete'}
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <>
                                         {!isNoShow && (
                                             <>
                                                 <button
@@ -2825,6 +4074,8 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                                 </span>
                                             )}
                                         </button>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             );
@@ -2934,7 +4185,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                 textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '12px',
                             }}>
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                                Current Schedule
+                                {summaryStudentModal.scheduleInfo?.source === 'tdc_online' ? 'Current Enrollment' : 'Current Schedule'}
                             </div>
                             <div style={{
                                 background: 'var(--hover-bg, #f8fafc)', borderRadius: '12px',
@@ -2945,6 +4196,28 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                             }}>
                                 {(() => {
                                     const si = summaryStudentModal.scheduleInfo;
+                                    if (si?.source === 'tdc_online') {
+                                        const enrolledOn = si?.created_at
+                                            ? new Date(si.created_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+                                            : '—';
+                                        return [
+                                            ['Course', si?.course_type || 'TDC Online', {}],
+                                            ['Type', 'TDC', {}],
+                                            ['Mode', 'Online', {}],
+                                            ['Status', si?.booking_status ? si.booking_status.charAt(0).toUpperCase() + si.booking_status.slice(1) : '—', {}],
+                                            ['Enrolled On', enrolledOn, {}],
+                                            ['Payment Type', si?.payment_type || '—', {}],
+                                            ['Payment Method', si?.payment_method || '—', {}],
+                                            ['Branch', si?.branch_name || '—', { gridColumn: 'span 2' }],
+                                            ['Booking ID', si?.booking_id || '—', {}],
+                                        ].map(([label, value, spanStyle]) => (
+                                            <div key={label} style={spanStyle}>
+                                                <div style={{ fontSize: '0.7rem', color: 'var(--secondary-text)', fontWeight: 600, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.03em' }}>{label}</div>
+                                                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-color)', lineHeight: 1.3 }}>{value || '—'}</div>
+                                            </div>
+                                        ));
+                                    }
+
                                     const dateStr = si?.slot_date
                                         ? (si.slot_date === si.slot_end_date
                                             ? new Date(si.slot_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })

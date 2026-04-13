@@ -227,7 +227,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                             }),
                             status: booking.payment_type === 'Full Payment' ? 'Full Payment' :
                                 booking.status === 'pending' ? 'Pending' :
-                                    booking.status === 'collectable' ? 'Downpayment' :
+                                    booking.status === 'partial_payment' ? 'Downpayment' :
                                         booking.status === 'paid' ? 'Full Payment' : 'Pending',
                             method: booking.payment_method || 'N/A',
                             type: booking.enrollment_type || 'online'

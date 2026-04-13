@@ -477,6 +477,75 @@
     border-color: rgba(67, 24, 255, 0.2);
 }
 
+/* PDC assign modal session boxes (matched to Walk-In page color coding) */
+.schedule-module .session-sub-box {
+    padding: 5px 7px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    gap: 2px;
+}
+
+.schedule-module .session-sub-box.morning {
+    background-color: #fff7ed;
+    border-color: #ffedd5;
+    color: #c2410c;
+}
+
+.schedule-module .session-sub-box.afternoon {
+    background-color: #fefce8;
+    border-color: #fef9c3;
+    color: #a16207;
+}
+
+.schedule-module .session-sub-box.whole {
+    background-color: #eff6ff;
+    border-color: #dbeafe;
+    color: #1d4ed8;
+}
+
+.schedule-module .session-sub-box:hover:not(.full):not(.selected) {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+.schedule-module .session-sub-box.selected {
+    background-color: #2563eb !important;
+    border-color: #2563eb !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2) !important;
+}
+
+.schedule-module .session-sub-box.full {
+    background-color: #fef2f2 !important;
+    border-color: #fee2e2 !important;
+    color: #ef4444 !important;
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.schedule-module .session-sub-label-text {
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.schedule-module .session-sub-count-tag {
+    font-size: 8px;
+    font-weight: 700;
+    padding: 1px 4px;
+}
+
+.schedule-module .session-sub-time-mini {
+    font-size: 8px;
+    font-weight: 500;
+}
+
 /* =============================================
    SLOTS PANEL (right side)
    ============================================= */

@@ -4,7 +4,7 @@ const axios = require('axios');
 const pool = require('../config/db');
 const path = require('path');
 const fs = require('fs');
-const { generateVerificationCode, sendVerificationEmail, sendGuestEnrollmentEmail } = require('../utils/emailService');
+const { generateVerificationCode, sendVerificationEmail } = require('../utils/emailService');
 
 const MAX_FAILED_LOGIN_ATTEMPTS = parseInt(process.env.MAX_FAILED_LOGIN_ATTEMPTS || '5', 10);
 const LOGIN_LOCK_MINUTES = parseInt(process.env.LOGIN_LOCK_MINUTES || '15', 10);
@@ -119,8 +119,8 @@ const register = async (req, res) => {
     }
 
     // Validate email format
-    if (!/@/.test(email) || !/\.com$/.test(email.toLowerCase())) {
-      return res.status(400).json({ error: 'Email must contain @ and end with .com' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim())) {
+      return res.status(400).json({ error: 'Please provide a valid email address' });
     }
 
     // Validate password length
@@ -202,156 +202,6 @@ const register = async (req, res) => {
   } catch (error) {
     console.error('Register error:', error);
     res.status(500).json({ error: 'Server error during registration' });
-  }
-};
-
-// Process Guest Checkout (User creation, booking, schedule, and email)
-const guestCheckout = async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const {
-      firstName, middleName, lastName, email, address, age, gender, birthday,
-      birthPlace, nationality, maritalStatus, contactNumbers, zipCode,
-      emergencyContactPerson, emergencyContactNumber,
-      courseId, courseCategory, courseType, branchId,
-      scheduleSlotId, scheduleDate,
-      scheduleSlotId2, scheduleDate2,
-      paymentMethod, amountPaid, paymentStatus, hasReviewer, hasVehicleTips
-      } = req.body;
-
-    if (!firstName || !lastName || !email || !contactNumbers || !courseId) {
-      return res.status(400).json({ error: 'Please provide all required fields.' });
-    }
-
-    const parsedBranchId = branchId ? parseInt(branchId, 10) : null;
-
-    await client.query('BEGIN');
-
-    // 1. Check if user already exists
-    const userExists = await client.query('SELECT * FROM users WHERE email = $1', [email]);
-    if (userExists.rows.length > 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'User with this email already exists. Please sign in instead.' });
-    }
-
-    // 2. Generate random password just for DB constraint (NOT sent to user)
-    const randomPassword = require('crypto').randomBytes(12).toString('hex');
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(randomPassword, salt);
-
-    // 3. Insert user as guest_student
-    const result = await client.query(
-      `INSERT INTO users (
-        first_name, middle_name, last_name, email, password,
-        address, age, gender, birthday, birth_place,
-        nationality, marital_status, contact_numbers, zip_code,
-        emergency_contact_person, emergency_contact_number,
-        is_verified, role, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-      RETURNING id, email`,
-      [
-        firstName, middleName || null, lastName, email, hashedPassword,
-        address, age, gender, birthday, birthPlace,
-        nationality, maritalStatus, contactNumbers, zipCode,
-        emergencyContactPerson, emergencyContactNumber,
-        true, 'student', 'active'
-      ]
-    );
-
-    const newUser = result.rows[0];
-
-    // 4. Create booking
-    const bookingStatus = paymentStatus === 'Full Payment' ? 'paid' : 'collectable';
-    const bookingResult = await client.query(
-      `INSERT INTO bookings (
-        user_id, course_id, branch_id, booking_date, 
-        total_amount, payment_type, payment_method, status,
-        enrollment_type, course_type, notes
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      RETURNING id`,
-      [
-        newUser.id, courseId, parsedBranchId, scheduleDate,
-        amountPaid, paymentStatus, paymentMethod, bookingStatus,
-        'guest', courseType, 'Guest enrollment'
-      ]
-    );
-
-    // 5. Enroll in schedule
-    if (scheduleSlotId) {
-      await client.query(
-        `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
-         VALUES ($1, $2, 'enrolled')`,
-        [scheduleSlotId, newUser.id]
-      );
-      await client.query(
-        `UPDATE schedule_slots SET available_slots = available_slots - 1, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $1 AND available_slots > 0`,
-        [scheduleSlotId]
-      );
-    }
-
-    // 6. Day 2 schedule if applicable
-    if (scheduleSlotId2 && scheduleDate2) {
-      await client.query(
-        `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
-         VALUES ($1, $2, 'enrolled')`,
-        [scheduleSlotId2, newUser.id]
-      );
-      await client.query(
-        `UPDATE schedule_slots SET available_slots = available_slots - 1, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $1 AND available_slots > 0`,
-        [scheduleSlotId2]
-      );
-    }
-
-    await client.query('COMMIT');
-
-    // 7. Send Guest email WITHOUT login details
-    const courseResult = await pool.query('SELECT name, category FROM courses WHERE id = $1', [courseId]);
-    const branchResult = await pool.query('SELECT name, address FROM branches WHERE id = $1', [parsedBranchId]);
-    const slotResult = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [scheduleSlotId]);
-
-    let scheduleSession2Email = null, scheduleTime2Email = null, scheduleDate2Email = null;
-    if (scheduleSlotId2) {
-      const slot2Result = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [scheduleSlotId2]);
-      scheduleSession2Email = slot2Result.rows[0]?.session;
-      scheduleTime2Email = slot2Result.rows[0]?.time_range;
-      scheduleDate2Email = scheduleDate2;
-    }
-
-    
-    try {
-      await sendGuestEnrollmentEmail(email, firstName, lastName, {
-        courseName: courseResult.rows[0]?.name || 'N/A',
-        courseCategory: courseCategory || courseResult.rows[0]?.category || 'PDC',
-        courseType,
-        branchName: branchResult.rows[0]?.name || 'N/A',
-        branchAddress: branchResult.rows[0]?.address || '',
-        scheduleDate,
-        scheduleSession: slotResult.rows[0]?.session || 'N/A',
-        scheduleTime: slotResult.rows[0]?.time_range || 'N/A',
-        scheduleDate2: scheduleDate2Email,
-        scheduleSession2: scheduleSession2Email,
-        scheduleTime2: scheduleTime2Email,
-        paymentMethod,
-        amountPaid,
-        paymentStatus
-      }, hasReviewer, hasVehicleTips);
-    } catch (e) {
-      console.error('Email failed (proceeding):', e);
-    }
-
-    res.status(201).json({
-      success: true,
-      message: 'Guest Checkout successful. Enrollment email sent.'
-    });
-
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Guest Checkout error:', error);
-    res.status(500).json({ error: 'Server error during guest checkout' });
-  } finally {
-    client.release();
   }
 };
 
@@ -987,7 +837,6 @@ const changePassword = async (req, res) => {
 
 module.exports = {
   register,
-  guestCheckout,
   login,
   logout,
   getProfile,

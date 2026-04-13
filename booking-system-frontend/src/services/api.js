@@ -155,14 +155,6 @@ export const authAPI = {
     });
   },
 
-  // Process Guest Checkout (User creation, booking, schedule, and email)
-  guestCheckout: async (checkoutData) => {
-    return await apiRequest('/auth/guest-checkout', {
-      method: 'POST',
-      body: JSON.stringify(checkoutData),
-    });
-  },
-
   // Login user
   login: async (credentials) => {
     return await apiRequest('/auth/login', {
@@ -363,10 +355,6 @@ export const starpayAPI = {
     method: 'POST',
     body: JSON.stringify(data),
   }),
-  createGuestPayment: async (data) => await apiRequest('/starpay/guest-create-payment', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
   checkStatus: async (msgId) => {
     try {
       return await apiRequest(`/starpay/status/${msgId}`);
@@ -503,6 +491,27 @@ export const adminAPI = {
     return await apiRequest(`/admin/today-students${qs ? '?' + qs : ''}`);
   },
 
+  // Get all Online TDC enrollments for provider onboarding queue
+  getTdcOnlineStudents: async ({ branchId } = {}) => {
+    const params = new URLSearchParams();
+    if (branchId) params.append('branch_id', branchId);
+    const qs = params.toString();
+    const querySuffix = qs ? `?${qs}` : '';
+    try {
+      return await apiRequest(`/admin/tdc-online-students${querySuffix}`);
+    } catch (error) {
+      if (error?.statusCode !== 404) throw error;
+
+      // Compatibility fallbacks for older/newer backend route naming.
+      try {
+        return await apiRequest(`/admin/tdc_online_students${querySuffix}`);
+      } catch (fallbackError) {
+        if (fallbackError?.statusCode !== 404) throw fallbackError;
+        return await apiRequest(`/admin/online-tdc-students${querySuffix}`);
+      }
+    }
+  },
+
   // Get full student detail (personal info + bookings/payment)
   getStudentDetail: async (studentId) => {
     return await apiRequest(`/admin/student-detail/${studentId}`);
@@ -571,12 +580,27 @@ export const adminAPI = {
     });
   },
 
+  assignPdcSchedule: async (id, assignments) => {
+    return await apiRequest(`/admin/bookings/${id}/assign-pdc`, {
+      method: 'PATCH',
+      body: JSON.stringify({ assignments }),
+    });
+  },
+
+  getPdcSchedulingQueue: async ({ branchId } = {}) => {
+    const params = new URLSearchParams();
+    if (branchId) params.append('branch_id', branchId);
+    const qs = params.toString();
+    return await apiRequest(`/admin/pdc-scheduling-queue${qs ? `?${qs}` : ''}`);
+  },
+
   // Send payment receipt email to student for a booking
   sendReceipt: async (id) => {
     return await apiRequest(`/admin/bookings/${id}/send-receipt`, {
       method: 'POST',
     });
   },
+
   // Search students for auto-fill in enrollment
   searchStudents: async (name) => {
     return await apiRequest(`/admin/search-students?name=${encodeURIComponent(name)}`);
@@ -654,6 +678,14 @@ export const schedulesAPI = {
     if (branchId) params.append('branch_id', branchId);
     const queryString = params.toString();
     return await apiRequest(`/schedules${queryString ? `?${queryString}` : ''}`);
+  },
+
+  // Fallback accessor for Online TDC enrollment queue.
+  getTdcOnlineStudents: async ({ branchId } = {}) => {
+    const params = new URLSearchParams();
+    if (branchId) params.append('branch_id', branchId);
+    const qs = params.toString();
+    return await apiRequest(`/admin/tdc-online-students${qs ? '?' + qs : ''}`);
   },
 
   // Get schedule by ID

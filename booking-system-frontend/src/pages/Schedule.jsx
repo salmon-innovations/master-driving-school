@@ -79,7 +79,26 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
 
   // Promo bundle: separate two-step flow (TDC slot + PDC slot)
   const isPromoCourse = selectedCourse?.category === 'Promo'
-  const promoTdcType = isPromoCourse ? (selectedCourse.course_type?.split('+')[0] || 'F2F') : null
+  const isOnlineTdcNoSchedule = isTDCCourse && !isPromoCourse && String(selectedCourse?.selectedType || courseType || '').toLowerCase() === 'online'
+  const promoCourseTypeRaw = String(selectedCourse?.course_type || '')
+  const promoCourseTypeParts = promoCourseTypeRaw.split('+').map((part) => String(part || '').trim()).filter(Boolean)
+  const promoTdcType = isPromoCourse ? (promoCourseTypeParts[0] || 'F2F') : null
+  const promoHasPdcFromType = promoCourseTypeParts.slice(1).some((part) => /pdc/i.test(part))
+  const promoHasPdcFromName = /pdc|otdc\s*\+\s*4\s*pdc|4\s*pdc/i.test(`${selectedCourse?.name || ''} ${selectedCourse?.shortName || ''}`)
+  const promoHasPdcFromSelectedCourseMeta = Array.isArray(selectedCourse?._pdcCourses) && selectedCourse._pdcCourses.length > 0
+  const isPromoOnlineTdcLockedBundle = isPromoCourse
+    && String(promoTdcType || '').toLowerCase() === 'online'
+    && (
+      promoHasPdcFromType
+      || promoHasPdcFromName
+      || promoHasPdcFromSelectedCourseMeta
+      || cart.some((item) => {
+        const category = String(item?.category || '').toLowerCase()
+        const name = String(item?.name || '').toLowerCase()
+        const type = String(item?.type || '').toLowerCase()
+        return category.includes('pdc') || name.includes('pdc') || type.includes('pdc')
+      })
+    )
   const getPromoPdcTypeFromItem = (item) => {
     const label = `${item?.name || ''} ${(item?.type || '')}`.toLowerCase()
     const isMotor = label.includes('motor') || label.includes('motorcycle')
@@ -101,15 +120,29 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
 
   const promoPdcCourses = useMemo(() => {
     if (!isPromoCourse) return []
-    return cart
+    const cartPdc = cart
       .filter(item => {
         const category = (item?.category || '').toLowerCase()
         const name = (item?.name || '').toLowerCase()
         const shortName = (item?.shortName || '').toLowerCase()
         return category === 'pdc' || category.includes('practical') || name.includes('pdc') || shortName.includes('pdc')
       })
+    const selectedCoursePdc = Array.isArray(selectedCourse?._pdcCourses)
+      ? selectedCourse._pdcCourses
+      : (selectedCourse?._pdcCourse ? [selectedCourse._pdcCourse] : [])
+
+    const merged = [...cartPdc, ...selectedCoursePdc]
+      .filter(Boolean)
       .map(item => ({ ...item, _pdcKey: getPromoPdcCourseKey(item) }))
-  }, [isPromoCourse, cart])
+
+    // Keep first occurrence order while removing duplicates by stable PDC key.
+    const seen = new Set()
+    return merged.filter((item) => {
+      if (!item?._pdcKey || seen.has(item._pdcKey)) return false
+      seen.add(item._pdcKey)
+      return true
+    })
+  }, [isPromoCourse, cart, selectedCourse])
   const activePromoPdcCourse = promoPdcCourses.find(c => c._pdcKey === activePromoPdcCourseId) || promoPdcCourses[0] || null
   const promoPdcType = activePromoPdcCourse
     ? getPromoPdcTypeFromItem(activePromoPdcCourse)
@@ -175,6 +208,46 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
       setCourseType(selectedCourse.selectedType)
     }
   }, [selectedCourse, onNavigate, showNotification])
+
+  useEffect(() => {
+    if (!selectedCourse || !isOnlineTdcNoSchedule) return
+
+    const scheduleData = {
+      noScheduleRequired: true,
+      isOnlineTdcNoSchedule: true,
+      providerName: 'drivetech.ph / OTDC.ph',
+    }
+    setScheduleSelection(scheduleData)
+
+    if (!selectedCourse.fromCartBundle) {
+      const existingItem = cart.find(item => item.id === selectedCourse.id && item.type === courseType)
+      if (existingItem) {
+        setCart(cart.map(item =>
+          item.id === selectedCourse.id && item.type === courseType
+            ? { ...item, quantity: 1 }
+            : item
+        ))
+      } else {
+        setCart([...cart, {
+          id: selectedCourse.id,
+          name: selectedCourse.name,
+          shortName: selectedCourse.shortName,
+          duration: selectedCourse.duration,
+          price: selectedCourse.price,
+          category: selectedCourse.category,
+          typeOptions: selectedCourse.typeOptions,
+          hasTypeOption: selectedCourse.hasTypeOption,
+          addonsConfig: selectedCourse.addonsConfig,
+          selectedAddons: selectedCourse.selectedAddons,
+          quantity: 1,
+          type: courseType,
+        }])
+      }
+    }
+
+    showNotification('Online TDC does not require schedule selection. Proceeding to payment.', 'info')
+    onNavigate('payment')
+  }, [selectedCourse, isOnlineTdcNoSchedule, setScheduleSelection, cart, setCart, courseType, showNotification, onNavigate])
 
   // Prevent rendering while redirect is pending (no course selected)
   if (!selectedCourse) return null
@@ -580,6 +653,60 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
 
     // Promo bundle: requires both TDC + PDC slots
     if (isPromoCourse) {
+      if (isPromoOnlineTdcLockedBundle) {
+        const scheduleData = {
+          date: promoTdcSlot?.date ? new Date(promoTdcSlot.date + 'T00:00:00') : null,
+          slot: promoTdcSlot?.id || null,
+          slotDetails: promoTdcSlot ? {
+            id: promoTdcSlot.id,
+            session: promoTdcSlot.session,
+            type: promoTdcSlot.type,
+            time: promoTdcSlot.time_range,
+            available: promoTdcSlot.available_slots,
+            total: promoTdcSlot.total_capacity,
+            date: promoTdcSlot.date,
+            end_date: promoTdcSlot.end_date,
+          } : null,
+          pdcDate: null,
+          pdcSlot: null,
+          pdcSlotDetails: null,
+          pdcDate2: null,
+          pdcSlot2: null,
+          pdcSlotDetails2: null,
+          pdcSelections: {},
+          noScheduleRequired: true,
+          isOnlineTdcNoSchedule: true,
+          pdcScheduleLockedUntilCompletion: true,
+          pdcScheduleLockReason: 'PDC schedule will be assigned by Admin/Superadmin after OTDC is marked complete.',
+          providerName: 'drivetech.ph / OTDC.ph',
+        }
+        setScheduleSelection(scheduleData)
+        if (selectedCourse && !selectedCourse.fromCartBundle) {
+          const existingItem = cart.find(item => item.id === selectedCourse.id)
+          if (existingItem) {
+            setCart(cart.map(item => item.id === selectedCourse.id ? { ...item, quantity: 1 } : item))
+          } else {
+            setCart([...cart, {
+              id: selectedCourse.id,
+              name: selectedCourse.name,
+              shortName: selectedCourse.shortName,
+              duration: selectedCourse.duration,
+              price: selectedCourse.price,
+              category: selectedCourse.category,
+              typeOptions: selectedCourse.typeOptions,
+              hasTypeOption: selectedCourse.hasTypeOption,
+              addonsConfig: selectedCourse.addonsConfig,
+              selectedAddons: selectedCourse.selectedAddons,
+              quantity: 1,
+              type: courseType,
+            }])
+          }
+        }
+        showNotification('Online TDC selected. No branch slot selection is required. Proceeding to enrollment.', 'info')
+        onNavigate('payment')
+        return
+      }
+
       if (!promoTdcSlot) {
         showNotification('Please select a TDC schedule (Step 1)', 'error')
         setPromoStep(1)
@@ -1719,6 +1846,15 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
                 </div>
               </div>
 
+              {isPromoOnlineTdcLockedBundle && (
+                <div className="mb-5 bg-blue-50 border border-blue-200 rounded-2xl p-4">
+                  <p className="text-sm font-black text-blue-900">Online TDC Selected</p>
+                  <p className="text-xs text-blue-800 mt-1">
+                    No branch slot selection is required for Online TDC. You can proceed directly to Enrollment.
+                  </p>
+                </div>
+              )}
+
               {/* ---- STEP 1: TDC Slot Selection ---- */}
               {promoStep === 1 && (
                 <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
@@ -1762,7 +1898,13 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
                     )}
                   </div>
 
-                  {loadingPromoTdc ? (
+                  {isPromoOnlineTdcLockedBundle ? (
+                    <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                      <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center"><span className="text-3xl">💻</span></div>
+                      <p className="text-base font-black text-blue-900">Online TDC Selected</p>
+                      <p className="text-sm text-blue-700">No branch slot selection is required for Online TDC. You can proceed directly to Enrollment.</p>
+                    </div>
+                  ) : loadingPromoTdc ? (
                     <div className="flex flex-col items-center justify-center py-12 gap-4">
                       <div className="w-10 h-10 border-4 border-[#2157da] border-t-transparent rounded-full animate-spin" />
                       <p className="text-sm text-gray-500 font-medium">Loading TDC slots...</p>
@@ -2455,11 +2597,25 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
                 </button>
                 {promoStep === 1 ? (
                   <button
-                    onClick={() => { if (!promoTdcSlot) { showNotification('Please select a TDC schedule first', 'error'); return } setPromoStep(2) }}
-                    disabled={!promoTdcSlot}
-                    className={`flex-1 py-4 rounded-2xl font-black text-base transition-all flex items-center justify-center gap-2 ${promoTdcSlot ? 'bg-gradient-to-r from-[#2157da] to-[#1a3a8a] text-white hover:shadow-2xl hover:shadow-blue-500/40 hover:scale-105 active:scale-100' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                    onClick={() => {
+                      if (isPromoOnlineTdcLockedBundle) {
+                        handleProceedToPayment()
+                        return
+                      }
+                      if (!promoTdcSlot) {
+                        showNotification('Please select a TDC schedule first', 'error')
+                        return
+                      }
+                      setPromoStep(2)
+                    }}
+                    disabled={!isPromoOnlineTdcLockedBundle && !promoTdcSlot}
+                    className={`flex-1 py-4 rounded-2xl font-black text-base transition-all flex items-center justify-center gap-2 ${isPromoOnlineTdcLockedBundle || promoTdcSlot ? 'bg-gradient-to-r from-[#2157da] to-[#1a3a8a] text-white hover:shadow-2xl hover:shadow-blue-500/40 hover:scale-105 active:scale-100' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
                   >
-                    {promoTdcSlot ? <><span>Next: Select PDC Schedule</span><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg></> : 'Select TDC Slot to Continue'}
+                    {isPromoOnlineTdcLockedBundle
+                      ? <><span>Proceed to Enrollment</span><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg></>
+                      : promoTdcSlot
+                        ? <><span>Next: Select PDC Schedule</span><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg></>
+                      : 'Select TDC Slot to Continue'}
                   </button>
                 ) : (
                   <>

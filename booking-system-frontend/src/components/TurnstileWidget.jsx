@@ -1,15 +1,17 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const TURNSTILE_SCRIPT_ID = 'cf-turnstile-script'
 const TURNSTILE_SCRIPT_SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
 
-function TurnstileWidget({ onVerify, onExpire, onError }) {
+function TurnstileWidget({ onVerify, onExpire, onError, className = '' }) {
   const containerRef = useRef(null)
+  const wrapperRef = useRef(null)
   const widgetIdRef = useRef(null)
   const onVerifyRef = useRef(onVerify)
   const onExpireRef = useRef(onExpire)
   const onErrorRef = useRef(onError)
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY
+  const [scale, setScale] = useState(1)
 
   useEffect(() => {
     onVerifyRef.current = onVerify
@@ -69,6 +71,27 @@ function TurnstileWidget({ onVerify, onExpire, onError }) {
     }
   }, [siteKey])
 
+  useEffect(() => {
+    const baseWidth = 300
+    const mobileBreakpoint = 640
+    const updateScale = () => {
+      const width = wrapperRef.current?.offsetWidth || baseWidth
+      const isMobile = window.innerWidth < mobileBreakpoint
+      if (!isMobile) {
+        setScale(1)
+        return
+      }
+
+      setScale(width < baseWidth ? width / baseWidth : 1)
+    }
+
+    updateScale()
+    window.addEventListener('resize', updateScale)
+    return () => {
+      window.removeEventListener('resize', updateScale)
+    }
+  }, [])
+
   if (!siteKey) {
     return (
       <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -77,7 +100,13 @@ function TurnstileWidget({ onVerify, onExpire, onError }) {
     )
   }
 
-  return <div ref={containerRef} className="cf-turnstile" />
+  return (
+    <div ref={wrapperRef} className={`w-full flex justify-center overflow-hidden ${className}`.trim()}>
+      <div style={{ width: '300px', transform: `scale(${scale})`, transformOrigin: 'top center' }}>
+        <div ref={containerRef} className="cf-turnstile" />
+      </div>
+    </div>
+  )
 }
 
 export default TurnstileWidget

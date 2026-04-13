@@ -1,7 +1,6 @@
 const pool = require('../config/db');
-const bcrypt = require('bcryptjs');
 const { createRepayment, queryRepayment, verifySignature } = require('../utils/starpayService');
-const { sendGuestEnrollmentEmail, sendAddonsEmail } = require('../utils/emailService');
+const { sendEnrollmentEmail, sendAddonsEmail } = require('../utils/emailService');
 
 /*
 Payment lifecycle (authoritative status rules):
@@ -13,7 +12,7 @@ Payment lifecycle (authoritative status rules):
     - StarPay expired/failed/reversed/closed OR pending timed out.
     - Reserved slots must be released.
 
-3) collectable
+3) partial_payment
     - Payment succeeded for Downpayment bookings.
     - Enrollment is valid, but remaining balance is still due.
 
@@ -23,7 +22,7 @@ Payment lifecycle (authoritative status rules):
 Notes:
 - Do not keep successful Downpayment bookings in pending.
 - pending is only for unpaid active StarPay sessions.
-- checkStatus treats paid and collectable as successful terminal states.
+- checkStatus treats paid and partial_payment as successful terminal states.
 */
 
 const extractSlotIdsFromMeta = (meta = {}) => {
@@ -40,6 +39,68 @@ const extractSlotIdsFromMeta = (meta = {}) => {
     });
 
     return [...new Set(slotIds.filter(Boolean).map(Number))];
+};
+
+const isPdcEnrollmentRequest = (payload = {}) => {
+    const category = String(payload.courseCategory || '').toLowerCase();
+    const courseType = String(payload.courseType || '').toLowerCase();
+    const courseName = String(payload.courseName || '').toLowerCase();
+    const list = Array.isArray(payload.courseList) ? payload.courseList : [];
+
+    if (category === 'pdc') return true;
+    if (courseName.includes('pdc')) return true;
+    if (courseType.includes('pdc')) return true;
+
+    return list.some((item) => {
+        const itemCategory = String(item?.category || '').toLowerCase();
+        const itemName = String(item?.name || '').toLowerCase();
+        const itemType = String(item?.type || '').toLowerCase();
+        return itemCategory === 'pdc' || itemName.includes('pdc') || itemType.includes('pdc');
+    });
+};
+
+const hasIncompleteOnlineTdcBooking = async (userId) => {
+    const result = await pool.query(
+        `SELECT 1
+           FROM bookings b
+           JOIN courses c ON c.id = b.course_id
+          WHERE b.user_id = $1
+            AND LOWER(COALESCE(c.category, '')) = 'tdc'
+            AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
+            AND LOWER(COALESCE(b.status, '')) NOT IN ('completed', 'cancelled')
+          LIMIT 1`,
+        [userId]
+    );
+
+    return result.rows.length > 0;
+};
+
+const GLOBAL_B1B2_DAILY_CAPACITY = 2;
+const isB1B2CourseType = (courseType = '') => {
+    const src = String(courseType || '').toLowerCase();
+    return src.includes('b1') || src.includes('b2') || src.includes('van') || src.includes('l300');
+};
+
+const getGlobalB1B2BookedCount = async (client, date, excludeStudentId = null) => {
+    const params = [date];
+    let excludeClause = '';
+    if (excludeStudentId) {
+        params.push(excludeStudentId);
+        excludeClause = ` AND se.student_id <> $${params.length}`;
+    }
+
+    const result = await client.query(
+        `SELECT COUNT(DISTINCT se.student_id) AS booked_count
+           FROM schedule_enrollments se
+           JOIN schedule_slots ss ON ss.id = se.slot_id
+          WHERE ss.date = $1
+            AND (ss.course_type ILIKE '%B1%' OR ss.course_type ILIKE '%B2%' OR ss.course_type ILIKE '%VAN%' OR ss.course_type ILIKE '%L300%')
+            AND se.enrollment_status NOT IN ('cancelled', 'no-show')
+            ${excludeClause}`,
+        params
+    );
+
+    return Number(result.rows[0]?.booked_count || 0);
 };
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -94,6 +155,8 @@ const initiatePayment = async (req, res) => {
         branchId,
         courseCategory,
         courseType,
+        courseTypePdc,
+        courseTypeTdc,
         amount,
         paymentType = 'Full Payment',
         attach,
@@ -110,6 +173,7 @@ const initiatePayment = async (req, res) => {
         courseName,
         branchName,
         branchAddress,
+        tdcScheduleLabel,
     } = req.body;
 
     // TEST MODE: skip all DB writes and send enrollment email only.
@@ -169,7 +233,10 @@ const initiatePayment = async (req, res) => {
                 const slot1 = pdcSlotLookup[sel?.pdcSlot || sel?.slot] || {};
                 const slot2 = pdcSlotLookup[sel?.pdcSlot2 || sel?.slot2] || {};
                 return {
-                    label: sel?.courseName || 'PDC',
+                    label: sel?.label || sel?.courseName || 'PDC',
+                    courseName: sel?.courseName || 'PDC',
+                    courseType: sel?.courseType || sel?.courseTypeDetailed || '',
+                    transmission: sel?.transmission || null,
                     scheduleDate: sel?.pdcDate || sel?.date || null,
                     scheduleSession: slot1.session || sel?.pdcSlotDetails?.session || sel?.slot?.session || null,
                     scheduleTime: slot1.time_range || sel?.pdcSlotDetails?.time || sel?.pdcSlotDetails?.time_range || sel?.slot?.time_range || null,
@@ -182,11 +249,27 @@ const initiatePayment = async (req, res) => {
             const primarySlot = slotLookup[Number(scheduleSlotId)] || {};
             const secondarySlot = slotLookup[Number(scheduleSlotId2)] || {};
 
-            await sendGuestEnrollmentEmail(user.email, user.first_name || 'Student', user.last_name || '', {
+            await sendEnrollmentEmail(user.email, user.first_name || 'Student', user.last_name || '', {
+                bookingId: Number(req.body.bookingId || 0) || null,
                 courseName: courseName || courseRow.course_name || `${courseCategory || ''} ${courseType || ''}`.trim() || 'N/A',
                 courseList: Array.isArray(courseList) ? courseList : [],
+                addonsDetailed: Array.isArray(req.body.addonsDetailed) ? req.body.addonsDetailed : [],
                 courseCategory,
                 courseType,
+                courseTypePdc,
+                courseTypeTdc,
+                subtotal: req.body.subtotal || 0,
+                promoDiscount: req.body.promoDiscount || 0,
+                convenienceFee: req.body.convenienceFee || 0,
+                totalAmount: req.body.totalAmount || req.body.finalTotal || req.body.grandTotal || 0,
+                tdcLabel: (() => {
+                    const explicit = String(tdcScheduleLabel || '').trim();
+                    if (explicit) return explicit;
+                    const ct = String(courseType || '').toUpperCase();
+                    if (ct.includes('ONLINE')) return 'TDC Online';
+                    if (ct.includes('F2F') || ct.includes('FACE TO FACE')) return 'TDC F2F';
+                    return 'TDC';
+                })(),
                 branchName: branchName || courseRow.branch_name || 'N/A',
                 branchAddress: branchAddress || courseRow.branch_address || '',
                 scheduleDate: scheduleDate || primarySlot.date || null,
@@ -196,6 +279,8 @@ const initiatePayment = async (req, res) => {
                 scheduleSession2: scheduleSession2 || secondarySlot.session || null,
                 scheduleTime2: scheduleTime2 || secondarySlot.time_range || null,
                 pdcSchedules,
+                pdcScheduleLockedUntilCompletion: !!req.body.pdcScheduleLockedUntilCompletion,
+                pdcScheduleLockReason: req.body.pdcScheduleLockReason || null,
                 paymentMethod: 'StarPay (Email Test)',
                 amountPaid: amount || 0,
                 paymentStatus: paymentType,
@@ -220,6 +305,16 @@ const initiatePayment = async (req, res) => {
         return res.status(400).json({ success: false, message: 'courseId and amount are required' });
     }
 
+    if (isPdcEnrollmentRequest(req.body)) {
+        const blocked = await hasIncompleteOnlineTdcBooking(userId);
+        if (blocked) {
+            return res.status(403).json({
+                success: false,
+                message: 'PDC enrollment is blocked. Your Online TDC must be marked Complete in CRM before enrolling in any PDC course.',
+            });
+        }
+    }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -227,10 +322,56 @@ const initiatePayment = async (req, res) => {
         // Self-cleaning: release any old stuck reservations
         await cleanupExpiredReservations(client);
 
+        const requestedSlotIds = [...new Set([scheduleSlotId, scheduleSlotId2].filter(Boolean).map(Number))];
+        const slotMetaById = new Map();
+        if (requestedSlotIds.length > 0) {
+            const slotResult = await client.query(
+                `SELECT id, date, course_type, branch_id
+                   FROM schedule_slots
+                  WHERE id = ANY($1::int[])
+                  FOR UPDATE`,
+                [requestedSlotIds]
+            );
+
+            slotResult.rows.forEach((row) => {
+                slotMetaById.set(Number(row.id), row);
+            });
+
+            for (const slotId of requestedSlotIds) {
+                const slotMeta = slotMetaById.get(Number(slotId));
+                if (!slotMeta) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({
+                        success: false,
+                        message: `Selected schedule slot ${slotId} not found.`,
+                    });
+                }
+
+                if (branchId && slotMeta.branch_id && Number(slotMeta.branch_id) !== Number(branchId)) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Selected schedule slot does not belong to the chosen branch.',
+                    });
+                }
+
+                if (isB1B2CourseType(slotMeta.course_type)) {
+                    const globalBooked = await getGlobalB1B2BookedCount(client, slotMeta.date, userId);
+                    if (globalBooked >= GLOBAL_B1B2_DAILY_CAPACITY) {
+                        await client.query('ROLLBACK');
+                        return res.status(409).json({
+                            success: false,
+                            message: `The B1/B2 Van/L300 units are fully booked for ${slotMeta.date} across all branches.`,
+                        });
+                    }
+                }
+            }
+        }
+
         // 1. ATOMIC SLOT RESERVATION
         // Hold the slots while the user is paying. 
         // If the slot count is 0, the UPDATE will return 0 rows.
-        for (const slotId of [scheduleSlotId, scheduleSlotId2]) {
+        for (const slotId of requestedSlotIds) {
             if (!slotId) continue;
 
             const resResult = await client.query(
@@ -265,7 +406,20 @@ const initiatePayment = async (req, res) => {
             scheduleTime: req.body.scheduleTime || null,
             scheduleTime2: req.body.scheduleTime2 || null,
             pdcSelections: req.body.pdcSelections || {},
+            noScheduleRequired: !!req.body.noScheduleRequired,
+            isOnlineTdcNoSchedule: !!req.body.isOnlineTdcNoSchedule,
+            pdcScheduleLockedUntilCompletion: !!req.body.pdcScheduleLockedUntilCompletion,
+            pdcScheduleLockReason: req.body.pdcScheduleLockReason || null,
             courseList: Array.isArray(req.body.courseList) ? req.body.courseList : [],
+            courseTypePdc: req.body.courseTypePdc || null,
+            courseTypeTdc: req.body.courseTypeTdc || null,
+            tdcScheduleLabel: req.body.tdcScheduleLabel || null,
+            addonsDetailed: Array.isArray(req.body.addonsDetailed) ? req.body.addonsDetailed : [],
+            subtotal: req.body.subtotal || 0,
+            promoDiscount: req.body.promoDiscount || 0,
+            convenienceFee: req.body.convenienceFee || 0,
+            totalAmount: req.body.totalAmount || req.body.finalTotal || req.body.grandTotal || 0,
+            initialAmountPaid: Number(amount || 0),
             paymentType,
             hasReviewer: req.body.hasReviewer || false,
             hasVehicleTips: req.body.hasVehicleTips || false,
@@ -292,7 +446,7 @@ const initiatePayment = async (req, res) => {
                 await pool.query(
                     `UPDATE bookings
                         SET status = CASE
-                                      WHEN LOWER(COALESCE(payment_type, '')) ~ 'down[\\s-]*payment' THEN 'collectable'
+                                      WHEN LOWER(COALESCE(payment_type, '')) ~ 'down[\\s-]*payment' THEN 'partial_payment'
                                       ELSE 'paid'
                                     END,
                             total_amount = COALESCE($2, total_amount),
@@ -373,12 +527,12 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
 
         // Mark booking based on payment type:
         // - Full Payment => paid
-        // - Downpayment => collectable (remaining balance still due)
+        // - Downpayment => partial_payment (remaining balance still due)
     const { rows } = await pool.query(
         `UPDATE bookings
                         SET status       = CASE
                                                                 WHEN LOWER(COALESCE(payment_type, '')) ~ 'down[\\s-]*payment'
-                                                                    THEN 'collectable'
+                                                                    THEN 'partial_payment'
                                                                 ELSE 'paid'
                                                              END,
                 total_amount = $1,
@@ -426,87 +580,6 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
             }
         }
 
-        // Send enrollment email for guests
-        if (meta.source === 'starpay_guest' && meta.guestData?.email) {
-            const { firstName, lastName, email: gEmail, courseCategory, courseType, paymentType: pType } = meta.guestData;
-            try {
-                const pdcSelections = meta.pdcSelections || {};
-                const pdcSlotIds = [];
-                Object.values(pdcSelections).forEach((sel) => {
-                    if (sel?.pdcSlot) pdcSlotIds.push(sel.pdcSlot);
-                    if (sel?.pdcSlot2) pdcSlotIds.push(sel.pdcSlot2);
-                    if (sel?.slot) pdcSlotIds.push(sel.slot);
-                    if (sel?.slot2) pdcSlotIds.push(sel.slot2);
-                });
-
-                let pdcSlotLookup = {};
-                if (pdcSlotIds.length) {
-                    const { rows: pdcRows } = await pool.query(
-                        `SELECT id, session, time_range FROM schedule_slots WHERE id = ANY($1::int[])`,
-                        [[...new Set(pdcSlotIds.map(Number))]]
-                    );
-                    pdcSlotLookup = pdcRows.reduce((acc, row) => {
-                        acc[row.id] = row;
-                        return acc;
-                    }, {});
-                }
-
-                const pdcSchedules = Object.values(pdcSelections).map((sel) => {
-                    const slot1 = pdcSlotLookup[sel?.pdcSlot || sel?.slot] || {};
-                    const slot2 = pdcSlotLookup[sel?.pdcSlot2 || sel?.slot2] || {};
-                    return {
-                        label: sel?.courseName || 'PDC',
-                        scheduleDate: sel?.pdcDate || sel?.date || null,
-                        scheduleSession: slot1.session || null,
-                        scheduleTime: slot1.time_range || null,
-                        scheduleDate2: sel?.pdcDate2 || sel?.date2 || null,
-                        scheduleSession2: slot2.session || null,
-                        scheduleTime2: slot2.time_range || null,
-                    };
-                }).filter(s => s.scheduleDate);
-
-                const [courseRow, bookingRow] = await Promise.all([
-                    pool.query(
-                        `SELECT c.name, br.name AS branch_name, br.address AS branch_address
-                           FROM bookings b
-                           JOIN courses c ON b.course_id = c.id
-                           LEFT JOIN branches br ON b.branch_id = br.id
-                          WHERE b.id = $1`, [bookingId]
-                    ),
-                    pool.query(
-                        `SELECT s1.session AS session1, s1.time_range AS time1,
-                                s2.session AS session2, s2.time_range AS time2
-                           FROM bookings b
-                           LEFT JOIN schedule_slots s1 ON s1.id = $2
-                           LEFT JOIN schedule_slots s2 ON s2.id = $3
-                          WHERE b.id = $1`, [bookingId, meta.scheduleSlotId, meta.scheduleSlotId2]
-                    ),
-                ]);
-                const cr = courseRow.rows[0] || {};
-                const sr = bookingRow.rows[0] || {};
-                await sendGuestEnrollmentEmail(gEmail, firstName, lastName, {
-                    courseName: cr.name || 'N/A',
-                    courseCategory,
-                    courseType,
-                    branchName: cr.branch_name || 'N/A',
-                    branchAddress: cr.branch_address || '',
-                    scheduleDate: meta.scheduleDate,
-                    scheduleSession: sr.session1 || 'N/A',
-                    scheduleTime: sr.time1 || 'N/A',
-                    scheduleDate2: meta.scheduleDate2 || null,
-                    scheduleSession2: sr.session2 || null,
-                    scheduleTime2: sr.time2 || null,
-                    pdcSchedules,
-                    paymentMethod: 'StarPay',
-                    amountPaid: amountPhp,
-                    paymentStatus: pType || 'Full Payment',
-                }, meta.hasReviewer, meta.hasVehicleTips);
-                console.log(`[StarPay] Enrollment email sent to ${gEmail}`);
-            } catch (emailErr) {
-                console.error('[StarPay] Guest email failed:', emailErr.message);
-            }
-        }
-
         // Send enrollment email for logged-in students
         if (meta.source === 'starpay' && studentId) {
             try {
@@ -535,7 +608,10 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
                     const slot1 = pdcSlotLookup[sel?.pdcSlot || sel?.slot] || {};
                     const slot2 = pdcSlotLookup[sel?.pdcSlot2 || sel?.slot2] || {};
                     return {
-                        label: sel?.courseName || 'PDC',
+                        label: sel?.label || sel?.courseName || 'PDC',
+                        courseName: sel?.courseName || 'PDC',
+                        courseType: sel?.courseType || sel?.courseTypeDetailed || '',
+                        transmission: sel?.transmission || null,
                         scheduleDate: sel?.pdcDate || sel?.date || null,
                         scheduleSession: slot1.session || sel?.pdcSlotDetails?.session || sel?.slot?.session || null,
                         scheduleTime: slot1.time_range || sel?.pdcSlotDetails?.time || sel?.pdcSlotDetails?.time_range || sel?.slot?.time_range || null,
@@ -564,11 +640,27 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
 
                 const d = detailsRows[0] || {};
                 if (d.email) {
-                    await sendGuestEnrollmentEmail(d.email, d.first_name || 'Student', d.last_name || '', {
+                    await sendEnrollmentEmail(d.email, d.first_name || 'Student', d.last_name || '', {
+                        bookingId,
                         courseName: d.course_name || 'N/A',
                         courseList: Array.isArray(meta.courseList) ? meta.courseList : [],
+                        addonsDetailed: Array.isArray(meta.addonsDetailed) ? meta.addonsDetailed : [],
                         courseCategory: d.course_category || null,
                         courseType: d.course_type || null,
+                        courseTypePdc: meta.courseTypePdc || null,
+                        courseTypeTdc: meta.courseTypeTdc || null,
+                        subtotal: meta.subtotal || 0,
+                        promoDiscount: meta.promoDiscount || 0,
+                        convenienceFee: meta.convenienceFee || 0,
+                        totalAmount: meta.totalAmount || 0,
+                        tdcLabel: (() => {
+                            const explicit = String(meta.tdcScheduleLabel || '').trim();
+                            if (explicit) return explicit;
+                            const ct = String(d.course_type || '').toUpperCase();
+                            if (ct.includes('ONLINE')) return 'TDC Online';
+                            if (ct.includes('F2F') || ct.includes('FACE TO FACE')) return 'TDC F2F';
+                            return 'TDC';
+                        })(),
                         branchName: d.branch_name || 'N/A',
                         branchAddress: d.branch_address || '',
                         scheduleDate: meta.scheduleDate || d.date1 || null,
@@ -578,6 +670,8 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
                         scheduleSession2: d.session2 || meta.scheduleSession2 || null,
                         scheduleTime2: d.time2 || meta.scheduleTime2 || null,
                         pdcSchedules,
+                        pdcScheduleLockedUntilCompletion: !!meta.pdcScheduleLockedUntilCompletion,
+                        pdcScheduleLockReason: meta.pdcScheduleLockReason || null,
                         paymentMethod: 'StarPay',
                         amountPaid: amountPhp,
                         paymentStatus: meta.paymentType || 'Full Payment',
@@ -680,7 +774,7 @@ const checkStatus = async (req, res) => {
     if (rows.length) {
         const booking = rows[0];
         if (booking.status !== 'pending') {
-            const successfulLocalStatus = ['paid', 'collectable'].includes(String(booking.status || '').toLowerCase());
+            const successfulLocalStatus = ['paid', 'partial_payment'].includes(String(booking.status || '').toLowerCase());
             return res.json({
                 success: true,
                 localStatus: booking.status,
@@ -811,256 +905,6 @@ const checkStatus = async (req, res) => {
 };
 
 /* ─────────────────────────────────────────────────────────────────────
-   POST /api/starpay/guest-create-payment  (no auth required)
-   Body: all guest personal fields + courseId, branchId, scheduleSlotId,
-         scheduleSlotId2, scheduleDate, courseCategory, courseType,
-         amount, paymentType, attach?
-
-   Creates a guest user account + pending booking, then calls StarPay.
-   On webhook SUCCESS the booking is marked paid, student is enrolled
-   in schedule slots, and an enrollment email is sent.
- ───────────────────────────────────────────────────────────────────── */
-const initiateGuestPayment = async (req, res) => {
-    const {
-        // Personal info
-        firstName, middleName, lastName, email,
-        address, age, gender, birthday, birthPlace,
-        nationality, maritalStatus, contactNumbers, zipCode,
-        emergencyContactPerson, emergencyContactNumber,
-        // Course / schedule
-        courseId, branchId, courseCategory, courseType,
-        scheduleSlotId, scheduleSlotId2, scheduleDate, scheduleDate2,
-        pdcSelections,
-        courseList,
-        // Payment
-        amount, paymentType = 'Full Payment', attach,
-    } = req.body;
-
-    // TEST MODE: send email only, skip account/booking/schedule DB writes.
-    if (req.body?.emailOnlyTest) {
-        try {
-            const pdcSelections = req.body.pdcSelections || {};
-            const pdcSchedules = Object.values(pdcSelections).map((sel) => ({
-                label: sel?.courseName || 'PDC',
-                scheduleDate: sel?.pdcDate || sel?.date || null,
-                scheduleSession: sel?.pdcSlotDetails?.session || sel?.slot?.session || null,
-                scheduleTime: sel?.pdcSlotDetails?.time || sel?.pdcSlotDetails?.time_range || sel?.slot?.time_range || null,
-                scheduleDate2: sel?.pdcDate2 || sel?.date2 || null,
-                scheduleSession2: sel?.pdcSlotDetails2?.session || sel?.slot2?.session || null,
-                scheduleTime2: sel?.pdcSlotDetails2?.time || sel?.pdcSlotDetails2?.time_range || sel?.slot2?.time_range || null,
-            })).filter(s => s.scheduleDate);
-
-            await sendGuestEnrollmentEmail(email, firstName, lastName, {
-                courseName: req.body.courseName || `${courseCategory || ''} ${courseType || ''}`.trim() || 'N/A',
-                courseList: Array.isArray(courseList) ? courseList : [],
-                courseCategory,
-                courseType,
-                branchName: req.body.branchName || 'N/A',
-                branchAddress: req.body.branchAddress || '',
-                scheduleDate: scheduleDate || null,
-                scheduleSession: req.body.scheduleSession || req.body.scheduleTime || 'N/A',
-                scheduleTime: req.body.scheduleTime || 'N/A',
-                scheduleDate2: scheduleDate2 || null,
-                scheduleSession2: req.body.scheduleSession2 || null,
-                scheduleTime2: req.body.scheduleTime2 || null,
-                pdcSchedules,
-                paymentMethod: 'StarPay (Email Test)',
-                amountPaid: amount || 0,
-                paymentStatus: paymentType,
-            }, req.body.hasReviewer, req.body.hasVehicleTips);
-
-            return res.json({
-                success: true,
-                emailOnlyTest: true,
-                message: 'Guest enrollment email test sent successfully. No database changes were made.',
-                msgId: `TEST${Date.now()}G0`,
-            });
-        } catch (emailErr) {
-            console.error('[StarPay] emailOnlyTest guest email failed:', emailErr.message);
-            return res.status(500).json({
-                success: false,
-                message: `Email test failed: ${emailErr.message}`,
-            });
-        }
-    }
-
-    if (!courseId || !amount || !email || !firstName || !lastName || !contactNumbers) {
-        return res.status(400).json({ success: false, message: 'Required fields are missing.' });
-    }
-
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-
-        // Clean stale reservations
-        await cleanupExpiredReservations(client);
-
-        // 1. ATOMIC SLOT RESERVATION
-        const parsedBranchId = branchId ? parseInt(branchId, 10) : null;
-        const allRequestedSlotIds = [
-            scheduleSlotId,
-            scheduleSlotId2,
-            ...extractSlotIdsFromMeta({ pdcSelections }),
-        ];
-
-        for (const slotId of allRequestedSlotIds) {
-            if (!slotId) continue;
-
-            const resResult = await client.query(
-                `UPDATE schedule_slots 
-                    SET available_slots = available_slots - 1 
-                  WHERE id = $1 AND available_slots > 0 
-                  RETURNING id`,
-                [slotId]
-            );
-
-            if (resResult.rows.length === 0) {
-                await client.query('ROLLBACK');
-                return res.status(409).json({ 
-                    success: false, 
-                    message: 'Sorry, this schedule slot was just filled. Please choose a different session.' 
-                });
-            }
-        }
-
-        // Reject if email is already registered
-        const existing = await client.query('SELECT id FROM users WHERE email = $1', [email]);
-        if (existing.rows.length > 0) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({
-                success: false,
-                message: 'An account with this email already exists. Please sign in to pay online.',
-            });
-        }
-
-        // Create guest student account
-        const randomPassword = require('crypto').randomBytes(12).toString('hex');
-        const hashedPassword = await bcrypt.hash(randomPassword, 10);
-
-        const userResult = await client.query(
-            `INSERT INTO users (
-                first_name, middle_name, last_name, email, password,
-                address, age, gender, birthday, birth_place,
-                nationality, marital_status, contact_numbers, zip_code,
-                emergency_contact_person, emergency_contact_number,
-                is_verified, role, status
-             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,'student','active')
-             RETURNING id`,
-            [
-                firstName, middleName || null, lastName, email, hashedPassword,
-                address, age, gender, birthday, birthPlace,
-                nationality, maritalStatus, contactNumbers, zipCode,
-                emergencyContactPerson, emergencyContactNumber,
-            ]
-        );
-        const userId = userResult.rows[0].id;
-
-        const msgId = `MDS${Date.now()}G${userId}`;
-
-        // Store info in notes
-        const notesPayload = JSON.stringify({
-            source: 'starpay_guest',
-            scheduleSlotId: scheduleSlotId || null,
-            scheduleSlotId2: scheduleSlotId2 || null,
-            scheduleDate: scheduleDate || null,
-            scheduleDate2: scheduleDate2 || null,
-            pdcSelections: pdcSelections || {},
-            courseList: Array.isArray(courseList) ? courseList : [],
-            paymentType,
-            hasReviewer: req.body.hasReviewer || false,
-            hasVehicleTips: req.body.hasVehicleTips || false,
-            guestData: { firstName, lastName, email, courseCategory, courseType, paymentType },
-        });
-
-        const bookingResult = await client.query(
-            `INSERT INTO bookings
-               (user_id, course_id, branch_id, booking_date, booking_time,
-                notes, total_amount, payment_type, payment_method, status,
-                transaction_id, enrollment_type, course_type)
-             VALUES ($1,$2,$3,CURRENT_DATE,NULL,$4,$5,$6,'StarPay','pending',$7,'guest',$8)
-             RETURNING id`,
-            [userId, courseId, parsedBranchId, notesPayload, amount, paymentType, msgId, courseType]
-        );
-        const bookingId = bookingResult.rows[0].id;
-
-        await client.query('COMMIT');
-
-        // TEST MODE: save payment locally as paid without calling StarPay.
-        if (req.body?.localDbTest) {
-            const testOrderNo = `LOCAL${Date.now()}G${userId}`;
-            const fulfilledBookingId = await fulfillBookingPayment(msgId, Math.round(parseFloat(amount || 0) * 100), testOrderNo);
-            if (!fulfilledBookingId && bookingId) {
-                await pool.query(
-                    `UPDATE bookings
-                        SET status = CASE
-                                      WHEN LOWER(COALESCE(payment_type, '')) ~ 'down[\\s-]*payment' THEN 'collectable'
-                                      ELSE 'paid'
-                                    END,
-                            total_amount = COALESCE($2, total_amount),
-                            updated_at = CURRENT_TIMESTAMP
-                      WHERE id = $1 AND status = 'pending'`,
-                    [bookingId, parseFloat(amount || 0)]
-                );
-            }
-            return res.json({
-                success: true,
-                localDbTest: true,
-                msgId,
-                bookingId,
-                trxState: 'SUCCESS',
-                orderNo: testOrderNo,
-                message: 'Guest local DB test payment saved successfully. StarPay gateway was skipped.',
-            });
-        }
-
-        // StarPay call
-        const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
-        const notifyUrl = `${backendUrl}/api/starpay/webhook`;
-
-        const spResult = await createRepayment({
-            msgId,
-            notifyUrl,
-            amountPhp: parseFloat(amount),
-            attach: attach || `MDS ${courseCategory || ''} ${courseType || ''}`.trim().slice(0, 92),
-            branchId: parsedBranchId || null,
-        });
-
-        const spResponse = spResult?.response || spResult;
-
-        if (!spResponse || spResponse.code !== '200') {
-            await client.query('BEGIN');
-            await client.query(`UPDATE bookings SET status='cancelled' WHERE id=$1`, [bookingId]);
-            for (const slotId of allRequestedSlotIds) {
-                if (slotId) {
-                    await client.query(`UPDATE schedule_slots SET available_slots = available_slots + 1 WHERE id=$1`, [slotId]);
-                }
-            }
-            await client.query('COMMIT');
-
-            console.error('[StarPay] guest initiate failed:', spResponse?.message);
-            return res.status(502).json({
-                success: false,
-                message: `StarPay error: ${spResponse?.message || 'Order creation failed'}`,
-            });
-        }
-
-        return res.json({
-            success: true,
-            codeUrl: spResponse.codeUrl,
-            msgId,
-            bookingId,
-        });
-
-    } catch (err) {
-        await client.query('ROLLBACK').catch(() => { });
-        console.error('[StarPay] initiateGuestPayment error:', err.message);
-        return res.status(500).json({ success: false, message: err.message });
-    } finally {
-        client.release();
-    }
-};
-
-/* ─────────────────────────────────────────────────────────────────────
    POST /api/starpay/reschedule-fee/:enrollmentId
    Logged-in student pays the ₱1,000 no-show reschedule fee via StarPay.
    No booking record is created here — it is only created after the
@@ -1165,4 +1009,4 @@ const initiateRescheduleFeePayment = async (req, res) => {
     }
 };
 
-module.exports = { initiatePayment, initiateGuestPayment, handleWebhook, checkStatus, initiateRescheduleFeePayment };
+module.exports = { initiatePayment, handleWebhook, checkStatus, initiateRescheduleFeePayment };

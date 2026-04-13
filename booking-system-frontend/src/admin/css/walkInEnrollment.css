@@ -1220,6 +1220,62 @@
     cursor: not-allowed;
 }
 
+/* ── Taken/Conflict state (session already used by another course) ── */
+.session-sub-box.type-btn--disabled {
+    background-color: #f1f5f9 !important;
+    border-color: #cbd5e1 !important;
+    color: #94a3b8 !important;
+    opacity: 0.6;
+    cursor: not-allowed;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Diagonal stripe overlay to visually signal conflict */
+.session-sub-box.type-btn--disabled::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+        -45deg,
+        transparent,
+        transparent 3px,
+        rgba(148, 163, 184, 0.25) 3px,
+        rgba(148, 163, 184, 0.25) 5px
+    );
+    pointer-events: none;
+    border-radius: inherit;
+}
+
+/* On hover: deepen the stripe and show a red tint — no lift effect */
+.session-sub-box.type-btn--disabled:hover {
+    transform: none !important;
+    box-shadow: none !important;
+    background-color: #fee2e2 !important;
+    border-color: #fca5a5 !important;
+    color: #dc2626 !important;
+    opacity: 0.8;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+/* Prevent the default hover rule from overriding the disabled state */
+.session-sub-box:hover:not(.full):not(.selected).type-btn--disabled {
+    transform: none;
+    box-shadow: none;
+}
+
+@keyframes session-shake {
+    0%, 100% { transform: translateX(0); }
+    20%       { transform: translateX(-3px); }
+    40%       { transform: translateX(3px); }
+    60%       { transform: translateX(-2px); }
+    80%       { transform: translateX(2px); }
+}
+
+.session-sub-box.type-btn--disabled:active {
+    animation: session-shake 0.35s ease;
+}
+
 .cal-day {
     min-height: 140px;
     border-radius: 12px;

@@ -476,7 +476,7 @@ const getUnassignedPdcMotorcycle = async (req, res) => {
       JOIN courses c ON b.course_id = c.id
       WHERE (c.category = 'PDC' OR c.category ILIKE '%Motorcycle%')
         AND (c.name ILIKE '%Motorcycle%' OR c.category ILIKE '%Motorcycle%')
-        AND b.status IN ('paid', 'confirmed', 'collectable')
+        AND b.status IN ('paid', 'confirmed', 'partial_payment')
         AND NOT EXISTS (
            SELECT 1 FROM schedule_enrollments se 
            JOIN schedule_slots ss ON se.slot_id = ss.id

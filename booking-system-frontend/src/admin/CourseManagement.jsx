@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import './css/user.css';
 import { coursesAPI, branchesAPI, adminAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
@@ -15,6 +15,62 @@ const COURSE_TAB_PERMISSION_MAP = {
 const normalizePermissionList = (permissions) => {
     if (!Array.isArray(permissions)) return [];
     return permissions.filter((permission) => typeof permission === 'string' && permission.trim().length > 0);
+};
+
+const buildBundleKey = (tdcPart, pdcParts) => {
+    const normalizedPdcParts = [...new Set((pdcParts || []).map(v => normalizePromoPdcName(v)).filter(Boolean))].sort();
+    if (!tdcPart || normalizedPdcParts.length === 0) return '';
+    return `${String(tdcPart).trim()}+${normalizedPdcParts.join('|')}`;
+};
+
+const normalizePromoPdcName = (value) => {
+    const cleaned = String(value || '').trim();
+    const lower = cleaned.toLowerCase();
+    if (!cleaned) return '';
+    if (lower === 'motorcycle') return 'PDC Motor Manual';
+    if (lower === 'manual' || lower === 'carmt' || lower === 'car mt' || lower === 'pdc car manual') return 'PDC Car Manual';
+    if (lower === 'automatic' || lower === 'carat' || lower === 'car at' || lower === 'pdc car automatic') return 'PDC Car Automatic';
+    if (lower === 'v1-tricycle' || lower === 'a1-tricycle' || lower === 'pdc a1-tricycle') return 'PDC A1-Tricycle';
+    if (lower === 'b1-van/b2 - l300' || lower === 'b1-van/b2-l300' || lower === 'pdc b1-van/b2-l300') return 'PDC B1-Van/B2-L300';
+    return cleaned;
+};
+
+const normalizeBundleType = (entry) => {
+    if (!entry) return null;
+
+    if (typeof entry === 'string') {
+        const [tdcPart, pdcRaw = ''] = entry.split('+');
+        const pdcParts = pdcRaw.split('|').map(v => normalizePromoPdcName(v)).filter(Boolean);
+        const key = buildBundleKey(tdcPart, pdcParts);
+        if (!key) return null;
+        return {
+            value: key,
+            label: `${tdcPart} TDC + ${[...new Set(pdcParts)].sort().join(', ')} PDC`,
+            tdcPart,
+            pdcParts: [...new Set(pdcParts)].sort(),
+            legacyValues: [String(entry).trim()].filter(Boolean),
+        };
+    }
+
+    if (typeof entry === 'object') {
+        const rawValue = String(entry.value || '').trim();
+        const tdcPart = String(entry.tdcPart || '').trim() || (rawValue.includes('+') ? rawValue.split('+')[0].trim() : '');
+        const rawPdcParts = Array.isArray(entry.pdcParts)
+            ? entry.pdcParts
+            : (rawValue.includes('+') ? rawValue.split('+')[1].split('|') : []);
+        const pdcParts = [...new Set(rawPdcParts.map(v => normalizePromoPdcName(v)).filter(Boolean))].sort();
+        const key = buildBundleKey(tdcPart, pdcParts);
+        if (!key) return null;
+        return {
+            value: key,
+            label: String(entry.label || '').trim() || `${tdcPart} TDC + ${pdcParts.join(', ')} PDC`,
+            tdcPart,
+            pdcParts,
+            legacyValues: [rawValue].filter(Boolean),
+        };
+    }
+
+    return null;
 };
 
 const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', currentUserBranchId = null }) => {
@@ -65,6 +121,29 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
         return requiredPermissions.some((permission) => permissionSet.has(permission));
     };
     const allowedCourseTabs = ['courses', 'discounts', 'config'].filter((tabKey) => canAccessCourseTab(tabKey));
+
+    const normalizedPromoBundles = useMemo(() => {
+        const source = Array.isArray(courseConfig?.bundleTypes) ? courseConfig.bundleTypes : [];
+        return source
+            .map(normalizeBundleType)
+            .filter(Boolean);
+    }, [courseConfig]);
+
+    const promoBundleLabelMap = useMemo(() => {
+        const map = new Map();
+        normalizedPromoBundles.forEach((bundle) => {
+            map.set(bundle.value, bundle.label);
+            (bundle.legacyValues || []).forEach((legacy) => {
+                map.set(legacy, bundle.label);
+            });
+        });
+        return map;
+    }, [normalizedPromoBundles]);
+
+    const resolvePromoBundleLabel = (bundleValue) => {
+        if (!bundleValue) return '';
+        return promoBundleLabelMap.get(bundleValue) || bundleValue;
+    };
 
     // Fetch courses from database
     useEffect(() => {
@@ -932,13 +1011,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                                         border: '1px solid var(--border-color)'
                                                     }}>
                                                         <span style={{ fontSize: '0.85rem', color: 'var(--text-color)', fontWeight: '500' }}>
-                                                            {course.category === 'Promo' ? (() => {
-                                                                const labels = {
-                                                                    'F2F+Motorcycle': 'F2F TDC + MOTOR', 'F2F+CarAT': 'F2F TDC + CAR AT', 'F2F+CarMT': 'F2F TDC + CAR MT',
-                                                                    'Online+Motorcycle': 'OTDC + MOTOR', 'Online+CarAT': 'OTDC + CAR AT', 'Online+CarMT': 'OTDC + CAR MT'
-                                                                }
-                                                                return labels[course.course_type] || course.course_type
-                                                            })() : course.course_type}
+                                                            {course.category === 'Promo' ? resolvePromoBundleLabel(course.course_type) : course.course_type}
                                                         </span>
                                                         <span style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--primary-color)' }}>
                                                             ₱{getEffectivePrice(course, course.price).toLocaleString()}
@@ -1064,13 +1137,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                                         </div>
                                                         {(course.course_type || course.category) && course.category !== 'Basic' && (
                                                             <span className="text-xs text-gray-500 font-medium">
-                                                                {course.category === 'Promo' ? (() => {
-                                                                    const labels = {
-                                                                        'F2F+Motorcycle': 'F2F TDC + MOTOR', 'F2F+CarAT': 'F2F TDC + CAR AT', 'F2F+CarMT': 'F2F TDC + CAR MT',
-                                                                        'Online+Motorcycle': 'OTDC + MOTOR', 'Online+CarAT': 'OTDC + CAR AT', 'Online+CarMT': 'OTDC + CAR MT'
-                                                                    }
-                                                                    return labels[course.course_type] || course.course_type
-                                                                })() : (
+                                                                {course.category === 'Promo' ? resolvePromoBundleLabel(course.course_type) : (
                                                                     `${course.category} ${course.course_type ? '- ' + course.course_type : ''}`
                                                                 )}
                                                             </span>
@@ -1730,16 +1797,12 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                             }}
                                         >
                                             <option value="">Select Promo Bundle</option>
-                                            {(courseConfig?.bundleTypes || [
-                                                { value: 'F2F+Motorcycle', label: 'F2F TDC + MOTOR (Motorcycle PDC)' },
-                                                { value: 'F2F+CarAT', label: 'F2F TDC + CAR AT (Car Automatic PDC)' },
-                                                { value: 'F2F+CarMT', label: 'F2F TDC + CAR MT (Car Manual PDC)' },
-                                                { value: 'Online+Motorcycle', label: 'OTDC + MOTOR (Motorcycle PDC)' },
-                                                { value: 'Online+CarAT', label: 'OTDC + CAR AT (Car Automatic PDC)' },
-                                                { value: 'Online+CarMT', label: 'OTDC + CAR MT (Car Manual PDC)' },
-                                            ]).map(b => (
+                                            {normalizedPromoBundles.map(b => (
                                                 <option key={b.value} value={b.value}>{b.label}</option>
                                             ))}
+                                            {courseData.course_type && !normalizedPromoBundles.some((b) => b.value === courseData.course_type || (b.legacyValues || []).includes(courseData.course_type)) && (
+                                                <option value={courseData.course_type}>{resolvePromoBundleLabel(courseData.course_type)}</option>
+                                            )}
                                         </select>
                                         <p style={{ marginTop: '6px', fontSize: '0.8rem', color: '#92400e', background: '#fef3c7', padding: '8px 10px', borderRadius: '8px' }}>
                                             🏷️ Students select a TDC slot first, then a PDC slot when booking this promo.

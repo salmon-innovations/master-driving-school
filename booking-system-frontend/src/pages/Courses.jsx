@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNotification } from '../context/NotificationContext'
 import { coursesAPI, branchesAPI, schedulesAPI } from '../services/api'
 
-function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, setSelectedCourseForSchedule }) {
+function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, setSelectedCourseForSchedule, setScheduleSelection }) {
   const { showNotification } = useNotification()
   const [sortBy, setSortBy] = useState('best-selling')
   const [priceFilter, setPriceFilter] = useState('all')
@@ -215,6 +215,8 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   });
 
   const addToCart = (pkg, qty = 1, type = 'online') => {
+    const normalizedQty = Math.max(1, Number(qty) || 1)
+    const normalizedType = String(type || 'online')
     // Only store lightweight fields — images are base64 blobs that blow localStorage quota
     const cartItem = {
       id: pkg.id,
@@ -225,31 +227,76 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
       category: pkg.category,
       typeOptions: pkg.typeOptions,
       hasTypeOption: pkg.hasTypeOption,
-      quantity: qty,
-      type: type,
+      quantity: normalizedQty,
+      type: normalizedType,
       addonsConfig: addonsConfig,
       selectedAddons: selectedAddons,
     }
-    const existingItem = cart.find(item => item.id === pkg.id && item.type === type)
-    if (existingItem) {
-      setCart(cart.map(item =>
-        item.id === pkg.id && item.type === type
-          ? { ...item, quantity: item.quantity + qty }
-          : item
-      ))
-    } else {
-      setCart([...cart, cartItem])
-    }
+    const cartKey = `${pkg.id}::${normalizedType}`
+    setCart((prevCart) => {
+      const existingIndex = prevCart.findIndex((item) => `${item.id}::${String(item.type || 'online')}` === cartKey)
+      if (existingIndex === -1) {
+        return [...prevCart, cartItem]
+      }
+
+      return prevCart.map((item, idx) => {
+        if (idx !== existingIndex) return item
+        const currentQty = Number(item.quantity) || 1
+        return { ...item, quantity: currentQty + normalizedQty }
+      })
+    })
   }
 
   const handleAddToCartFromDetail = () => {
     if (selectedCourse) {
+      if (isSelectedOnlineTdc()) {
+        showNotification('Regular Online TDC cannot be added to cart. Please use Enroll Now to proceed.', 'error')
+        return
+      }
       addToCart(selectedCourse, quantity, courseType)
       showNotification(`${selectedCourse.shortName} added to cart!`, "success")
     }
   }
 
-  const handleEnrollNow = () => {
+  const isSelectedOnlineTdc = () => {
+    if (!selectedCourse) return false
+    const isTdcCourse = selectedCourse?.type === 'tdc' || selectedCourse?.category === 'TDC' || (selectedCourse?.name || '').toLowerCase().includes('tdc') || (selectedCourse?.shortName || '').toLowerCase().includes('tdc')
+    return isTdcCourse && String(courseType || '').toLowerCase() === 'online'
+  }
+
+  const isSelectedPdcCourse = () => {
+    if (!selectedCourse) return false
+    const category = String(selectedCourse?.category || '').toLowerCase()
+    const name = `${selectedCourse?.name || ''} ${selectedCourse?.shortName || ''}`.toLowerCase()
+    return category === 'pdc' || name.includes('pdc')
+  }
+
+  const hasIncompleteOnlineTdc = async () => {
+    if (!isLoggedIn) return false
+
+    try {
+      const res = await schedulesAPI.getMyEnrollments()
+      const enrollments = Array.isArray(res?.enrollments) ? res.enrollments : []
+
+      const onlineTdcBookings = enrollments.filter((row) => {
+        const category = String(row?.course_category || '').toLowerCase()
+        const type = String(row?.course_type || '').toLowerCase()
+        const name = String(row?.course_name || row?.course_full_name || '').toLowerCase()
+        const isTdc = category === 'tdc' || name.includes('tdc')
+        const isOnline = type.includes('online')
+        return isTdc && isOnline
+      })
+
+      if (onlineTdcBookings.length === 0) return false
+
+      return onlineTdcBookings.some((row) => String(row?.booking_status || '').toLowerCase() !== 'completed')
+    } catch (error) {
+      console.error('Failed to validate online TDC completion:', error)
+      return false
+    }
+  }
+
+  const handleEnrollNow = async () => {
 
     if (!preSelectedBranch) {
       showNotification("Please select a branch first from the Branches page", "error")
@@ -258,6 +305,27 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
     }
 
     if (selectedCourse) {
+      if (isSelectedPdcCourse() && isLoggedIn) {
+        const blockedByOnlineTdc = await hasIncompleteOnlineTdc()
+        if (blockedByOnlineTdc) {
+          showNotification('You cannot enroll in any PDC course yet. Your Online TDC must be marked Complete in CRM first.', 'error')
+          return
+        }
+      }
+
+      const persistPostVerifyRedirect = (target, isOnlineTdc = false) => {
+        const payload = {
+          next: target,
+          source: 'courses',
+          isOnlineTdcNoSchedule: Boolean(isOnlineTdc),
+          createdAt: Date.now(),
+        }
+        sessionStorage.setItem('postVerifyRedirect', JSON.stringify(payload))
+        localStorage.setItem('postVerifyRedirect', JSON.stringify(payload))
+      }
+
+      const isOnlineTdc = isSelectedOnlineTdc()
+
       // Only store lightweight fields to avoid localStorage QuotaExceededError (images are base64 blobs)
       setSelectedCourseForSchedule({
         id: selectedCourse.id,
@@ -272,8 +340,25 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
         addonsConfig: addonsConfig,
         selectedAddons: selectedAddons,
       })
+
+      if (isOnlineTdc) {
+        addToCart(selectedCourse, quantity, courseType)
+        setScheduleSelection({
+          noScheduleRequired: true,
+          isOnlineTdcNoSchedule: true,
+          providerName: 'drivetech.ph / OTDC.ph'
+        })
+        persistPostVerifyRedirect('payment', true)
+      } else {
+        setScheduleSelection(null)
+        persistPostVerifyRedirect('schedule')
+      }
+
       if (!isLoggedIn) {
-        onNavigate('guest-enrollment')
+        onNavigate('signup')
+      } else if (isOnlineTdc) {
+        showNotification('Online TDC does not require schedule selection. Proceeding to payment.', 'success')
+        onNavigate('payment')
       } else {
         onNavigate('schedule')
       }
@@ -308,6 +393,12 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
       setHasAvailableSlots(true)
       setSlotAvailabilityDetail(null)
       try {
+        if (isSelectedOnlineTdc()) {
+          setHasAvailableSlots(true)
+          setSlotAvailabilityDetail(null)
+          return
+        }
+
         const name = (selectedCourse.name || '').toLowerCase()
         const shortName = (selectedCourse.shortName || '').toLowerCase()
         const category = selectedCourse.category || ''
@@ -335,6 +426,16 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
           const isMotorPdc = pdcPart.includes('motorcycle') || pdcPart.includes('motor')
           const isCarAT = pdcPart.includes('carat') || pdcPart.includes('car-at')
           const isCarMT = pdcPart.includes('carmt') || pdcPart.includes('car-mt')
+
+          // FREE OTDC + PDC MOTOR policy: student picks only OTDC slot.
+          // PDC schedule is assigned later by admin after OTDC + CRM completion.
+          if (tdcPart === 'online' && isMotorPdc) {
+            const tdcLabel = 'TDC (Online)'
+            const pdcLabel = 'PDC Motorcycle (Admin Scheduled)'
+            setSlotAvailabilityDetail({ hasTdc, hasPdc: true, tdcLabel, pdcLabel })
+            setHasAvailableSlots(hasTdc)
+            return
+          }
 
           const hasPdc = Array.isArray(allSlots) && allSlots.some(s => {
             if (s.type?.toLowerCase() !== 'pdc') return false
@@ -445,6 +546,123 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   }
 
   const filteredPackages = getFilteredPackages()
+  const regularPackages = filteredPackages.filter(pkg => String(pkg.category || '').toLowerCase() !== 'promo')
+  const promoBundlePackages = filteredPackages.filter(pkg => String(pkg.category || '').toLowerCase() === 'promo')
+
+  const getPriceDisplay = (pkg, dash = ' - ') => {
+    if (pkg.priceNote) return pkg.priceNote
+    if (pkg.typeOptions && pkg.typeOptions.length > 0) {
+      if (pkg.typeOptions.length === 1) return `₱${Number(pkg.typeOptions[0].price || 0).toLocaleString()}`
+      const minPrice = Math.min(...pkg.typeOptions.map(o => Number(o.price || 0)))
+      const maxPrice = Math.max(...pkg.typeOptions.map(o => Number(o.price || 0)))
+      return minPrice === maxPrice
+        ? `₱${minPrice.toLocaleString()}`
+        : `₱${minPrice.toLocaleString()}${dash}₱${maxPrice.toLocaleString()}`
+    }
+    return `₱${Number(pkg.price || 0).toLocaleString()}`
+  }
+
+  const renderMobileCourseCards = (items) => (
+    <div className="flex flex-col gap-4">
+      {items.map((pkg) => (
+        <div
+          key={pkg.id}
+          className={`bg-white rounded-2xl shadow-md border border-gray-100 p-4 flex flex-col gap-3 active:scale-[0.99] transition-all ${pkg.popular ? 'border-l-4 border-l-[#F3B74C]' : ''}`}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <button
+              className="text-left text-base font-bold text-[#2157da] hover:underline flex-1"
+              onClick={() => handleViewCourse(pkg)}
+            >
+              {pkg.name}
+            </button>
+            {pkg.popular && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3B74C] text-[#2157da] shadow-sm whitespace-nowrap flex-shrink-0 mt-0.5">
+                BEST SELLER
+              </span>
+            )}
+          </div>
+          <div className="flex items-center justify-between border-t border-gray-100 pt-3">
+            <div className="flex items-center gap-1.5 text-gray-500 text-sm">
+              <span>⏱</span>
+              <span className="font-medium">{pkg.duration}</span>
+            </div>
+            <span className="text-[#2157da] font-black text-lg">{getPriceDisplay(pkg, ' – ')}</span>
+          </div>
+          <button
+            onClick={() => handleViewCourse(pkg)}
+            className={`w-full py-2.5 text-sm font-bold rounded-xl transition-all active:scale-95 ${pkg.popular ? 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b]' : 'bg-[#2157da] text-white hover:bg-[#1a3a8a]'}`}
+          >
+            Select Course
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+
+  const renderDesktopCourseTable = (items) => (
+    <div className="bg-white rounded-lg shadow-md overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse min-w-[600px]">
+          <thead>
+            <tr className="bg-[#2157da] text-white">
+              <th className="py-4 px-6 font-semibold text-sm">Course Details</th>
+              <th className="py-4 px-6 font-semibold text-sm text-center whitespace-nowrap">Duration</th>
+              <th className="py-4 px-6 font-semibold text-sm text-right whitespace-nowrap">Price</th>
+              <th className="py-4 px-6 font-semibold text-sm text-center">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {items.map((pkg) => (
+              <tr
+                key={pkg.id}
+                className={`hover:bg-blue-50 transition-colors ${pkg.popular ? 'bg-orange-50/30' : ''}`}
+              >
+                <td className="py-4 px-6 align-middle">
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <h3
+                        className="text-sm sm:text-base font-bold text-[#2157da] cursor-pointer hover:underline"
+                        onClick={() => handleViewCourse(pkg)}
+                      >
+                        {pkg.name}
+                      </h3>
+                      {pkg.popular && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3B74C] text-[#2157da] shadow-sm whitespace-nowrap">
+                          BEST SELLER
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-600">
+                      <ul className="flex gap-4 list-disc list-inside">
+                        {pkg.features.slice(0, 2).map((feature, idx) => (
+                          <li key={idx} className="truncate max-w-[200px] lg:max-w-xs" title={feature}>{feature}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </td>
+                <td className="py-4 px-6 text-center text-sm font-medium text-gray-700 align-middle whitespace-nowrap">
+                  {pkg.duration}
+                </td>
+                <td className="py-4 px-6 text-right font-black text-gray-800 text-base sm:text-lg align-middle whitespace-nowrap">
+                  {getPriceDisplay(pkg)}
+                </td>
+                <td className="py-4 px-6 text-center align-middle">
+                  <button
+                    onClick={() => handleViewCourse(pkg)}
+                    className={`inline-flex items-center justify-center px-6 py-2 border border-transparent text-sm font-bold rounded-md shadow-sm transition-all active:scale-95 whitespace-nowrap ${pkg.popular ? 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b]' : 'bg-[#2157da] text-white hover:bg-[#1a3a8a]'}`}
+                  >
+                    Select
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
 
   let calcBasePrice = 0;
   let calcDiscountRate = 0;
@@ -722,19 +940,24 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
 
               {/* Action Buttons */}
               <div className="space-y-3 mb-8 relative">
+                {(() => {
+                  const isOnlineTdc = isSelectedOnlineTdc()
+                  return (
                 <button
                   onClick={handleAddToCartFromDetail}
                   className="w-full py-3 border border-gray-800 text-gray-800 rounded-md font-medium hover:bg-gray-800 hover:text-white transition-all text-sm active:scale-95"
                 >
                   Add to cart
                 </button>
+                  )
+                })()}
                 <button
                   onClick={handleEnrollNow}
-                  disabled={availabilityLoading || (!hasAvailableSlots && !!preSelectedBranch)}
+                  disabled={availabilityLoading || (!hasAvailableSlots && !!preSelectedBranch && !isSelectedOnlineTdc())}
                   className={`w-full py-3 rounded-md font-bold transition-all text-sm uppercase ${
                     availabilityLoading
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : !hasAvailableSlots && preSelectedBranch
+                      : !hasAvailableSlots && preSelectedBranch && !isSelectedOnlineTdc()
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : preSelectedBranch
                           ? 'bg-[#F3B74C] text-gray-800 hover:bg-[#e1a63b]'
@@ -743,13 +966,15 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                 >
                   {availabilityLoading
                     ? 'Checking availability...'
-                    : !hasAvailableSlots && preSelectedBranch
+                    : !hasAvailableSlots && preSelectedBranch && !isSelectedOnlineTdc()
                       ? 'No Available Slots'
-                      : preSelectedBranch ? 'ENROLL NOW' : 'SELECT BRANCH TO ENROLL'}
+                      : preSelectedBranch
+                        ? (isSelectedOnlineTdc() ? 'PROCEED TO PAYMENT' : 'ENROLL NOW')
+                        : 'SELECT BRANCH TO ENROLL'}
                 </button>
 
                 {/* Slot availability detail note — shown when a course has no slots */}
-                {!availabilityLoading && !hasAvailableSlots && preSelectedBranch && (
+                {!availabilityLoading && !hasAvailableSlots && preSelectedBranch && !isSelectedOnlineTdc() && (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 mt-1">
                     <div className="flex items-start gap-2">
                       <svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
@@ -779,16 +1004,6 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
               <div className="space-y-4 text-sm leading-relaxed">
                 <p className="text-gray-700">{selectedCourse.description}</p>
                 <p className="text-gray-600">{selectedCourse.contact}</p>
-
-                {/* B1/B2 VAN/L300 Notice */}
-                {selectedCourse && (selectedCourse.name.toLowerCase().includes('b1') || selectedCourse.name.toLowerCase().includes('b2') || selectedCourse.name.toLowerCase().includes('van') || selectedCourse.name.toLowerCase().includes('l300')) && (
-                  <div className="bg-blue-50 border-l-4 border-[#2157da] p-4 my-4 rounded-r-md">
-                    <p className="text-[#2157da] font-medium text-sm">
-                      <span className="font-bold mr-1">Note:</span>
-                      For Practical Driving Course (PDC) - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.
-                    </p>
-                  </div>
-                )}
 
                 {/* A1 Tricycle Notice */}
                 {selectedCourse && (selectedCourse.name.toLowerCase().includes('a1') || selectedCourse.name.toLowerCase().includes('tricycle')) && (
@@ -921,138 +1136,39 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
             <p className="text-gray-500 mt-2">Please check back later.</p>
           </div>
         ) : (
-        <div>
+        <div className="space-y-8">
           {isMobileScreen ? (
-            /* Mobile: Card layout */
-            <div className="flex flex-col gap-4">
-              {filteredPackages.map((pkg) => {
-                const priceDisplay = (() => {
-                  if (pkg.priceNote) return pkg.priceNote;
-                  if (pkg.typeOptions && pkg.typeOptions.length > 0) {
-                    if (pkg.typeOptions.length === 1) return `₱${Number(pkg.typeOptions[0].price || 0).toLocaleString()}`;
-                    const minPrice = Math.min(...pkg.typeOptions.map(o => Number(o.price || 0)));
-                    const maxPrice = Math.max(...pkg.typeOptions.map(o => Number(o.price || 0)));
-                    return minPrice === maxPrice
-                      ? `₱${minPrice.toLocaleString()}`
-                      : `₱${minPrice.toLocaleString()} – ₱${maxPrice.toLocaleString()}`;
-                  }
-                  return `₱${Number(pkg.price || 0).toLocaleString()}`;
-                })();
+            <>
+              {regularPackages.length > 0 && (
+                <div>
+                  <h2 className="text-lg font-black text-[#1a3a8a] mb-3">Regular Courses</h2>
+                  {renderMobileCourseCards(regularPackages)}
+                </div>
+              )}
 
-                return (
-                  <div
-                    key={pkg.id}
-                    className={`bg-white rounded-2xl shadow-md border border-gray-100 p-4 flex flex-col gap-3 active:scale-[0.99] transition-all ${pkg.popular ? 'border-l-4 border-l-[#F3B74C]' : ''}`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <button
-                        className="text-left text-base font-bold text-[#2157da] hover:underline flex-1"
-                        onClick={() => handleViewCourse(pkg)}
-                      >
-                        {pkg.name}
-                      </button>
-                      {pkg.popular && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3B74C] text-[#2157da] shadow-sm whitespace-nowrap flex-shrink-0 mt-0.5">
-                          BEST SELLER
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between border-t border-gray-100 pt-3">
-                      <div className="flex items-center gap-1.5 text-gray-500 text-sm">
-                        <span>⏱</span>
-                        <span className="font-medium">{pkg.duration}</span>
-                      </div>
-                      <span className="text-[#2157da] font-black text-lg">{priceDisplay}</span>
-                    </div>
-                    <button
-                      onClick={() => handleViewCourse(pkg)}
-                      className={`w-full py-2.5 text-sm font-bold rounded-xl transition-all active:scale-95 ${pkg.popular ? 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b]' : 'bg-[#2157da] text-white hover:bg-[#1a3a8a]'}`}
-                    >
-                      Select Course
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+              {promoBundlePackages.length > 0 && (
+                <div>
+                  <h2 className="text-lg font-black text-[#7c2d12] mb-3">Promo Bundle Package</h2>
+                  {renderMobileCourseCards(promoBundlePackages)}
+                </div>
+              )}
+            </>
           ) : (
-            /* Desktop: Table layout */
-            <div className="bg-white rounded-lg shadow-md overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[600px]">
-                  <thead>
-                    <tr className="bg-[#2157da] text-white">
-                      <th className="py-4 px-6 font-semibold text-sm">Course Details</th>
-                      <th className="py-4 px-6 font-semibold text-sm text-center whitespace-nowrap">Duration</th>
-                      <th className="py-4 px-6 font-semibold text-sm text-right whitespace-nowrap">Price</th>
-                      <th className="py-4 px-6 font-semibold text-sm text-center">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {filteredPackages.map((pkg) => (
-                      <tr
-                        key={pkg.id}
-                        className={`hover:bg-blue-50 transition-colors ${pkg.popular ? 'bg-orange-50/30' : ''}`}
-                      >
-                        <td className="py-4 px-6 align-middle">
-                          <div className="flex flex-col">
-                            <div className="flex items-center gap-2 flex-wrap mb-1">
-                              <h3
-                                className="text-sm sm:text-base font-bold text-[#2157da] cursor-pointer hover:underline"
-                                onClick={() => handleViewCourse(pkg)}
-                              >
-                                {pkg.name}
-                              </h3>
-                              {pkg.popular && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3B74C] text-[#2157da] shadow-sm whitespace-nowrap">
-                                  BEST SELLER
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-xs text-gray-600">
-                              <ul className="flex gap-4 list-disc list-inside">
-                                {pkg.features.slice(0, 2).map((feature, idx) => (
-                                  <li key={idx} className="truncate max-w-[200px] lg:max-w-xs" title={feature}>{feature}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-4 px-6 text-center text-sm font-medium text-gray-700 align-middle whitespace-nowrap">
-                          {pkg.duration}
-                        </td>
-                        <td className="py-4 px-6 text-right font-black text-gray-800 text-base sm:text-lg align-middle whitespace-nowrap">
-                          {pkg.priceNote ? (
-                            <div className="text-[15px]">{pkg.priceNote}</div>
-                          ) : (
-                            <div>
-                              {(() => {
-                                if (pkg.typeOptions && pkg.typeOptions.length > 0) {
-                                  if (pkg.typeOptions.length === 1) return `₱${Number(pkg.typeOptions[0].price || 0).toLocaleString()}`;
-                                  const minPrice = Math.min(...pkg.typeOptions.map(o => Number(o.price || 0)));
-                                  const maxPrice = Math.max(...pkg.typeOptions.map(o => Number(o.price || 0)));
-                                  return minPrice === maxPrice
-                                    ? `₱${minPrice.toLocaleString()}`
-                                    : `₱${minPrice.toLocaleString()} - ₱${maxPrice.toLocaleString()}`;
-                                }
-                                return `₱${Number(pkg.price || 0).toLocaleString()}`;
-                              })()}
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-4 px-6 text-center align-middle">
-                          <button
-                            onClick={() => handleViewCourse(pkg)}
-                            className={`inline-flex items-center justify-center px-6 py-2 border border-transparent text-sm font-bold rounded-md shadow-sm transition-all active:scale-95 whitespace-nowrap ${pkg.popular ? 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b]' : 'bg-[#2157da] text-white hover:bg-[#1a3a8a]'}`}
-                          >
-                            Select
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <>
+              {regularPackages.length > 0 && (
+                <section>
+                  <h2 className="text-xl font-black text-[#1a3a8a] mb-3">Regular Courses</h2>
+                  {renderDesktopCourseTable(regularPackages)}
+                </section>
+              )}
+
+              {promoBundlePackages.length > 0 && (
+                <section>
+                  <h2 className="text-xl font-black text-[#7c2d12] mb-3">Promo Bundle Package</h2>
+                  {renderDesktopCourseTable(promoBundlePackages)}
+                </section>
+              )}
+            </>
           )}
         </div>
         )}

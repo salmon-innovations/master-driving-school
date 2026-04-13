@@ -549,6 +549,11 @@
     color: var(--primary-color);
 }
 
+.notification-btn.has-online-tdc-alert {
+    border-color: rgba(245, 158, 11, 0.55);
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
+}
+
 .notification-badge {
     position: absolute;
     top: 10px;
@@ -559,6 +564,21 @@
     border-radius: 50%;
     border: 2px solid var(--card-bg);
     animation: pulse-notify 2s infinite;
+}
+
+.notification-badge.online-tdc-badge {
+    background-color: #f59e0b;
+}
+
+.online-tdc-pill {
+    margin-left: 8px;
+    background: #fffbeb;
+    color: #92400e;
+    border: 1px solid #fde68a;
+    border-radius: 99px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 2px 8px;
 }
 
 @keyframes pulse-notify {
@@ -686,6 +706,14 @@
     background: var(--primary-color);
 }
 
+.notification-item.online-tdc-notif {
+    background: #fffbeb;
+}
+
+.notification-item.online-tdc-notif.unread::after {
+    background: #f59e0b;
+}
+
 .status-dot {
     width: 10px;
     height: 10px;
@@ -712,6 +740,10 @@
 
 .status-dot.reschedule {
     background: #8b5cf6;
+}
+
+.status-dot.online-tdc {
+    background: #f59e0b;
 }
 
 .notify-content {
@@ -745,6 +777,23 @@
     margin: 0;
     line-height: 1.5;
     text-align: left;
+}
+
+.quick-open-link {
+    margin-top: 8px;
+    border: none;
+    background: transparent;
+    color: #b45309;
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.quick-open-link:hover {
+    color: #92400e;
 }
 
 .delete-notify {
@@ -2296,6 +2345,15 @@ input:checked+.slider:before {
 .card-icon-box.reschedule {
     background: rgba(139, 92, 246, 0.1);
     color: #8b5cf6;
+}
+
+.card-icon-box.online-tdc {
+    background: rgba(245, 158, 11, 0.12);
+    color: #b45309;
+}
+
+.notify-card-lux.online-tdc.unread .card-indicator {
+    background: #f59e0b;
 }
 
 .card-main {

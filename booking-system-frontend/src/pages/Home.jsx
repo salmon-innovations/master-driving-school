@@ -13,8 +13,8 @@ function Home({ onNavigate, isLoggedIn }) {
   // Use leading slash for public folder
   const slides = [
     { src: '/images/slider1.png', alt: 'Master Driving School - Legit at Sulit' },
-    { src: '/images/slider2.jpg', alt: 'Master Driving School - Christmas Promo' },
-    { src: '/images/slider3.jpg', alt: 'Master Driving School - Learn the Master Way' }
+    { src: '/images/slider2.png', alt: 'Master Driving School - Christmas Promo' },
+    { src: '/images/slider3.png', alt: 'Master Driving School - Learn the Master Way' }
   ]
 
   useEffect(() => {
@@ -27,7 +27,7 @@ function Home({ onNavigate, isLoggedIn }) {
         if (response.success) {
           const fetched = response.testimonials || [];
           const featured = fetched.filter(t => t.isFeatured);
-          
+
           if (featured.length > 0) {
             setTestimonials(featured.slice(0, 5));
           } else {
@@ -173,16 +173,6 @@ function Home({ onNavigate, isLoggedIn }) {
 
         {/* Gradient Overlay for better text visibility */}
         <div className="absolute inset-0 bg-black/20 z-20"></div>
-
-        {/* Enroll Now Button Overlay */}
-        <div className="absolute inset-0 flex items-center justify-center z-30">
-          <button
-            onClick={() => handleNavigate('branches')}
-            className="px-6 sm:px-10 md:px-12 py-3 sm:py-4 md:py-5 bg-[#F3B74C] text-[#2157da] font-bold text-base sm:text-lg md:text-xl rounded-full hover:bg-[#e1a63b] transition-all transform hover:scale-105 shadow-2xl"
-          >
-            Enroll Now
-          </button>
-        </div>
 
         {/* Navigation Dots */}
         <div className="absolute bottom-4 sm:bottom-8 left-0 right-0 flex justify-center space-x-2 sm:space-x-3 z-30">

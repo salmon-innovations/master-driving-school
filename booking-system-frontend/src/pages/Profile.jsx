@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { authAPI, schedulesAPI, starpayAPI, testimonialsAPI, MEDIA_BASE_URL } from '../services/api'
 import { useNotification } from '../context/NotificationContext'
 import { resolveAvatar } from '../utils/avatarUtils'
+import { getPaymentAutoCancelMinutes } from '../utils/systemSettings'
 import NationalitySelect from '../components/NationalitySelect'
 
 // Helper component for detail items
@@ -59,6 +60,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
   const [payLoading, setPayLoading] = useState(false)
   const [payToast, setPayToast] = useState(null)
   const [pendingNow, setPendingNow] = useState(Date.now())
+  const [paymentAutoCancelMinutes, setPaymentAutoCancelMinutes] = useState(() => getPaymentAutoCancelMinutes())
   const [expandedBundles, setExpandedBundles] = useState({})
 
   // Reschedule fee payment state
@@ -112,11 +114,21 @@ function Profile({ onNavigate, setIsLoggedIn }) {
   }, [courseHistory])
 
   useEffect(() => {
+    const syncSettings = () => setPaymentAutoCancelMinutes(getPaymentAutoCancelMinutes())
+    window.addEventListener('storage', syncSettings)
+    window.addEventListener('mds-admin-settings-updated', syncSettings)
+    return () => {
+      window.removeEventListener('storage', syncSettings)
+      window.removeEventListener('mds-admin-settings-updated', syncSettings)
+    }
+  }, [])
+
+  useEffect(() => {
     const now = Date.now()
     const expiredPending = courseHistory.filter((item) => {
       const rowStatus = String(item?.booking_status || item?.enrollment_status || '').toLowerCase()
       const enrolledAtMs = item?.enrolled_at ? new Date(item.enrolled_at).getTime() : NaN
-      const isExpired = Number.isFinite(enrolledAtMs) && now >= enrolledAtMs + (20 * 60 * 1000)
+      const isExpired = Number.isFinite(enrolledAtMs) && now >= enrolledAtMs + (paymentAutoCancelMinutes * 60 * 1000)
       return rowStatus === 'pending' && isExpired && item?.enrollment_id && !autoCancelingRef.current.has(item.enrollment_id)
     })
 
@@ -146,7 +158,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
         fetchUserData()
       }
     })()
-  }, [courseHistory, pendingNow, showNotification])
+  }, [courseHistory, pendingNow, showNotification, paymentAutoCancelMinutes])
 
   const fetchUserData = async () => {
     try {
@@ -768,7 +780,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                       const statusLabel = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1)
                       const isPendingBooking = bookingStatus === 'pending'
                       const pendingExpiresAtMs = isPendingBooking && enrollment?.enrolled_at
-                        ? (new Date(enrollment.enrolled_at).getTime() + (20 * 60 * 1000))
+                        ? (new Date(enrollment.enrolled_at).getTime() + (paymentAutoCancelMinutes * 60 * 1000))
                         : null
                       const pendingSecondsLeft = Number.isFinite(pendingExpiresAtMs)
                         ? Math.max(0, Math.floor((pendingExpiresAtMs - pendingNow) / 1000))
@@ -1080,14 +1092,15 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                             const normalizedPaymentType = String(enrollment.payment_status || '').toLowerCase()
                             const coursePriceNum = Math.max(0, Number(enrollment.course_price || 0))
                             const amountPaidNum = Math.max(0, Number(enrollment.amount_paid || 0))
+                            const pendingAmountDue = amountPaidNum > 0 ? amountPaidNum : coursePriceNum
                             const balanceDue = Math.max(0, coursePriceNum - amountPaidNum)
-                            const collectableFallbackDue = normalizedPaymentType.includes('downpayment')
+                            const partialPaymentFallbackDue = normalizedPaymentType.includes('downpayment')
                               ? Math.max(0, amountPaidNum)
                               : coursePriceNum
-                            const payableBalanceDue = balanceDue > 0 ? balanceDue : collectableFallbackDue
+                            const payableBalanceDue = balanceDue > 0 ? balanceDue : partialPaymentFallbackDue
                             const isPendingForPay = rowStatus === 'pending' && (pendingSecondsLeft == null || pendingSecondsLeft > 0)
-                            const isCollectableForPay = rowStatus === 'collectable' && payableBalanceDue > 0
-                            const canPay = isPendingForPay || isCollectableForPay
+                            const isPartialPaymentForPay = (rowStatus === 'partial_payment' || rowStatus === 'partial payment') && payableBalanceDue > 0
+                            const canPay = isPendingForPay || isPartialPaymentForPay
                             return canPay ? (
                               <div className="px-5 py-4 bg-orange-50 border-t border-orange-100">
                                 <div className="flex items-center justify-between gap-4">
@@ -1095,7 +1108,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                                     <p className="text-[11px] text-orange-600 font-semibold uppercase tracking-wide">
                                       {isPendingForPay ? 'Pending Payment' : 'Remaining Balance'}
                                     </p>
-                                    <p className="text-xl font-extrabold text-orange-500">₱{(isPendingForPay ? coursePriceNum : payableBalanceDue).toLocaleString()}</p>
+                                    <p className="text-xl font-extrabold text-orange-500">₱{(isPendingForPay ? pendingAmountDue : payableBalanceDue).toLocaleString()}</p>
                                   </div>
                                   <button
                                     onClick={() => {
@@ -1105,6 +1118,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                                         courseName,
                                         coursePrice: coursePriceNum,
                                         amountPaid: amountPaidNum,
+                                        pendingAmount: pendingAmountDue,
                                         isPending: isPendingForPay,
                                         paymentStatus: enrollment.payment_status,
                                         bookingNotes: enrollment.booking_notes,
@@ -1114,7 +1128,9 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                                         type: row.course_type || row.slot_type || null,
                                       })),
                                       })
-                                      setPayTypeChoice(isPendingForPay ? 'downpayment' : 'full')
+                                      setPayTypeChoice(isPendingForPay
+                                        ? (normalizedPaymentType.includes('downpayment') ? 'downpayment' : 'full')
+                                        : 'full')
                                       setPayMethod('StarPay')
                                     }}
                                     className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold text-sm hover:shadow-md transition-all shrink-0"
@@ -1126,7 +1142,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                                         : 'Pay Balance via StarPay')}
                                   </button>
                                 </div>
-                                {isCollectableForPay && (
+                                      {isPartialPaymentForPay && (
                                   <p className="mt-2 text-[11px] text-orange-700 font-medium">
                                     Note: You can also pay walk-in on the day of your first face-to-face lesson.
                                   </p>
@@ -1226,7 +1242,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
           <div className="p-6">
             {(() => {
               const selectedAmount = payModal.isPending
-                ? (payTypeChoice === 'downpayment' ? Math.max(0, (payModal.coursePrice || 0) * 0.5) : Math.max(0, payModal.coursePrice || 0))
+                ? Math.max(0, Number(payModal.pendingAmount ?? payModal.amountPaid ?? payModal.coursePrice ?? 0))
                 : Math.max(0, payModal.balanceDue || 0)
               const modalMeta = parseBookingNotes(payModal.bookingNotes)
               const modalBundleCourses = Array.isArray(payModal.bundleCourses) ? payModal.bundleCourses : []
@@ -1254,10 +1270,12 @@ function Profile({ onNavigate, setIsLoggedIn }) {
                 : [{ name: payModal.courseName, type: null }]
               const normalizedStatus = String(payModal.paymentStatus || '').toLowerCase()
               const isDownpaymentFlow = payModal.isPending
-                ? payTypeChoice === 'downpayment'
+                ? normalizedStatus.includes('downpayment')
                 : normalizedStatus.includes('downpayment')
               const totalAssessment = payModal.isPending
-                ? Math.max(0, Number(payModal.coursePrice || 0))
+                ? (isDownpaymentFlow
+                  ? Math.max(0, Number(payModal.pendingAmount ?? payModal.amountPaid ?? payModal.coursePrice ?? 0)) * 2
+                  : Math.max(0, Number(payModal.pendingAmount ?? payModal.amountPaid ?? payModal.coursePrice ?? 0)))
                 : Math.max(0, Number(payModal.amountPaid || 0) + Number(payModal.balanceDue || 0), Number(payModal.coursePrice || 0))
               const paidSoFar = payModal.isPending ? 0 : Math.max(0, Number(payModal.amountPaid || 0))
               const remainingAfterThis = Math.max(0, totalAssessment - (paidSoFar + selectedAmount))

@@ -428,11 +428,11 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
         autoVerifyUsers: true,
         sessionTimeout: 60,
         enableNotifications: true,
+        tdcOnlineAlerts: true,
         compactView: false,
         // Booking rules
-        maxStudentsPerSlot: 10,
-        minBookingAdvanceDays: 1,
-        autoCancelDays: 7,
+        maxStudentsPerSlot: 15,
+        paymentAutoCancelMinutes: 20,
         allowWalkIn: true,
         // Payment settings
         enableCash: true,
@@ -441,7 +441,16 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
     const loadSettings = () => {
         try {
             const saved = localStorage.getItem(SETTINGS_KEY);
-            return saved ? { ...defaultSettings, ...JSON.parse(saved) } : defaultSettings;
+            if (!saved) return defaultSettings;
+
+            const parsed = JSON.parse(saved);
+            return {
+                ...defaultSettings,
+                ...parsed,
+                // These are intentionally fixed values in current behavior.
+                maxStudentsPerSlot: 15,
+                paymentAutoCancelMinutes: 20,
+            };
         } catch { return defaultSettings; }
     };
     const [generalSettings, setGeneralSettings] = useState(loadSettings);
@@ -589,6 +598,7 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
         setGeneralSettings(prev => {
             const updated = { ...prev, [key]: value };
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
+            window.dispatchEvent(new CustomEvent('mds-admin-settings-updated', { detail: updated }));
             return updated;
         });
         showNotification('Setting updated', 'success');
@@ -597,6 +607,7 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
     const handleSaveGeneral = (e) => {
         e.preventDefault();
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(generalSettings));
+        window.dispatchEvent(new CustomEvent('mds-admin-settings-updated', { detail: generalSettings }));
         showNotification('Settings saved successfully!', 'success');
     };
 
@@ -759,6 +770,7 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
                         setSettings={setGeneralSettings}
                         onSave={handleSaveGeneral}
                         onSettingChange={handleSettingChange}
+                        isSuperAdmin={isSuperAdmin}
                     />
                 )}
                 {activeTab === 'coursetypes' && (

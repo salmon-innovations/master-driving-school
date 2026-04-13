@@ -10,6 +10,27 @@ function VerifyEmail({ onNavigate, setIsLoggedIn, userEmail }) {
   const [resending, setResending] = useState(false)
   const [countdown, setCountdown] = useState(0)
 
+  const getPostVerifyRedirect = () => {
+    const parsePayload = (raw) => {
+      if (!raw) return null
+      try {
+        const parsed = JSON.parse(raw)
+        if (!parsed || typeof parsed !== 'object') return null
+        return parsed
+      } catch {
+        return null
+      }
+    }
+
+    return parsePayload(sessionStorage.getItem('postVerifyRedirect'))
+      || parsePayload(localStorage.getItem('postVerifyRedirect'))
+  }
+
+  const clearPostVerifyRedirect = () => {
+    sessionStorage.removeItem('postVerifyRedirect')
+    localStorage.removeItem('postVerifyRedirect')
+  }
+
   useEffect(() => {
     if (countdown > 0) {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000)
@@ -74,8 +95,36 @@ function VerifyEmail({ onNavigate, setIsLoggedIn, userEmail }) {
       // Update login state
       setIsLoggedIn(true)
 
-      // Navigate to booking page
-      onNavigate('payment')
+      const redirectContext = getPostVerifyRedirect()
+      const nextRoute = redirectContext?.next
+      if (nextRoute === 'payment') {
+        clearPostVerifyRedirect()
+        onNavigate('payment')
+        return
+      }
+
+      if (nextRoute === 'schedule') {
+        clearPostVerifyRedirect()
+        onNavigate('schedule')
+        return
+      }
+
+      const savedScheduleSelection = localStorage.getItem('scheduleSelection')
+      if (savedScheduleSelection) {
+        try {
+          const parsedSchedule = JSON.parse(savedScheduleSelection)
+          if (parsedSchedule?.isOnlineTdcNoSchedule) {
+            clearPostVerifyRedirect()
+            onNavigate('payment')
+            return
+          }
+        } catch {
+          // Ignore invalid saved schedule payload.
+        }
+      }
+
+      clearPostVerifyRedirect()
+      onNavigate('schedule')
     } catch (error) {
       setError(error.message || 'Invalid verification code')
       setCode(['', '', '', '', '', ''])

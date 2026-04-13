@@ -5,7 +5,6 @@ const path = require('path');
 const fs = require('fs');
 const {
   register,
-  guestCheckout,
   login,
   logout,
   getProfile,
@@ -48,7 +47,6 @@ const avatarUpload = multer({
 
 // Public routes
 router.post('/register', register);
-router.post('/guest-checkout', guestCheckout);
 router.post('/login', login);
 router.post('/verify-email', verifyEmail);
 router.post('/resend-code', resendVerificationCode);

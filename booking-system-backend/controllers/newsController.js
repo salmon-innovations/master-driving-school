@@ -110,11 +110,11 @@ const broadcastNews = async (req, res) => {
         }
         const news = newsResult.rows[0];
 
-        // Fetch all active students/guests/walk-ins who have emails
+        // Fetch all active students and walk-ins who have emails
         const usersResult = await pool.query(`
             SELECT email, first_name 
             FROM users 
-            WHERE role IN ('student', 'walkin_student', 'guest') 
+            WHERE role IN ('student', 'walkin_student') 
             AND email IS NOT NULL 
             AND status = 'active'
         `);

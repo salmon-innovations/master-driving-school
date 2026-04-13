@@ -328,7 +328,7 @@ const CRMManagement = () => {
                                         </td>
                                     ) : null}
                                     <td>
-                                        <span className={`status-pill ${(student.status || 'active').toLowerCase() === 'active' ? 'success' : 'collectable'}`}>
+                                        <span className={`status-pill ${(student.status || 'active').toLowerCase() === 'active' ? 'success' : 'partial-payment'}`}>
                                             {student.status || 'Active'}
                                         </span>
                                     </td>
@@ -403,7 +403,7 @@ const CRMManagement = () => {
                                                 </div>
                                             </div>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                <span className={`status-pill ${booking.status === 'completed' ? 'success' : booking.status === 'cancelled' ? 'failed' : 'collectable'}`}>
+                                                <span className={`status-pill ${booking.status === 'completed' ? 'success' : booking.status === 'cancelled' ? 'failed' : 'partial-payment'}`}>
                                                     {booking.status}
                                                 </span>
                                                 {booking.status !== 'completed' && booking.status !== 'cancelled' && (

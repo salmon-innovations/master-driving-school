@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './css/sale.css';
 import { adminAPI, coursesAPI, branchesAPI, authAPI } from '../services/api';
+import { normalizeNotificationText } from '../utils/notificationText';
 const logo = `${window.location.origin}/images/Master-logo.png`;
 import Pagination from './components/Pagination';
 import {
@@ -25,24 +26,41 @@ const parseNotesJson = (rawNotes) => {
     }
 };
 
+const formatCourseWithType = (name = '', type = '') => {
+    const cleanName = String(name || '').trim();
+    const cleanType = String(type || '').trim();
+    const upperName = cleanName.toUpperCase();
+    const hasEmbeddedPdcType = upperName.includes('PRACTICAL DRIVING COURSE')
+        && (upperName.includes('B1 - VAN/B2 - L300') || upperName.includes('A1 - TRICYCLE'));
+    if (hasEmbeddedPdcType) return cleanName || 'Course';
+    if (!cleanType) return cleanName || 'Course';
+    const typeLabel = cleanType.toLowerCase() === 'f2f'
+        ? 'F2F'
+        : `${cleanType.charAt(0).toUpperCase()}${cleanType.slice(1)}`;
+    return `${cleanName || 'Course'} (${typeLabel})`;
+};
+
 const getCourseSummaryFromTransaction = (txn) => {
     const notesJson = parseNotesJson(txn?.notes);
     const list = Array.isArray(notesJson?.courseList) ? notesJson.courseList.filter(Boolean) : [];
     if (list.length > 0) {
+        const labels = [...new Set(list.map((c) => formatCourseWithType(c?.name, c?.type)).filter(Boolean))];
         const names = [...new Set(list.map((c) => c?.name).filter(Boolean))];
-        const shortLabel = names.length > 1
-            ? `${names.length} courses: ${names.slice(0, 2).join(', ')}${names.length > 2 ? ` +${names.length - 2} more` : ''}`
-            : (names[0] || txn?.course_name || 'N/A');
+        const shortLabel = labels.length > 1
+            ? `${labels.length} courses: ${labels.slice(0, 2).join(', ')}${labels.length > 2 ? ` +${labels.length - 2} more` : ''}`
+            : (labels[0] || txn?.course_name || 'N/A');
         return {
             courseSummary: shortLabel,
-            courseSummaryFull: names.join(', '),
+            courseSummaryFull: labels.join(', '),
             courseCount: names.length || 1,
             courseNames: names,
         };
     }
+
+    const fallbackLabel = formatCourseWithType(txn?.course_name || 'N/A', txn?.course_type || '');
     return {
-        courseSummary: txn?.course_name || 'N/A',
-        courseSummaryFull: txn?.course_name || 'N/A',
+        courseSummary: fallbackLabel,
+        courseSummaryFull: fallbackLabel,
         courseCount: 1,
         courseNames: [txn?.course_name || 'N/A'],
     };
@@ -67,7 +85,41 @@ const getCourseSummaryFromBooking = (booking) => {
 
 const isRecordedPaymentStatus = (status) => {
     const value = String(status || '').toLowerCase();
-    return value === 'success' || value === 'paid' || value === 'collectable';
+    return value === 'success'
+        || value === 'paid'
+        || value === 'partial_payment'
+        || value === 'partial payment'
+        || value === 'partial-payment';
+};
+
+const getPaymentStatusKey = (status) => {
+    const value = String(status || '').toLowerCase().trim();
+    if (value === 'success' || value === 'paid' || value === 'confirmed' || value === 'completed') return 'success';
+    if (value === 'partial_payment' || value === 'partial payment' || value === 'partial-payment') return 'partial-payment';
+    if (value === 'failed') return 'failed';
+    if (value === 'cancelled') return 'cancelled';
+    return 'partial-payment';
+};
+
+const getPaymentStatusLabel = (statusKey) => {
+    if (statusKey === 'success') return 'Success';
+    if (statusKey === 'failed') return 'Failed';
+    if (statusKey === 'cancelled') return 'Cancelled';
+    return 'Partial Payment';
+};
+
+const toDateLabel = (raw) => {
+    if (!raw) return 'N/A';
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return 'N/A';
+    return d.toLocaleString('en-US', {
+        month: 'numeric',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+    });
 };
 
 const isCompletedPaymentStatus = (status) => {
@@ -75,19 +127,75 @@ const isCompletedPaymentStatus = (status) => {
     return value === 'success' || value === 'paid';
 };
 
+const resolveBookingAssessment = (booking = {}) => {
+    const notesJson = parseNotesJson(booking?.notes || '');
+    const paid = Math.max(0, Number(parseFloat(booking?.total_amount || 0).toFixed(2)));
+    const listedCoursePrice = Math.max(0, Number(parseFloat(booking?.course_price || 0).toFixed(2)));
+    const paymentType = String(booking?.payment_type || '').toLowerCase();
+
+    const notesCourseList = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
+    const notesCourseTotal = notesCourseList.reduce((sum, item) => {
+        return sum + Math.max(0, Number(item?.price ?? item?.amount ?? item?.coursePrice ?? 0));
+    }, 0);
+
+    const notesAddonList = Array.isArray(notesJson?.addonsDetailed) ? notesJson.addonsDetailed : [];
+    const notesAddonTotal = notesAddonList.reduce((sum, addon) => sum + Math.max(0, Number(addon?.price || 0)), 0);
+    const notesConvenience = Math.max(0, Number(notesJson?.convenienceFee || booking?.convenience_fee || 0));
+
+    const hasBundleInNotes = notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'TDC')
+        && notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'PDC');
+    const fallbackPromoBase = notesCourseTotal + notesAddonTotal + notesConvenience;
+    const fallbackPromoDiscount = hasBundleInNotes ? Number((fallbackPromoBase * 0.03).toFixed(2)) : 0;
+    const notesPromoRaw = Number(notesJson?.promoDiscount || booking?.promo_discount || 0);
+    const notesPromoDiscount = Math.max(0, notesPromoRaw > 0 ? notesPromoRaw : fallbackPromoDiscount);
+
+    const notesComputedTotal = Math.max(0, Number((notesCourseTotal + notesAddonTotal + notesConvenience - notesPromoDiscount).toFixed(2)));
+
+    const explicitNoteTotals = [
+        notesJson?.totalAmount,
+        notesJson?.grandTotal,
+        notesJson?.finalTotal,
+        notesJson?.assessedTotal,
+        notesJson?.payableAmount,
+        notesJson?.amountToPay,
+    ]
+        .map((v) => Number(v))
+        .filter((v) => Number.isFinite(v) && v > 0);
+
+    const baseFromBookingFields = Math.max(
+        0,
+        Number((listedCoursePrice + Math.max(0, Number(booking?.convenience_fee || 0)) - Math.max(0, Number(booking?.promo_discount || 0))).toFixed(2))
+    );
+
+    let assessed = 0;
+    if (explicitNoteTotals.length > 0) {
+        assessed = explicitNoteTotals[0];
+    } else if (notesComputedTotal > 0) {
+        assessed = notesComputedTotal;
+    } else if (baseFromBookingFields > 0) {
+        assessed = baseFromBookingFields;
+    } else if (listedCoursePrice > 0) {
+        assessed = listedCoursePrice;
+    } else if (paymentType.includes('down') && paid > 0) {
+        assessed = paid * 2;
+    } else {
+        assessed = paid;
+    }
+
+    const hasReliableAssessment = explicitNoteTotals.length > 0 || notesComputedTotal > 0 || baseFromBookingFields > 0 || listedCoursePrice > 0;
+    const rawDue = Math.max(0, Number(parseFloat(booking?.balance_due || 0).toFixed(2)));
+    if (!hasReliableAssessment && rawDue > 0) {
+        assessed = paid + rawDue;
+    }
+
+    assessed = Math.max(assessed, paid);
+    assessed = Number(assessed.toFixed(2));
+    const remaining = Math.max(0, Number((assessed - paid).toFixed(2)));
+    return { assessed, paid: Number(paid.toFixed(2)), remaining };
+};
+
 const getEffectiveBalanceDue = (booking = {}) => {
-    const rawDue = Number(parseFloat(booking?.balance_due || 0).toFixed(2));
-    if (rawDue > 0) return rawDue;
-
-    const paid = Number(parseFloat(booking?.total_amount || 0).toFixed(2));
-    const listedCoursePrice = Number(parseFloat(booking?.course_price || 0).toFixed(2));
-    const isDownpayment = String(booking?.payment_type || '').toLowerCase().includes('down');
-
-    const assessed = isDownpayment
-        ? Math.max(listedCoursePrice, paid * 2, paid)
-        : Math.max(listedCoursePrice, paid);
-
-    return Math.max(0, Number((assessed - paid).toFixed(2)));
+    return resolveBookingAssessment(booking).remaining;
 };
 
 const toCompactCourseLabel = (item = {}) => {
@@ -181,7 +289,7 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
     const subtotal = courseSubtotal + reviewerTotal + vehicleTipsTotal;
     const promoDiscount = hasBundle ? Number((((subtotal + convenienceFee) * promoPct) / 100).toFixed(2)) : 0;
     const netTotal = Number((subtotal + convenienceFee - promoDiscount).toFixed(2));
-    const remainingBalance = String(txn?.status || '').toLowerCase() === 'collectable'
+    const remainingBalance = getPaymentStatusKey(txn?.status) === 'partial-payment'
         ? Math.max(0, Number((netTotal - paidAmount).toFixed(2)))
         : 0;
 
@@ -213,11 +321,12 @@ const SalePayment = () => {
     const [transactions, setTransactions] = useState([]);
     const [allHistory, setAllHistory] = useState([]);
     const [unpaidBookings, setUnpaidBookings] = useState([]);
+    const [revenueData, setRevenueData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [financialStats, setFinancialStats] = useState({
         revenue: 0,
         completed: 0,
-        collectable: 0,
+        partialPayment: 0,
         refunds: 0
     });
 
@@ -252,11 +361,15 @@ const SalePayment = () => {
     const fetchTransactions = async () => {
         try {
             setLoading(true);
-            const [response, bookingsResponse] = await Promise.all([
+            const [response, bookingsResponse, revenueResponse] = await Promise.all([
                 adminAPI.getAllTransactions(100),
                 adminAPI.getAllBookings(null, 300),
+                adminAPI.getRevenueData(),
             ]);
-            let calculatedStats = { revenue: 0, completed: 0, collectable: 0, refunds: 0 };
+            if (revenueResponse && revenueResponse.success) {
+                setRevenueData(revenueResponse);
+            }
+            let calculatedStats = { revenue: 0, completed: 0, partialPayment: 0, refunds: 0 };
             const bookingsById = new Map(
                 (bookingsResponse?.success ? (bookingsResponse.bookings || []) : [])
                     .map((b) => [Number(b.id), b])
@@ -266,27 +379,39 @@ const SalePayment = () => {
                 const mappedTransactions = (response.transactions || []).map(t => {
                     const linkedBooking = bookingsById.get(Number(t.booking_id));
                     const { courseSummary, courseSummaryFull, courseCount, courseNames } = getCourseSummaryFromTransaction(t);
+                    const statusKey = getPaymentStatusKey(t.status);
+                    const paymentType = t.payment_type || linkedBooking?.payment_type || 'Full Payment';
+                    const isPartialPaymentFlow = statusKey === 'partial-payment' || String(paymentType || '').toLowerCase().includes('down');
+                    const firstPaymentRaw = linkedBooking?.created_at || t.transaction_date || null;
+                    const fullPaymentRaw = statusKey === 'success' ? (linkedBooking?.updated_at || t.transaction_date || null) : null;
                     return {
                         id: t.transaction_id || 'N/A',
                         booking_id: t.booking_id,
                         student: t.student_name || 'Unknown',
+                        studentEmail: linkedBooking?.student_email || 'N/A',
+                        studentContact: linkedBooking?.student_contact || 'N/A',
                         course: courseSummary,
                         courseFull: courseSummaryFull,
                         courseCount,
                         courseNames,
                         notes: t.notes || linkedBooking?.notes || null,
-                        paymentType: t.payment_type || linkedBooking?.payment_type || 'Full Payment',
+                        paymentType,
                         rawDate: t.transaction_date,
                         date: t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : 'N/A',
+                        firstPaymentDate: isPartialPaymentFlow ? toDateLabel(firstPaymentRaw) : toDateLabel(t.transaction_date),
+                        fullPaymentDate: isPartialPaymentFlow ? (fullPaymentRaw ? toDateLabel(fullPaymentRaw) : '-') : toDateLabel(t.transaction_date),
                         amount: `P ${parseFloat(t.amount || 0).toLocaleString()}`,
                         rawAmount: parseFloat(t.amount || 0),
                         method: t.payment_method || linkedBooking?.payment_method || 'N/A',
-                        status: t.status || 'Collectable',
+                        statusKey,
+                        status: getPaymentStatusLabel(statusKey),
                         branch: t.branch_name || 'Unknown',
                         searchIndex: [
                             t.transaction_id,
                             t.booking_id,
                             t.student_name,
+                            linkedBooking?.student_email,
+                            linkedBooking?.student_contact,
                             courseSummary,
                             (courseNames || []).join(' '),
                             t.payment_method,
@@ -311,9 +436,9 @@ const SalePayment = () => {
                     } else if (status === 'failed' || status === 'cancelled') {
                         acc.refunds += amt;
                     }
-                    // Collectable is now calculated from unpaid bookings
+                    // Partial Payment total is calculated from unpaid bookings.
                     return acc;
-                }, { revenue: 0, completed: 0, collectable: 0, refunds: 0 });
+                }, { revenue: 0, completed: 0, partialPayment: 0, refunds: 0 });
             }
 
             const unpaidResponse = await adminAPI.getUnpaidBookings(200); // Fetch more to get accurate total
@@ -333,8 +458,8 @@ const SalePayment = () => {
                 });
 
                 setUnpaidBookings(mappedUnpaid);
-                const totalCollectable = mappedUnpaid.reduce((sum, booking) => sum + (parseFloat(booking.balance_due || 0) || 0), 0);
-                calculatedStats.collectable = totalCollectable;
+                const totalPartialPayment = mappedUnpaid.reduce((sum, booking) => sum + (parseFloat(booking.balance_due || 0) || 0), 0);
+                calculatedStats.partialPayment = totalPartialPayment;
             }
 
             setFinancialStats(calculatedStats);
@@ -414,7 +539,11 @@ const SalePayment = () => {
         e.preventDefault();
         setUpdateLoading(true);
         try {
-            const response = await adminAPI.updateBookingStatus(selectedBooking.id, selectedBooking.status.toLowerCase());
+            const statusKey = getPaymentStatusKey(selectedBooking?.statusKey || selectedBooking?.status);
+            const apiStatus = statusKey === 'partial-payment'
+                ? 'partial_payment'
+                : (statusKey === 'success' ? 'paid' : statusKey);
+            const response = await adminAPI.updateBookingStatus(selectedBooking.id, apiStatus);
             if (response.success) {
                 setShowEditModal(false);
                 fetchTransactions();
@@ -556,19 +685,56 @@ const SalePayment = () => {
         return acc;
     }, { revenue: 0, completed: 0, refunds: 0 });
 
-    const branchCollectable = branchFilteredUnpaid.reduce((sum, b) => sum + getEffectiveBalanceDue(b), 0);
-    const collectableFromHistory = new Set(
+    const branchRevenueBreakdown = pageFilteredHistory.reduce((acc, t) => {
+        const status = String(t.status || '').toLowerCase();
+        if (!isRecordedPaymentStatus(status)) return acc;
+
+        const amount = Number(t.rawAmount || 0);
+        const notesJson = parseNotesJson(t.notes || '');
+
+        let addonRevenue = 0;
+        let convenienceFee = 0;
+
+        if (notesJson) {
+            if (Array.isArray(notesJson.addonsDetailed)) {
+                addonRevenue = notesJson.addonsDetailed.reduce((sum, addon) => sum + Number(addon?.price || 0), 0);
+            }
+            convenienceFee = Number(notesJson.convenienceFee || 0);
+        }
+
+        const courseRevenue = Math.max(0, amount - addonRevenue - convenienceFee);
+
+        acc.total += amount;
+        acc.course += courseRevenue;
+        acc.addons += addonRevenue;
+        acc.convenience += convenienceFee;
+        return acc;
+    }, { total: 0, course: 0, addons: 0, convenience: 0 });
+
+    const branchPartialPayment = branchFilteredUnpaid.reduce((sum, b) => sum + getEffectiveBalanceDue(b), 0);
+    const partialPaymentFromHistory = new Set(
         pageFilteredHistory
-            .filter((t) => String(t.status || '').toLowerCase() === 'collectable')
+            .filter((t) => t.statusKey === 'partial-payment')
             .map((t) => String(t.booking_id || ''))
             .filter(Boolean)
     ).size;
-    const branchCollectableCount = Math.max(branchFilteredUnpaid.length, collectableFromHistory);
+    const branchPartialPaymentCount = Math.max(branchFilteredUnpaid.length, partialPaymentFromHistory);
+
+    const isSuperAdmin = String(userRole || '').toLowerCase() === 'super_admin';
 
     const stats = [
-        { label: 'Gross Revenue', value: `P ${branchStats.revenue.toLocaleString()}`, trend: '0%', color: 'blue' },
+        {
+            label: 'Gross Revenue',
+            value: `P ${branchRevenueBreakdown.total.toLocaleString()}`,
+            trend: '0%',
+            color: 'blue'
+        },
+        ...(isSuperAdmin ? [
+            { label: 'Add-ons Revenue', value: `P ${branchRevenueBreakdown.addons.toLocaleString()}`, trend: '0%', color: 'purple' },
+            { label: 'Convenience Fees', value: `P ${branchRevenueBreakdown.convenience.toLocaleString()}`, trend: '0%', color: 'indigo' }
+        ] : []),
         { label: 'Completed Payments', value: branchStats.completed.toString(), trend: '0%', color: 'green' },
-        { label: 'Collectable', value: branchCollectableCount.toString(), trend: `P ${branchCollectable.toLocaleString()}`, color: 'orange' },
+        { label: 'Partial Payment', value: branchPartialPaymentCount.toString(), trend: `P ${branchPartialPayment.toLocaleString()}`, color: 'orange' },
         { label: 'Refunds / Cancelled', value: `P ${branchStats.refunds.toLocaleString()}`, trend: '0%', color: 'red' },
     ];
 
@@ -739,27 +905,49 @@ const SalePayment = () => {
                 const raw = (t.amount || '').toString().replace(/[^0-9.]/g, '');
                 return sum + (parseFloat(raw) || 0);
               }, 0);
+        const unpaidByBookingId = new Map((unpaidBookings || []).map((b) => [Number(b.id), b]));
+        const getTransactionBalanceDue = (txn) => {
+            const match = unpaidByBookingId.get(Number(txn?.booking_id));
+            if (match) return getEffectiveBalanceDue(match);
+            return getPaymentStatusKey(txn?.status) === 'partial-payment' ? Math.max(0, Number(txn?.rawAmount || 0)) : 0;
+        };
 
         const html = `
             <html>
             <head>
                 <title>Master Driving School - ${title}</title>
                 <style>
-                    body { font-family: 'Segoe UI', Arial, sans-serif; padding: 40px; color: #334155; }
+                    body { font-family: 'Segoe UI', Arial, sans-serif; padding: 16px; color: #334155; }
                     .header { border-bottom: 2px solid #1a4fba; padding-bottom: 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 20px; }
                     .header img { width: 70px; height: 70px; object-fit: cover; border-radius: 12px; }
                     .header-text { text-align: left; }
                     .header h1 { color: #1a4fba; margin: 0; font-size: 22pt; line-height: 1.2; }
                     .header p { color: #64748b; margin: 2px 0; font-size: 10pt; }
-                    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 20px; table-layout: fixed; }
                     th { background: #f8fafc; color: #1a4fba; font-weight: bold; border-bottom: 2px solid #e2e8f0; }
-                    th, td { padding: 12px; text-align: center; border: 1px solid #f1f5f9; }
+                    th, td { padding: 8px 6px; text-align: center; border: 1px solid #f1f5f9; font-size: 8.6pt; white-space: normal; word-break: break-word; }
                     .amount { font-weight: bold; }
-                    .status-success { color: #16a34a; font-weight: bold; }
-                    .status-collectable { color: #ea580c; font-weight: bold; }
+                    .status-pill { display: inline-block; padding: 4px 9px; border-radius: 999px; font-weight: 700; font-size: 8.4pt; line-height: 1.1; white-space: nowrap; }
+                    .status-success { color: #166534; background: #dcfce7; border: 1px solid #86efac; }
+                    .status-partial-payment { color: #9a3412; background: #ffedd5; border: 1px solid #fdba74; }
+                    .status-failed, .status-cancelled { color: #991b1b; background: #fee2e2; border: 1px solid #fca5a5; }
                     .total-row td { background: #f0f6ff; font-weight: bold; color: #1a4fba; border-top: 2px solid #1a4fba; font-size: 11pt; }
                     .footer { margin-top: 30px; font-size: 10pt; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 20px; text-align: center; }
-                    @media print { .no-print { display: none; } }
+                    @media print {
+                        @page { size: A4 landscape; margin: 8mm; }
+                        body { padding: 0; }
+                        .header { padding-bottom: 10px; margin-bottom: 10px; gap: 10px; }
+                        .header img { width: 48px; height: 48px; border-radius: 8px; }
+                        .header h1 { font-size: 14pt; }
+                        .header p { font-size: 8pt; }
+                        table { margin-top: 10px; }
+                        th, td { padding: 5px 4px; font-size: 7.7pt; }
+                        .status-pill { padding: 2px 6px; font-size: 7.4pt; line-height: 1.1; }
+                        .total-row td { font-size: 8.5pt; }
+                        .footer { margin-top: 10px; padding-top: 8px; font-size: 7pt; }
+                        .no-print { display: none; }
+                        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                    }
                 </style>
             </head>
             <body>
@@ -783,11 +971,16 @@ const SalePayment = () => {
                                 <th>CONTACT</th>
                             ` : `
                                 <th>TXN ID</th>
+                                <th>BOOKING ID</th>
                                 <th>STUDENT NAME</th>
+                                <th>EMAIL</th>
+                                <th>CONTACT</th>
                                 <th>COURSE</th>
-                                <th>DATE</th>
+                                <th>FIRST PAYMENT DATE</th>
+                                <th>FULLY PAID DATE</th>
                                 <th>METHOD</th>
                                 <th>AMOUNT</th>
+                                <th>BALANCE DUE</th>
                                 <th>STATUS</th>
                             `}
                         </tr>
@@ -799,24 +992,29 @@ const SalePayment = () => {
                                 <td>${t.student_name}</td>
                                 <td>${t.course_summary || t.course_name}</td>
                                 <td class="amount">P ${getEffectiveBalanceDue(t).toLocaleString()}</td>
-                                <td class="status-collectable">${t.status.toUpperCase()}</td>
+                                <td><span class="status-pill status-${getPaymentStatusKey(t.status)}">${getPaymentStatusLabel(getPaymentStatusKey(t.status))}</span></td>
                                 <td>${t.student_contact || 'N/A'}</td>
                             </tr>
                         ` : `
                             <tr>
                                 <td>${t.id}</td>
+                                <td>BK-${String(t.booking_id || '').padStart(3, '0')}</td>
                                 <td>${t.student}</td>
-                                <td title="${t.courseFull || t.course}">${t.course}</td>
-                                <td>${t.date}</td>
+                                <td>${t.studentEmail || 'N/A'}</td>
+                                <td>${t.studentContact || 'N/A'}</td>
+                                <td title="${t.courseFull || t.course}">${t.courseFull || t.course}</td>
+                                <td>${t.firstPaymentDate || toDateLabel(t.rawDate)}</td>
+                                <td>${t.fullPaymentDate || '-'}</td>
                                 <td>${t.method}</td>
                                 <td class="amount">${t.amount}</td>
-                                <td class="${t.status.toLowerCase() === 'success' ? 'status-success' : 'status-collectable'}">${t.status.toUpperCase()}</td>
+                                <td class="amount">P ${Number(getTransactionBalanceDue(t) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                <td><span class="status-pill status-${getPaymentStatusKey(t.status)}">${getPaymentStatusLabel(getPaymentStatusKey(t.status))}</span></td>
                             </tr>
                         `).join('')}
                         <tr class="total-row">
                             ${isUsers
                                 ? `<td colspan="3" style="text-align:right;">TOTAL AMOUNT DUE</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="2"></td>`
-                                : `<td colspan="5" style="text-align:right;">TOTAL AMOUNT</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td></td>`
+                                : `<td colspan="8" style="text-align:right;">TOTAL AMOUNT</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="3"></td>`
                             }
                         </tr>
                     </tbody>
@@ -855,9 +1053,9 @@ const SalePayment = () => {
         }
         const timestamp = new Date().toLocaleString();
         const breakdown = computeReceiptBreakdown(txn, coursesList);
-        const isCollectable = String(txn?.status || '').toLowerCase() === 'collectable';
+        const isPartialPayment = getPaymentStatusKey(txn?.status) === 'partial-payment';
         const unpaidRef = unpaidBookings.find((b) => Number(b.id) === Number(txn?.booking_id));
-        const remainingBalanceValue = isCollectable
+        const remainingBalanceValue = isPartialPayment
             ? (Number(unpaidRef?.balance_due || 0) > 0 ? Number(unpaidRef.balance_due) : breakdown.remainingBalance)
             : 0;
         const toPeso = (v) => `P ${Number(v || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -882,7 +1080,7 @@ const SalePayment = () => {
                     .amount-value { font-size: 16pt; font-weight: 800; color: #1a4fba; }
                     .status-tag { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 8pt; font-weight: bold; text-transform: uppercase; }
                     .status-success { background: #dcfce7; color: #16a34a; }
-                    .status-collectable { background: #ffedd5; color: #ea580c; }
+                    .status-partial-payment { background: #ffedd5; color: #ea580c; }
                     .breakdown { margin-top: 10px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
                     .breakdown-head { background: #f8fafc; color: #64748b; text-align: center; padding: 6px; font-size: 8pt; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
                     .line { display: flex; justify-content: space-between; gap: 10px; padding: 6px 10px; font-size: 9pt; border-top: 1px dashed #e2e8f0; }
@@ -938,7 +1136,7 @@ const SalePayment = () => {
                 </div>
                 <div class="info-row">
                     <span class="info-label">Status:</span>
-                    <span class="status-tag ${txn.status.toLowerCase() === 'success' ? 'status-success' : 'status-collectable'}">${txn.status}</span>
+                    <span class="status-tag ${getPaymentStatusKey(txn.status) === 'success' ? 'status-success' : 'status-partial-payment'}">${getPaymentStatusLabel(getPaymentStatusKey(txn.status))}</span>
                 </div>
                 <div class="breakdown">
                     <div class="breakdown-head">Payment Breakdown</div>
@@ -961,7 +1159,7 @@ const SalePayment = () => {
                         : ''
                     }
                     <div class="line line-total"><span>Net Total</span><span>${toPeso(breakdown.netTotal)}</span></div>
-                    ${isCollectable
+                    ${isPartialPayment
                         ? `<div class="line line-remaining"><span>Remaining Balance</span><span>${toPeso(remainingBalanceValue)}</span></div>`
                         : ''
                     }
@@ -1007,7 +1205,13 @@ const SalePayment = () => {
                 const raw = (t.amount || '').toString().replace(/[^0-9.]/g, '');
                 return sum + (parseFloat(raw) || 0);
               }, 0);
-        const colCount = isUsers ? 6 : 7;
+                const unpaidByBookingId = new Map((unpaidBookings || []).map((b) => [Number(b.id), b]));
+                const getTransactionBalanceDue = (txn) => {
+                        const match = unpaidByBookingId.get(Number(txn?.booking_id));
+                        if (match) return getEffectiveBalanceDue(match);
+                        return getPaymentStatusKey(txn?.status) === 'partial-payment' ? Math.max(0, Number(txn?.rawAmount || 0)) : 0;
+                };
+                const colCount = isUsers ? 6 : 12;
 
         const tableHtml = `
             <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
@@ -1021,8 +1225,10 @@ const SalePayment = () => {
                     .column-header th { background-color: #1a4fba !important; color: #ffffff !important; padding: 12px 10px; font-weight: bold; border: 1px solid #cbd5e1; text-align: center; }
                     .row td { padding: 10px; border: 1px solid #e2e8f0; color: #334155; background-color: #ffffff; text-align: center; }
                     .total-row td { background-color: #f0f6ff !important; font-weight: bold; color: #1a4fba; border-top: 2px solid #1a4fba; text-align: center; padding: 10px; }
-                    .status-success { color: #16a34a; font-weight: bold; }
-                    .status-collectable { color: #ea580c; font-weight: bold; }
+                    .status-pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 10pt; white-space: nowrap; }
+                    .status-success { color: #166534; background: #dcfce7; border: 1px solid #86efac; }
+                    .status-partial-payment { color: #9a3412; background: #ffedd5; border: 1px solid #fdba74; }
+                    .status-failed, .status-cancelled { color: #991b1b; background: #fee2e2; border: 1px solid #fca5a5; }
                 </style>
             </head>
             <body>
@@ -1040,11 +1246,16 @@ const SalePayment = () => {
                             <th>CONTACT</th>
                         ` : `
                             <th>TRANSACTION ID</th>
+                            <th>BOOKING ID</th>
                             <th>STUDENT NAME</th>
+                            <th>EMAIL</th>
+                            <th>CONTACT NO.</th>
                             <th>COURSE</th>
-                            <th>DATE</th>
+                            <th>FIRST PAYMENT DATE</th>
+                            <th>FULLY PAID DATE</th>
                             <th>METHOD</th>
                             <th>AMOUNT</th>
+                            <th>BALANCE DUE</th>
                             <th>STATUS</th>
                         `}
                     </tr>
@@ -1060,18 +1271,23 @@ const SalePayment = () => {
                     ` : `
                         <tr class="row">
                             <td>${t.id}</td>
+                            <td>BK-${String(t.booking_id || '').padStart(3, '0')}</td>
                             <td>${t.student}</td>
-                                <td title="${t.courseFull || t.course}">${t.course}</td>
-                            <td>${t.date}</td>
+                            <td>${t.studentEmail || 'N/A'}</td>
+                            <td>${t.studentContact || 'N/A'}</td>
+                            <td title="${t.courseFull || t.course}">${t.courseFull || t.course}</td>
+                            <td>${t.firstPaymentDate || toDateLabel(t.rawDate)}</td>
+                            <td>${t.fullPaymentDate || '-'}</td>
                             <td>${t.method}</td>
                             <td>${t.amount}</td>
-                            <td>${t.status}</td>
+                            <td>P ${Number(getTransactionBalanceDue(t) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            <td><span class="status-pill status-${getPaymentStatusKey(t.status)}">${getPaymentStatusLabel(getPaymentStatusKey(t.status))}</span></td>
                         </tr>
                     `).join('')}
                     <tr class="total-row">
                         ${isUsers
                             ? `<td colspan="3" style="text-align:right;">TOTAL AMOUNT DUE</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="2"></td>`
-                            : `<td colspan="5" style="text-align:right;">TOTAL AMOUNT</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td></td>`
+                            : `<td colspan="8" style="text-align:right;">TOTAL AMOUNT</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="3"></td>`
                         }
                     </tr>
                     <tr><td colspan="${colCount}" style="height: 15px; background-color: #ffffff;"></td></tr>
@@ -1109,7 +1325,7 @@ const SalePayment = () => {
                         ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                         : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
                     }
-                    {receiptToast.msg}
+                    {normalizeNotificationText(receiptToast.msg)}
                 </div>
             )}
             <div className="sale-header-section">
@@ -1216,6 +1432,19 @@ const SalePayment = () => {
                                     {stat.trend}
                                 </span>
                             </div>
+                            {Array.isArray(stat.metaLines) && stat.metaLines.length > 0 && (
+                                <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '4px', background: 'var(--subtle-bg, #f7f9fc)', padding: '8px', borderRadius: '6px' }}>
+                                    {stat.metaLines.map((line, lineIndex) => {
+                                        const [label, value] = line.split(': ');
+                                        return (
+                                            <div key={`${stat.label}-meta-${lineIndex}`} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--secondary-text)' }}>
+                                                <span style={{ fontWeight: 500 }}>{label}</span>
+                                                <span style={{ fontWeight: 600, color: 'var(--primary-text)' }}>{value}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
                         <div className="rev-icon">
                             {/* Simple dynamic circle decoration */}
@@ -1246,12 +1475,13 @@ const SalePayment = () => {
                                     />
                                     <Bar dataKey="amount" fill="#1a4fba" radius={[6, 6, 0, 0]} barSize={40} />
                                 </BarChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-                </div>
+                              </ResponsiveContainer>
+                          </div>
+                      </div>
 
-                <div className="payment-method-chart">
+                  </div>
+
+                  <div className="payment-method-chart">
                     <div className="chart-card">
                         <div className="card-header">
                             <h3>Payment Methods</h3>
@@ -1300,6 +1530,34 @@ const SalePayment = () => {
                     </div>
                 </div>
             </div>
+
+            {isSuperAdmin && revenueData?.addon_breakdown?.length > 0 && (
+                <div className="chart-card" style={{ marginTop: '10px' }}>
+                    <div className="card-header">
+                        <h3>Top Selling Add-ons</h3>
+                        <span>All-time revenue by add-on</span>
+                    </div>
+                    <div className="chart-body">
+                        <ResponsiveContainer width="100%" height={280}>
+                            <BarChart data={revenueData.addon_breakdown} margin={{ top: 12, right: 20, left: 0, bottom: 20 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
+                                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                                <Tooltip
+                                    formatter={(value, name) => {
+                                        if (name === 'revenue') {
+                                            return [`P ${Number(value || 0).toLocaleString()}`, 'Revenue'];
+                                        }
+                                        return [Number(value || 0).toLocaleString(), 'Units Sold'];
+                                    }}
+                                    contentStyle={{ borderRadius: '12px', border: '1px solid var(--border-color)', background: 'var(--card-bg)', color: 'var(--text-color)', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.2)' }}
+                                />
+                                <Bar dataKey="revenue" fill="#10b981" radius={[6, 6, 0, 0]} maxBarSize={56} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+            )}
 
 
 
@@ -1426,20 +1684,20 @@ const SalePayment = () => {
                 />
             </div>
 
-            {/* Unpaid / Collectable Bookings Section */}
+            {/* Unpaid / Partial Payment Bookings Section */}
             {branchFilteredUnpaid.length > 0 && (
                 <div className="transactions-section unpaid-section">
                     <div className="section-header">
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <h3>Collectable Bookings</h3>
+                            <h3>Partial Payment Bookings</h3>
                             <span className="unpaid-count">{branchFilteredUnpaid.length}</span>
                         </div>
                         <div className="section-actions">
-                            <button className="export-btn-secondary" onClick={() => handleExport(branchFilteredUnpaid, "UNPAID USERS")}>
+                            <button className="export-btn-secondary" onClick={() => handleExport(branchFilteredUnpaid, "PARTIAL PAYMENT USERS")}>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                                 Export
                             </button>
-                            <button className="export-btn-secondary" onClick={() => handlePrint(branchFilteredUnpaid, "COLLECTABLE USERS")}>
+                            <button className="export-btn-secondary" onClick={() => handlePrint(branchFilteredUnpaid, "PARTIAL PAYMENT USERS")}>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                                 Print
                             </button>
@@ -1479,18 +1737,18 @@ const SalePayment = () => {
                                         <td className="amount" style={{ color: '#ea580c', fontWeight: 700 }}>P {effectiveBalanceDue.toLocaleString()}</td>
                                         <td>{b.payment_type}</td>
                                         <td>
-                                            <span className="status-pill collectable">Collectable</span>
+                                            <span className="status-pill partial-payment">Partial Payment</span>
                                         </td>
                                         <td>{b.student_contact || 'N/A'}</td>
                                         <td style={{ textAlign: 'center' }}>
                                             <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
                                                 <button
-                                                    className="mark-paid-btn"
+                                                    className="mark-paid-icon-btn"
                                                     onClick={() => openMarkPaidModal(b)}
+                                                    aria-label="Mark as paid"
                                                     title="Collect remaining balance & mark as paid"
                                                 >
-                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                                                    Mark as Paid
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polyline points="20 6 9 17 4 12"></polyline></svg>
                                                 </button>
                                                 <button
                                                     className="receipt-btn email-receipt-btn"
@@ -1526,12 +1784,7 @@ const SalePayment = () => {
                 <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !markPaidLoading && setShowMarkPaidModal(false)}>
                     <div className="modal-container sale-mark-paid-modal">
                         {(() => {
-                            const paid = Number(parseFloat(markPaidBooking?.total_amount || 0).toFixed(2));
-                            const remaining = getEffectiveBalanceDue(markPaidBooking);
-                            const assessed = Math.max(
-                                Number(parseFloat(markPaidBooking?.course_price || 0).toFixed(2)),
-                                Number((paid + remaining).toFixed(2))
-                            );
+                            const { assessed, paid, remaining } = resolveBookingAssessment(markPaidBooking);
                             const inputAmount = Number(markPaidAmount);
                             const collectAmount = Number.isFinite(inputAmount) && inputAmount > 0
                                 ? Math.min(inputAmount, remaining)
@@ -1551,7 +1804,7 @@ const SalePayment = () => {
                                     <p>BK-{String(markPaidBooking.id || '').padStart(3, '0')}</p>
                                 </div>
                             </div>
-                            <div className="sale-mark-paid-chip">Collectable</div>
+                            <div className="sale-mark-paid-chip">Partial Payment</div>
                             <button className="close-modal" onClick={() => !markPaidLoading && setShowMarkPaidModal(false)}>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                             </button>
@@ -1667,7 +1920,7 @@ const SalePayment = () => {
                                     </div>
                                 </div>
                                 <div className="modal-header-right">
-                                    <button className="modal-header-btn" onClick={() => handleExport(filteredHistory, 'FILTERED TRANSACTION REPORT')} title="Export CSV">
+                                    <button className="modal-header-btn" onClick={() => handleExport(filteredHistory, 'FILTERED TRANSACTION REPORT')} title="Export Excel">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                                         Export
                                     </button>
@@ -1702,7 +1955,7 @@ const SalePayment = () => {
                                     <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="modal-filter-select">
                                         <option value="All">All Status</option>
                                         <option value="Success">Success</option>
-                                        <option value="Collectable">Collectable</option>
+                                        <option value="Partial Payment">Partial Payment</option>
                                     </select>
                                     <select value={courseFilter} onChange={(e) => setCourseFilter(e.target.value)} className="modal-filter-select modal-filter-select--wide">
                                         <option value="All">All Courses</option>
@@ -1812,7 +2065,7 @@ const SalePayment = () => {
                                                 </td>
                                                 <td className="amount">{txn.amount}</td>
                                                 <td>
-                                                    <span className={`status-pill ${txn.status.toLowerCase()}`}>
+                                                    <span className={`status-pill ${txn.statusKey}`}>
                                                         {txn.status}
                                                     </span>
                                                 </td>

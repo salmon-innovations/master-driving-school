@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
 const path = require('path');
 const fs = require('fs');
+const pool = require('../config/db');
 
 // ============================================================
 //  EMAIL CONTENT — loaded from config/emailContent.json
@@ -153,7 +154,6 @@ let EMAIL_CONTENT = (() => {
   },
   vehicleRental: {
     heading: 'ℹ️ Vehicle Rental Requirement:',
-    b1b2Note: "For Practical Driving Course (PDC) - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.",
     tricycleNote: "For Practical Driving Course (PDC) - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.",
   },
   requirements: {
@@ -229,6 +229,11 @@ const generateReceiptPDF = (firstName, lastName, receiptData) => {
       bookingId, transactionId, courseName, amountPaid,
       coursePrice, paymentMethod, paymentDate, isFullPayment, balanceDue,
     } = receiptData;
+    const paidAmt = Math.max(0, Number(amountPaid || 0));
+    const courseAmt = Math.max(0, Number(coursePrice || 0));
+    const dueAmt = Math.max(0, Number(balanceDue || 0));
+    const resolvedIsFullPayment = Boolean(isFullPayment) && dueAmt <= 0.009;
+    const settledTotalAmt = resolvedIsFullPayment ? Math.max(courseAmt, paidAmt) : paidAmt;
 
     const doc = new PDFDocument({ size: 'A5', margin: 40 });
     const chunks = [];
@@ -245,7 +250,7 @@ const generateReceiptPDF = (firstName, lastName, receiptData) => {
     doc.fillColor('#ffffff').fontSize(18).font('Helvetica-Bold')
       .text(EMAIL_CONTENT.pdf.schoolName, 40, 18, { align: 'center' });
     doc.fontSize(11).font('Helvetica')
-      .text(isFullPayment ? EMAIL_CONTENT.pdf.titleFull : EMAIL_CONTENT.pdf.titleDown, 40, 42, { align: 'center' });
+      .text(resolvedIsFullPayment ? EMAIL_CONTENT.pdf.titleFull : EMAIL_CONTENT.pdf.titleDown, 40, 42, { align: 'center' });
 
     // Receipt title
     doc.fillColor('#1a4fba').fontSize(13).font('Helvetica-Bold')
@@ -274,18 +279,18 @@ const generateReceiptPDF = (firstName, lastName, receiptData) => {
     });
 
     // Total row
-    doc.rect(40, y, doc.page.width - 80, 28).fill(isFullPayment ? '#dcfce7' : '#fff7ed');
-    doc.fillColor(isFullPayment ? '#15803d' : '#c2410c').fontSize(11).font('Helvetica-Bold')
-      .text(isFullPayment ? 'PAID IN FULL ✓' : 'AMOUNT PAID', 48, y + 8);
-    doc.text(`PHP ${Number(amountPaid).toLocaleString()}`, 200, y + 8, { align: 'right', width: doc.page.width - 250 });
+    doc.rect(40, y, doc.page.width - 80, 28).fill(resolvedIsFullPayment ? '#dcfce7' : '#fff7ed');
+    doc.fillColor(resolvedIsFullPayment ? '#15803d' : '#c2410c').fontSize(11).font('Helvetica-Bold')
+      .text(resolvedIsFullPayment ? 'PAID IN FULL ✓' : 'AMOUNT PAID', 48, y + 8);
+    doc.text(`PHP ${Number(settledTotalAmt).toLocaleString()}`, 200, y + 8, { align: 'right', width: doc.page.width - 250 });
     y += 38;
 
     // Balance box (downpayment only)
-    if (!isFullPayment && balanceDue > 0) {
+    if (!resolvedIsFullPayment && dueAmt > 0) {
       doc.rect(40, y, doc.page.width - 80, 52).fill('#fff7ed').stroke('#fb923c');
       doc.fillColor('#c2410c').fontSize(10).font('Helvetica-Bold').text('REMAINING BALANCE DUE', 48, y + 8);
       doc.fillColor('#ea580c').fontSize(16).font('Helvetica-Bold')
-        .text(`PHP ${Number(balanceDue).toLocaleString()}`, 48, y + 24);
+        .text(`PHP ${Number(dueAmt).toLocaleString()}`, 48, y + 24);
       doc.fillColor('#9a3412').fontSize(8).font('Helvetica')
         .text(EMAIL_CONTENT.pdf.balanceNote, 48, y + 42, { width: doc.page.width - 100 });
       y += 62;
@@ -376,17 +381,74 @@ const createStrictResendTransporter = () => {
   });
 };
 
+const TRANSIENT_EMAIL_ERROR_CODES = new Set([
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'ESOCKET',
+  'EPIPE',
+  'EAI_AGAIN',
+  'ENOTFOUND',
+]);
+
+const isTransientEmailError = (error) => {
+  if (!error) return false;
+  const code = String(error.code || '').toUpperCase();
+  if (TRANSIENT_EMAIL_ERROR_CODES.has(code)) return true;
+
+  const message = String(error.message || '').toLowerCase();
+  return (
+    message.includes('econnreset')
+    || message.includes('connection reset')
+    || message.includes('socket hang up')
+    || message.includes('timed out')
+    || message.includes('timeout')
+  );
+};
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const sendMailWithFallback = async (transporter, mailOptions) => {
-  try {
-    return await transporter.sendMail(mailOptions);
-  } catch (error) {
-    if (isResendMode() && process.env.RESEND_API_KEY) {
-      console.warn('[emailService] Primary send failed; retrying with strict Resend SMTP defaults:', error.message);
-      const strictResendTransporter = createStrictResendTransporter();
-      return strictResendTransporter.sendMail(mailOptions);
+  const maxRetries = 2;
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      const activeTransporter = attempt === 0 ? transporter : createTransporter();
+      return await activeTransporter.sendMail(mailOptions);
+    } catch (error) {
+      lastError = error;
+      const isTransient = isTransientEmailError(error);
+      if (!isTransient || attempt === maxRetries) break;
+
+      const waitMs = 500 * Math.pow(2, attempt);
+      console.warn(`[emailService] SMTP transient error (attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}. Retrying in ${waitMs}ms...`);
+      await delay(waitMs);
     }
-    throw error;
   }
+
+  if (isResendMode() && process.env.RESEND_API_KEY) {
+    try {
+      console.warn('[emailService] SMTP failed; retrying with strict Resend SMTP defaults:', lastError?.message || 'unknown error');
+      const strictResendTransporter = createStrictResendTransporter();
+      return await strictResendTransporter.sendMail(mailOptions);
+    } catch (strictError) {
+      lastError = strictError;
+    }
+  }
+
+  // Final non-breaking fallback for non-attachment emails if Resend API key exists.
+  const hasAttachments = Array.isArray(mailOptions?.attachments) && mailOptions.attachments.length > 0;
+  if (!hasAttachments && process.env.RESEND_API_KEY) {
+    try {
+      console.warn('[emailService] SMTP failed; falling back to Resend HTTP API for non-attachment email.');
+      const apiInfo = await sendViaResendApi(mailOptions);
+      return { messageId: apiInfo?.id || apiInfo?.messageId || 'resend-api-fallback' };
+    } catch (apiError) {
+      lastError = apiError;
+    }
+  }
+
+  throw lastError;
 };
 
 const sendViaResendApi = async ({ from, to, subject, html, text }) => {
@@ -687,87 +749,385 @@ const computeTDCDay2 = (dateString) => {
   return null;
 };
 
+const inferSessionFromTimeRange = (timeRange = '') => {
+  const raw = String(timeRange || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!raw) return null;
+  if ((raw.includes('08:00 am') || raw.includes('8:00 am')) && (raw.includes('05:00 pm') || raw.includes('5:00 pm'))) return 'Whole Day';
+  if ((raw.includes('08:00 am') || raw.includes('8:00 am')) && raw.includes('12:00 pm')) return 'Morning';
+  if ((raw.includes('01:00 pm') || raw.includes('1:00 pm')) && (raw.includes('05:00 pm') || raw.includes('5:00 pm'))) return 'Afternoon';
+  return null;
+};
+
+const normalizeSessionLabel = (session = '') => {
+  const raw = String(session || '').trim();
+  if (!raw) return null;
+  const cleaned = raw.replace(/\b(pdc|tdc)\b/ig, '').replace(/\s+/g, ' ').trim();
+  const lowered = cleaned.toLowerCase();
+  if (lowered.includes('whole')) return 'Whole Day';
+  if (lowered.includes('morning')) return 'Morning';
+  if (lowered.includes('afternoon')) return 'Afternoon';
+  return cleaned;
+};
+
+const resolveDisplaySession = (session = '', timeRange = '') =>
+  normalizeSessionLabel(session) || inferSessionFromTimeRange(timeRange) || 'N/A';
+
+const buildDetailedScheduleLabel = (rawLabel = '', rawType = '', transmission = '') => {
+  const normalizedLabel = String(rawLabel || '')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/\s*-\s*DAY\s*\d+\s*$/i, '')
+    .trim();
+  const source = `${normalizedLabel} ${rawType}`.toUpperCase();
+  const txCodeRaw = String(transmission || '').toUpperCase().trim();
+  const hasManual = txCodeRaw === 'MT' || source.includes(' MANUAL ') || source.endsWith(' MANUAL') || source.includes('(MANUAL)') || /(^|\W)MT($|\W)/.test(source);
+  const hasAutomatic = txCodeRaw === 'AT' || source.includes(' AUTOMATIC ') || source.includes(' AUTO ') || source.endsWith(' AUTOMATIC') || source.includes('(AUTOMATIC)') || /(^|\W)AT($|\W)/.test(source);
+  const txWord = hasManual && !hasAutomatic ? 'Manual' : hasAutomatic && !hasManual ? 'Automatic' : '';
+
+  if (source.includes('TDC') || source.includes('THEORETICAL')) {
+    if (source.includes('ONLINE')) return 'TDC Online';
+    if (source.includes('F2F') || source.includes('FACE TO FACE') || source.includes('FACE-TO-FACE')) return 'TDC F2F';
+    return 'TDC';
+  }
+
+  if (source.includes('A1') || source.includes('TRICYCLE') || source.includes('V1-TRICYCLE')) {
+    return 'PDC A1-Tricycle';
+  }
+
+  if ((source.includes('B1') || source.includes('VAN')) && (source.includes('B2') || source.includes('L300'))) {
+    return 'PDC B1-Van/B2-L300';
+  }
+
+  if (source.includes('MOTORCYCLE') || source.includes('MOTOR') || source.includes('MOTO') || source.includes('BIKE')) {
+    return ['PDC Motorcycle', txWord].filter(Boolean).join(' ');
+  }
+
+  if (source.includes('CAR')) {
+    return ['PDC Car', txWord].filter(Boolean).join(' ');
+  }
+
+  if (hasManual || hasAutomatic) {
+    // Single-course PDC records sometimes carry only transmission in type.
+    return ['PDC Car', txWord].filter(Boolean).join(' ');
+  }
+
+  if (source.includes('PDC') || source.includes('PRACTICAL')) {
+    return txWord ? `PDC Car ${txWord}` : 'PDC';
+  }
+
+  return normalizedLabel || 'PDC';
+};
+
+const compactScheduleLabelForDisplay = (rawLabel = '', rawType = '', transmission = '') => {
+  const normalized = String(rawLabel || '')
+    .replace(/[\u2013\u2014]/g, '-')
+    .trim();
+
+  const dayMatch = normalized.match(/\s*-\s*day\s*(\d+)\s*$/i);
+  const daySuffix = dayMatch ? ` - Day ${dayMatch[1]}` : '';
+  const baseLabel = dayMatch ? normalized.slice(0, dayMatch.index).trim() : normalized;
+
+  const compactBase = buildDetailedScheduleLabel(baseLabel, rawType, transmission);
+  if (daySuffix) return `${compactBase}${daySuffix}`;
+  return compactBase;
+};
+
+const computeEmailRemainingBalance = (enrollmentDetails = {}, amountPaid = 0, paymentStatus = '') => {
+  const toAmount = (value) => {
+    if (value == null) return 0;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const cleaned = String(value).replace(/[^0-9.-]/g, '');
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const paid = Math.max(0, toAmount(amountPaid));
+  const statusLower = String(paymentStatus || '').toLowerCase();
+  const isDownpayment = statusLower.includes('down');
+  if (!isDownpayment) return 0;
+
+  const explicitRemaining = [
+    enrollmentDetails?.remainingBalance,
+    enrollmentDetails?.balanceDue,
+    enrollmentDetails?.balance_due,
+  ]
+    .map((v) => toAmount(v))
+    .find((v) => Number.isFinite(v) && v > 0);
+  if (Number.isFinite(explicitRemaining) && explicitRemaining > 0) {
+    return Number(explicitRemaining.toFixed(2));
+  }
+
+  const explicitTotals = [
+    enrollmentDetails?.totalAmount,
+    enrollmentDetails?.grandTotal,
+    enrollmentDetails?.finalTotal,
+    enrollmentDetails?.assessedTotal,
+    enrollmentDetails?.payableAmount,
+    enrollmentDetails?.amountToPay,
+  ]
+    .map((v) => toAmount(v))
+    .filter((v) => Number.isFinite(v) && v > 0);
+  const explicitAssessment = explicitTotals.find((v) => v > paid + 0.009);
+  if (Number.isFinite(explicitAssessment) && explicitAssessment > 0) {
+    return Math.max(0, Number((explicitAssessment - paid).toFixed(2)));
+  }
+
+  const courseList = Array.isArray(enrollmentDetails?.courseList) ? enrollmentDetails.courseList : [];
+  const courseTotal = courseList.reduce((sum, item) => {
+    const resolvedLinePrice =
+      item?.finalPrice ?? item?.discountedPrice ?? item?.netPrice ?? item?.lineTotal ?? item?.price ?? item?.amount ?? item?.coursePrice ?? 0;
+    return sum + Math.max(0, toAmount(resolvedLinePrice));
+  }, 0);
+
+  const addonNamesRaw = String(enrollmentDetails?.addonNames || '').toLowerCase();
+  const hasReviewerAddonByName = addonNamesRaw.includes('reviewer');
+  const hasVehicleTipsAddonByName = addonNamesRaw.includes('maintenance') || addonNamesRaw.includes('vehicle');
+
+  const addons = Array.isArray(enrollmentDetails?.addonsDetailed) ? enrollmentDetails.addonsDetailed : [];
+  const detailedAddonTotal = addons.reduce((sum, item) => sum + Math.max(0, toAmount(item?.price || 0)), 0);
+  const inferredAddonTotal = detailedAddonTotal > 0
+    ? detailedAddonTotal
+    : (hasReviewerAddonByName || enrollmentDetails?.hasReviewer ? 30 : 0)
+      + (hasVehicleTipsAddonByName || enrollmentDetails?.hasVehicleTips ? 20 : 0);
+
+  const paymentMethodRaw = String(enrollmentDetails?.paymentMethod || '').toLowerCase();
+  const courseTypeRaw = String(enrollmentDetails?.courseType || '').toLowerCase();
+  const isLikelyOnline = paymentMethodRaw.includes('online') || paymentMethodRaw.includes('starpay') || paymentMethodRaw.includes('gcash') || courseTypeRaw.includes('online');
+  let convenienceFee = Math.max(0, toAmount(enrollmentDetails?.convenienceFee || 0));
+  if (convenienceFee <= 0 && isLikelyOnline) {
+    convenienceFee = 25;
+  }
+
+  let promoDiscount = Math.max(0, toAmount(enrollmentDetails?.promoDiscount || 0));
+  const isPromoBundleByType = String(enrollmentDetails?.courseType || '').toLowerCase().includes('promo-bundle');
+  const isPromoBundleByCategory = String(enrollmentDetails?.courseCategory || '').toUpperCase().includes('PROMO');
+  const hasBundleTdc = courseList.some((item) => String(item?.category || item?.name || '').toUpperCase().includes('TDC'));
+  const hasBundlePdc = courseList.some((item) => String(item?.category || item?.name || '').toUpperCase().includes('PDC'));
+  if (promoDiscount <= 0 && courseTotal > 0 && (isPromoBundleByType || isPromoBundleByCategory || (hasBundleTdc && hasBundlePdc))) {
+    promoDiscount = Number((courseTotal * 0.03).toFixed(2));
+  }
+
+  const addonTotal = inferredAddonTotal;
+  const computedTotal = Math.max(0, Number((courseTotal + addonTotal + convenienceFee - promoDiscount).toFixed(2)));
+  if (computedTotal > paid + 0.009) {
+    return Math.max(0, Number((computedTotal - paid).toFixed(2)));
+  }
+
+  const listedCoursePrice = Math.max(0, toAmount(enrollmentDetails?.coursePrice || 0));
+  if (listedCoursePrice > paid + 0.009) {
+    return Math.max(0, Number((listedCoursePrice - paid).toFixed(2)));
+  }
+
+  // Legacy fallback: most downpayment flows collect roughly half at first payment.
+  return Math.max(0, Number((paid).toFixed(2)));
+};
+
+const enrichEnrollmentDetailsForBalance = async (enrollmentDetails = {}, hasReviewer = false, hasVehicleTips = false) => {
+  const merged = {
+    ...(enrollmentDetails || {}),
+    hasReviewer: enrollmentDetails?.hasReviewer != null ? enrollmentDetails.hasReviewer : !!hasReviewer,
+    hasVehicleTips: enrollmentDetails?.hasVehicleTips != null ? enrollmentDetails.hasVehicleTips : !!hasVehicleTips,
+  };
+
+  try {
+    if (merged?.bookingId) {
+      const bookingRes = await pool.query(
+        `SELECT notes FROM bookings WHERE id = $1 LIMIT 1`,
+        [merged.bookingId]
+      );
+      const bookingRow = bookingRes?.rows?.[0] || null;
+      if (bookingRow?.notes) {
+        const notes = typeof bookingRow.notes === 'string' ? JSON.parse(bookingRow.notes) : bookingRow.notes;
+        if (notes && typeof notes === 'object') {
+          if ((!Array.isArray(merged.courseList) || merged.courseList.length === 0) && Array.isArray(notes.courseList) && notes.courseList.length) {
+            merged.courseList = notes.courseList;
+          }
+          if ((!Array.isArray(merged.addonsDetailed) || merged.addonsDetailed.length === 0) && Array.isArray(notes.addonsDetailed) && notes.addonsDetailed.length) {
+            merged.addonsDetailed = notes.addonsDetailed;
+          }
+          if (!merged.addonNames && notes.addonNames) {
+            merged.addonNames = notes.addonNames;
+          }
+          for (const key of ['subtotal', 'promoDiscount', 'convenienceFee', 'totalAmount', 'grandTotal', 'finalTotal', 'assessedTotal', 'coursePrice']) {
+            if (merged[key] == null || Number(merged[key] || 0) === 0) {
+              if (notes[key] != null) merged[key] = notes[key];
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[emailService] Failed to enrich booking notes for remaining balance:', err.message);
+  }
+
+  try {
+    const hasAnyExplicitTotal = Number(merged?.totalAmount || merged?.grandTotal || merged?.finalTotal || merged?.assessedTotal || 0) > 0;
+    const hasPricedCourseList = Array.isArray(merged?.courseList) && merged.courseList.some((item) => Number(item?.price ?? item?.finalPrice ?? item?.discountedPrice ?? 0) > 0);
+    const hasCoursePrice = Number(merged?.coursePrice || 0) > 0;
+    if (!hasAnyExplicitTotal && !hasPricedCourseList && !hasCoursePrice && merged?.courseName) {
+      const courseRes = await pool.query(
+        `SELECT price
+           FROM courses
+          WHERE LOWER(name) = LOWER($1)
+          LIMIT 1`,
+        [String(merged.courseName)]
+      );
+      const courseRow = courseRes?.rows?.[0] || null;
+      if (courseRow?.price != null) {
+        merged.coursePrice = Number(courseRow.price) || 0;
+      }
+    }
+  } catch (err) {
+    console.warn('[emailService] Failed to enrich course price for remaining balance:', err.message);
+  }
+
+  return merged;
+};
+
+const resolveTdcScheduleLabel = (enrollmentDetails = {}, courseType = '', courseList = []) => {
+  const explicit = String(enrollmentDetails?.tdcLabel || '').trim();
+  if (explicit) return explicit;
+
+  const list = Array.isArray(courseList) ? courseList : [];
+  const tdcItem = list.find((item) => {
+    const src = `${item?.name || ''} ${item?.category || ''}`.toUpperCase();
+    return src.includes('TDC') || src.includes('THEORETICAL');
+  });
+
+  const typeCandidates = [
+    enrollmentDetails?.courseTypeTdc,
+    courseType,
+    tdcItem?.type,
+  ]
+    .map((v) => String(v || '').toUpperCase().trim())
+    .filter(Boolean);
+
+  if (typeCandidates.some((v) => v.includes('ONLINE'))) return 'TDC Online';
+  if (typeCandidates.some((v) => v.includes('F2F') || v.includes('FACE TO FACE') || v.includes('FACE-TO-FACE'))) return 'TDC F2F';
+
+  return 'TDC';
+};
+
 // Send walk-in enrollment confirmation email with schedule, password, verification code, and optional PDF add-ons
 const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, verificationCode, enrollmentDetails, hasReviewer = false, hasVehicleTips = false) => {
   try {
     const transporter = createTransporter();
     const { courseName, courseCategory, courseType, branchName, branchAddress, scheduleDate, scheduleSession, scheduleTime, scheduleDate2, scheduleSession2, scheduleTime2, pdcSchedules, paymentMethod, amountPaid, paymentStatus } = enrollmentDetails;
 
-    const isTDC = (courseCategory || '').toUpperCase() === 'TDC';
-    const isPromo = (courseCategory || '').toLowerCase() === 'promo';
+    const categoryNorm = String(courseCategory || '').toUpperCase();
+    const isPromo = categoryNorm.includes('PROMO');
+    const isTDC = categoryNorm.includes('TDC') || categoryNorm.includes('THEORETICAL');
+    const isRegularPdc = categoryNorm.includes('PDC') || categoryNorm.includes('PRACTICAL');
+    const isOnlineTdc = (isTDC || isPromo) && (String(courseType || '').toLowerCase().includes('online') || String(courseType || '').toLowerCase().includes('otdc') || String(courseName || '').toLowerCase().includes('otdc'));
+    const isPdcScheduleLocked = !!enrollmentDetails?.pdcScheduleLockedUntilCompletion;
+    const pdcLockReason = enrollmentDetails?.pdcScheduleLockReason || 'Branch Manager will assigns your PDC schedule after OTDC is marked complete.';
     const formattedDate = formatDisplayDate(scheduleDate);
+    const displayPrimarySession = resolveDisplaySession(scheduleSession, scheduleTime);
     
     const schedules = [];
-    // Day 1 (Always present)
-    schedules.push({
-      label: isTDC || isPromo ? 'TDC — Day 1' : 'Day 1',
-      date: formattedDate,
-      session: scheduleSession,
-      time: scheduleTime
-    });
+    const tdcLabel = String(enrollmentDetails?.tdcLabel || 'TDC').trim();
+
+    const effectivePdcType = String(
+      enrollmentDetails?.courseTypePdc
+      || courseType
+      || pdcSchedules?.[0]?.courseTypeDetailed
+      || pdcSchedules?.[0]?.courseType
+      || ''
+    ).trim();
+    const effectivePdcTransmission = String(
+      enrollmentDetails?.transmission
+      || pdcSchedules?.[0]?.transmission
+      || ''
+    ).trim();
+
+    const primaryScheduleLabel = (() => {
+      if (isTDC || isPromo) {
+        return resolveTdcScheduleLabel(enrollmentDetails, courseType, enrollmentDetails?.courseList || []);
+      }
+      return buildDetailedScheduleLabel(courseName || 'Primary Schedule', effectivePdcType || courseType || '', effectivePdcTransmission);
+    })();
+
+    if (!isOnlineTdc && !isRegularPdc) {
+      // Day 1 (Always present)
+      schedules.push({
+        label: `${primaryScheduleLabel} - Day 1`,
+        date: formattedDate,
+        session: displayPrimarySession,
+        time: scheduleTime
+      });
+    }
 
     // TDC Day 2
     const { scheduleEndDate, pdcDate1, pdcSession1, pdcTime1, pdcDate2, pdcSession2, pdcTime2 } = enrollmentDetails;
     const tdcDay2 = scheduleEndDate ? formatDisplayDate(scheduleEndDate) : (isTDC || isPromo ? computeTDCDay2(scheduleDate) : null);
-    if (tdcDay2) {
+    if (!isOnlineTdc && !isRegularPdc && tdcDay2) {
       schedules.push({
-        label: isTDC || isPromo ? 'TDC — Day 2' : 'Day 2',
+        label: `${primaryScheduleLabel} - Day 2`,
         date: tdcDay2,
-        session: scheduleSession,
+        session: displayPrimarySession,
         time: scheduleTime
       });
     }
 
     const hasMultiPdc = Array.isArray(pdcSchedules) && pdcSchedules.length > 0;
 
-    if (hasMultiPdc) {
+    if (!isOnlineTdc && hasMultiPdc) {
       pdcSchedules.forEach((s, idx) => {
-        const baseLabel = s?.label || `PDC ${idx + 1}`;
+        const baseLabel = buildDetailedScheduleLabel(
+          s?.label || s?.courseName || `PDC ${idx + 1}`,
+          s?.courseTypeDetailed || s?.courseType || '',
+          s?.transmission || ''
+        );
         const d1 = formatDisplayDate(s?.scheduleDate);
         const d2 = formatDisplayDate(s?.promoPdcDate2 || s?.scheduleDate2);
 
         if (d1) {
+          const day1Session = resolveDisplaySession(s?.scheduleSession || s?.scheduleSession2 || 'Morning', s?.scheduleTime || s?.scheduleTime2 || '08:00 AM - 12:00 PM');
           schedules.push({
-            label: `${baseLabel} — Day 1`,
+            label: `${baseLabel} - Day 1`,
             date: d1,
-            session: s?.scheduleSession || s?.scheduleSession2 || 'Morning',
+            session: day1Session,
             time: s?.scheduleTime || s?.scheduleTime2 || '08:00 AM - 12:00 PM'
           });
         }
 
         if (d2) {
+          const day2Session = resolveDisplaySession(s?.promoPdcSession2 || s?.scheduleSession2 || 'Morning', s?.promoPdcTime2 || s?.scheduleTime2 || '08:00 AM - 12:00 PM');
           schedules.push({
-            label: `${baseLabel} — Day 2`,
+            label: `${baseLabel} - Day 2`,
             date: d2,
-            session: s?.promoPdcSession2 || s?.scheduleSession2 || 'Morning',
+            session: day2Session,
             time: s?.promoPdcTime2 || s?.scheduleTime2 || '08:00 AM - 12:00 PM'
           });
         }
       });
-    } else {
+    } else if (!isOnlineTdc) {
       // Backward compatibility for older payloads that only pass one PDC schedule.
+      const fallbackPdcLabel = buildDetailedScheduleLabel(courseName || 'PDC', effectivePdcType || 'PDC', effectivePdcTransmission);
       if (pdcDate1) {
+        const day1Session = resolveDisplaySession(pdcSession1 || 'Morning', pdcTime1 || '08:00 AM - 12:00 PM');
         schedules.push({
-          label: 'PDC — Day 1',
+          label: `${fallbackPdcLabel} - Day 1`,
           date: formatDisplayDate(pdcDate1),
-          session: pdcSession1 || 'Morning',
+          session: day1Session,
           time: pdcTime1 || '08:00 AM - 12:00 PM'
         });
       }
 
       if (pdcDate2) {
+        const day2Session = resolveDisplaySession(pdcSession2 || 'Morning', pdcTime2 || '08:00 AM - 12:00 PM');
         schedules.push({
-          label: 'PDC — Day 2',
+          label: `${fallbackPdcLabel} - Day 2`,
           date: formatDisplayDate(pdcDate2),
-          session: pdcSession2 || 'Morning',
+          session: day2Session,
           time: pdcTime2 || '08:00 AM - 12:00 PM'
         });
       }
     }
 
     const isDownpayment = paymentStatus && paymentStatus.toLowerCase().includes('downpayment');
+    const pricingDetails = await enrichEnrollmentDetailsForBalance(enrollmentDetails, hasReviewer, hasVehicleTips);
+    const remainingBalanceDue = computeEmailRemainingBalance(pricingDetails, amountPaid, paymentStatus);
     const courseNameLower = (courseName || '').toLowerCase();
-    const isB1B2 = courseNameLower.includes('b1') || courseNameLower.includes('b2') || courseNameLower.includes('van') || courseNameLower.includes('l300');
     const isTricycle = courseNameLower.includes('a1') || courseNameLower.includes('tricycle');
 
     const path = require('path');
@@ -833,11 +1193,26 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
               <h2 style="margin-top: 0;">${EMAIL_CONTENT.walkIn.greeting(firstName, lastName)}</h2>
               <p>${EMAIL_CONTENT.walkIn.intro}</p>
               
+              ${isOnlineTdc ? `
+              <div class="requirements" style="background: #ecfeff; border-left: 4px solid #0891b2; margin: 18px 0; border-radius: 8px;">
+                <h4 style="color: #0e7490; margin: 0 0 8px 0;">💻 Online TDC Provider Notice</h4>
+                <p style="margin: 0; font-size: 14px; color: #155e75;">
+                  Your Online TDC is handled by our partner providers <strong>drivetech.ph</strong> and <strong>OTDC.ph</strong>.
+                  Please wait up to <strong>30 minutes</strong> for your account activation email, and check your Inbox, Spam, and Promotions folders.
+                </p>
+              </div>
+              ${isPdcScheduleLocked ? `
+              <div class="requirements" style="background: #eff6ff; border-left: 4px solid #2563eb; margin: 12px 0 18px 0; border-radius: 8px;">
+                <h4 style="color: #1d4ed8; margin: 0 0 8px 0;">🗓️ PDC Scheduling Notice</h4>
+                <p style="margin: 0; font-size: 14px; color: #1e3a8a;">${pdcLockReason}</p>
+              </div>
+              ` : ''}
+              ` : `
               <div class="schedule-highlight">
                 <h3>${EMAIL_CONTENT.walkIn.scheduleHeading}</h3>
                 ${schedules.map((s, idx) => `
                   <div style="margin-bottom: ${idx === schedules.length - 1 ? '0' : '15px'};">
-                    <div style="font-size: 11px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px;">${s.label}</div>
+                    <div style="font-size: 11px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px;">${compactScheduleLabelForDisplay(s.label, s?.courseType || '', s?.transmission || '')}</div>
                     <div class="schedule-date">${s.date}</div>
                     <div class="schedule-session">${s.session}</div>
                     <div class="schedule-time">${s.time}</div>
@@ -845,6 +1220,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
                   ${idx === schedules.length - 1 ? '' : '<hr style="border: none; border-top: 2px dashed #93c5fd; margin: 15px 0;">'}
                 `).join('')}
               </div>
+              `}
 
               <div class="section">
                 <h3>${EMAIL_CONTENT.walkIn.detailsHeading}</h3>
@@ -880,23 +1256,23 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
                   <span class="detail-label">Amount Paid:&nbsp;&nbsp;</span>
                   <span class="detail-value">₱${Number(amountPaid).toLocaleString()}</span>
                 </div>
+                ${isDownpayment && remainingBalanceDue > 0 ? `
+                <div class="detail-row">
+                  <span class="detail-label">Remaining Balance:&nbsp;&nbsp;</span>
+                  <span class="detail-value">₱${Number(remainingBalanceDue).toLocaleString()}</span>
+                </div>
+                ` : ''}
                 <div class="detail-row">
                   <span class="detail-label">Payment Status:&nbsp;&nbsp;</span>
                   <span class="detail-value">${paymentStatus}</span>
                 </div>
+                ${isPdcScheduleLocked ? `<div class="detail-row"><span class="detail-label">PDC Schedule:&nbsp;&nbsp;</span><span class="detail-value">${pdcLockReason}</span></div>` : ''}
               </div>
 
               ${isDownpayment ? `
               <div class="requirements" style="background: #e0f2fe; border-left: 4px solid #0284c7;">
                 <h4 style="color: #0369a1; margin-top: 0;">${EMAIL_CONTENT.downpaymentReminder.heading}</h4>
                 <p style="margin: 0; font-size: 14px; color: #0c4a6e;">${EMAIL_CONTENT.downpaymentReminder.note}</p>
-              </div>
-              ` : ''}
-
-              ${isB1B2 ? `
-              <div style="background: #eff6ff; border-left: 4px solid #2157da; padding: 12px 15px; margin: 15px 0; border-radius: 0 8px 8px 0; font-size: 13px;">
-                <strong style="color: #1e40af;">${EMAIL_CONTENT.vehicleRental.heading}</strong>
-                <p style="margin: 6px 0 0; color: #1e3a8a;">${EMAIL_CONTENT.vehicleRental.b1b2Note}</p>
               </div>
               ` : ''}
 
@@ -933,7 +1309,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
                <div class="credentials" style="background: #f0fdf4; border-color: #15803d;">
                 <h3 style="color: #15803d; border-bottom: 2px solid #dcfce7; padding-bottom: 10px;">✅ Re-enrollment Successful</h3>
                 <p style="margin-top: 15px;">Welcome back! Your new course has been successfully linked to your existing account: <strong>${email}</strong>.</p>
-                <p>You can use your current password to log in and manage your schedule.</p>
+                <p>You can use your current password to log in and manage your enrollment details.</p>
               </div>
               
               <p style="text-align: center; margin-top: 25px;">
@@ -953,12 +1329,14 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
               </div>
               ` : ''}
 
+              ${!isOnlineTdc ? `
               <div class="requirements">
                 <h4>${EMAIL_CONTENT.requirements.heading}</h4>
                 <ul>
                   ${(isTDC ? EMAIL_CONTENT.requirements.tdc : EMAIL_CONTENT.requirements.pdc).map(item => `<li>${item}</li>`).join('\n                  ')}
                 </ul>
               </div>
+              ` : ''}
 
               <div class="terms">
                 <h4>${EMAIL_CONTENT.terms.heading}</h4>
@@ -979,8 +1357,16 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
     };
 
     // Construct plain text version
-    let plainText = `Hello ${firstName} ${lastName}!\n\nYour walk-in enrollment has been successfully processed.\n\nYOUR TRAINING SCHEDULE:\n`;
-    plainText += schedules.map(s => `${s.label}: ${s.date}\nSession: ${s.session} (${s.time})`).join('\n\n');
+    let plainText = `Hello ${firstName} ${lastName}!\n\nYour walk-in enrollment has been successfully processed.\n`;
+    if (isOnlineTdc) {
+      plainText += `\nONLINE TDC PROVIDER NOTICE:\nYour Online TDC is handled by drivetech.ph / OTDC.ph.\nPlease wait up to 30 minutes for your account activation email and check Inbox, Spam, and Promotions folders.\n`;
+      if (isPdcScheduleLocked) {
+        plainText += `\nPDC SCHEDULING NOTICE:\n${pdcLockReason}\n`;
+      }
+    } else {
+      plainText += `\nYOUR TRAINING SCHEDULE:\n`;
+      plainText += schedules.map(s => `${compactScheduleLabelForDisplay(s.label, s?.courseType || '', s?.transmission || '')}: ${s.date}\nSession: ${s.session} (${s.time})`).join('\n\n');
+    }
     plainText += `\n\nCourse: ${courseName} (${courseType})\nBranch: ${branchName}\n`;
     
     if (enrollmentDetails.isNewUser) {
@@ -989,8 +1375,12 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
       plainText += `\nWelcome back! Your new course has been linked to your existing account (${email}).\n`;
     }
 
-    if (isDownpayment) plainText += `\nREMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n`;
-    if (isB1B2) plainText += `\nVEHICLE RENTAL NOTE: For PDC - B1/B2, students are required to rent their own VAN or L300.\n`;
+    if (isDownpayment) {
+      if (remainingBalanceDue > 0) {
+        plainText += `\nRemaining Balance: PHP ${Number(remainingBalanceDue).toLocaleString()}\n`;
+      }
+      plainText += `\nREMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first day of your class or pay via starpay in profile.\n`;
+    }
     if (isTricycle) plainText += `\nVEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle.\n`;
     
     plainText += `\nMaster Driving School`;
@@ -1006,21 +1396,46 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
   }
 };
 
-// Send guest enrollment confirmation without login credentials
-const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails, hasReviewer = false, hasVehicleTips = false) => {
+// Send enrollment confirmation without login credentials.
+const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails, hasReviewer = false, hasVehicleTips = false) => {
   try {
     const transporter = createTransporter();
     const { courseName, courseList, courseCategory, courseType, branchName, branchAddress, scheduleDate, scheduleSession, scheduleTime, scheduleDate2, scheduleSession2, scheduleTime2, pdcSchedules, paymentMethod, amountPaid, paymentStatus } = enrollmentDetails;
 
     const isTDC = (courseCategory || '').toUpperCase() === 'TDC';
+    const isPromo = (courseCategory || '').toUpperCase() === 'PROMO';
+    const isOnlineTdc = (isTDC || isPromo) && (String(courseType || '').toLowerCase().includes('online') || String(courseType || '').toLowerCase().includes('otdc') || String(courseName || '').toLowerCase().includes('otdc'));
+    const isPdcScheduleLocked = !!enrollmentDetails?.pdcScheduleLockedUntilCompletion;
+    const pdcLockReason = enrollmentDetails?.pdcScheduleLockReason || 'Branch Manager will assigns your PDC schedule after OTDC is marked complete.';
     const formattedDate = formatDisplayDate(scheduleDate);
+    const displayScheduleSession = resolveDisplaySession(scheduleSession, scheduleTime);
 
     // Dynamically fulfill Day 2 for TDC directly, or bind to passed 2nd slots if PDC
     const effectiveDate2 = (isTDC && !scheduleDate2) ? computeTDCDay2(scheduleDate) : formatDisplayDate(scheduleDate2);
-    const effectiveSession2 = (isTDC && !scheduleSession2) ? scheduleSession : scheduleSession2;
+    const effectiveSession2Raw = (isTDC && !scheduleSession2) ? scheduleSession : scheduleSession2;
+    const effectiveSession2 = resolveDisplaySession(effectiveSession2Raw, scheduleTime2 || scheduleTime);
     const effectiveTime2 = (isTDC && !scheduleTime2) ? scheduleTime : scheduleTime2;
     const hasMultiPdc = Array.isArray(pdcSchedules) && pdcSchedules.length > 0;
-    const hasPrimarySchedule = !!scheduleDate;
+    const hasPrimarySchedule = !!scheduleDate && !isOnlineTdc;
+    const effectivePdcType = String(
+      enrollmentDetails?.courseTypePdc
+      || courseType
+      || pdcSchedules?.[0]?.courseTypeDetailed
+      || pdcSchedules?.[0]?.courseType
+      || ''
+    ).trim();
+    const effectivePdcTransmission = String(
+      enrollmentDetails?.transmission
+      || pdcSchedules?.[0]?.transmission
+      || ''
+    ).trim();
+
+    const primaryScheduleLabel = (() => {
+      if (isTDC || isPromo) {
+        return resolveTdcScheduleLabel(enrollmentDetails, courseType, courseList);
+      }
+      return buildDetailedScheduleLabel(courseName || 'Primary Schedule', effectivePdcType || courseType || '', effectivePdcTransmission);
+    })();
     const incomingCourseList = Array.isArray(courseList) ? courseList.filter(Boolean) : [];
     const fallbackCourseList = [];
     if (!incomingCourseList.length) {
@@ -1034,8 +1449,8 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
       if (hasMultiPdc) {
         pdcSchedules.forEach((s) => {
           fallbackCourseList.push({
-            name: s?.label || 'PDC',
-            type: 'PDC',
+            name: s?.label || s?.courseName || 'PDC',
+            type: s?.courseTypeDetailed || s?.courseType || 'PDC',
             category: 'PDC',
           });
         });
@@ -1078,25 +1493,36 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
       ? [...new Set(normalizedCourseList.map((c) => sanitizeType(c?.type)).filter(Boolean))].join(', ') || (courseType || 'N/A').toUpperCase()
       : (courseType || 'N/A').toUpperCase();
 
+    const normalizedPdcSchedules = (Array.isArray(pdcSchedules) ? pdcSchedules : []).map((s) => {
+      const time1 = s?.scheduleTime || 'N/A';
+      const time2 = s?.scheduleTime2 || time1;
+      return {
+        ...s,
+        scheduleLabelDisplay: compactScheduleLabelForDisplay(s?.label || s?.courseName || 'PDC', s?.courseTypeDetailed || s?.courseType || '', s?.transmission || ''),
+        scheduleSessionDisplay: resolveDisplaySession(s?.scheduleSession || s?.scheduleSession2, time1),
+        scheduleSession2Display: resolveDisplaySession(s?.scheduleSession2 || s?.scheduleSession, time2),
+      };
+    });
+
     const multiPdcHtml = hasMultiPdc
-      ? pdcSchedules.map((s, idx) => {
+      ? normalizedPdcSchedules.map((s, idx) => {
           const d1 = formatDisplayDate(s.scheduleDate);
           const d2 = formatDisplayDate(s.scheduleDate2);
           return `
             <div style="margin-top: ${idx === 0 ? '0' : '16px'}; padding-top: ${idx === 0 ? '0' : '16px'}; border-top: ${idx === 0 ? 'none' : '2px dashed #93c5fd'};">
-              <div style="font-size: 12px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">${s.label || `PDC ${idx + 1}`}</div>
+              <div style="font-size: 12px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">${s.scheduleLabelDisplay || `PDC ${idx + 1}`}</div>
               ${d2 ? `
                 <div style="font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 1</div>
                 <div class="schedule-date">${d1}</div>
-                <div class="schedule-session">${s.scheduleSession || 'N/A'}</div>
+                <div class="schedule-session">${s.scheduleSessionDisplay || 'N/A'}</div>
                 <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${s.scheduleTime || 'N/A'}</div>
                 <div style="margin-top:10px; font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 2</div>
                 <div class="schedule-date">${d2}</div>
-                <div class="schedule-session">${s.scheduleSession2 || 'N/A'}</div>
+                <div class="schedule-session">${s.scheduleSession2Display || 'N/A'}</div>
                 <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${s.scheduleTime2 || 'N/A'}</div>
               ` : `
                 <div class="schedule-date">${d1}</div>
-                <div class="schedule-session">${s.scheduleSession || 'N/A'}</div>
+                <div class="schedule-session">${s.scheduleSessionDisplay || 'N/A'}</div>
                 <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${s.scheduleTime || 'N/A'}</div>
               `}
             </div>
@@ -1107,10 +1533,10 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
     const primaryScheduleHtml = hasPrimarySchedule
       ? (effectiveDate2 ? `
         <div style="margin-bottom: ${hasMultiPdc ? '18px' : '0'}; padding-bottom: ${hasMultiPdc ? '14px' : '0'}; border-bottom: ${hasMultiPdc ? '2px dashed #93c5fd' : 'none'};">
-          <div style="font-size: 12px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">${courseName || 'Primary Schedule'}</div>
+          <div style="font-size: 12px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">${primaryScheduleLabel}</div>
           <div style="font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 1</div>
           <div class="schedule-date">${formattedDate}</div>
-          <div class="schedule-session">${scheduleSession || 'N/A'}</div>
+          <div class="schedule-session">${displayScheduleSession}</div>
           <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${scheduleTime || 'N/A'}</div>
           <div style="margin-top:10px; font-size: 12px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Day 2</div>
           <div class="schedule-date">${effectiveDate2}</div>
@@ -1119,16 +1545,17 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
         </div>
       ` : `
         <div style="margin-bottom: ${hasMultiPdc ? '18px' : '0'}; padding-bottom: ${hasMultiPdc ? '14px' : '0'}; border-bottom: ${hasMultiPdc ? '2px dashed #93c5fd' : 'none'};">
-          <div style="font-size: 12px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">${courseName || 'Primary Schedule'}</div>
+          <div style="font-size: 12px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">${primaryScheduleLabel}</div>
           <div class="schedule-date">${formattedDate}</div>
-          <div class="schedule-session">${scheduleSession || 'N/A'}</div>
+          <div class="schedule-session">${displayScheduleSession}</div>
           <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">${scheduleTime || 'N/A'}</div>
         </div>
       `)
       : '';
     const isDownpayment = paymentStatus && paymentStatus.toLowerCase().includes('downpayment');
+    const pricingDetails = await enrichEnrollmentDetailsForBalance(enrollmentDetails, hasReviewer, hasVehicleTips);
+    const remainingBalanceDue = computeEmailRemainingBalance(pricingDetails, amountPaid, paymentStatus);
     const courseNameLower = (courseName || '').toLowerCase();
-    const isB1B2 = courseNameLower.includes('b1') || courseNameLower.includes('b2') || courseNameLower.includes('van') || courseNameLower.includes('l300');
     const isTricycle = courseNameLower.includes('a1') || courseNameLower.includes('tricycle');
 
     const path = require('path');
@@ -1190,6 +1617,21 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
               <h2 style="margin-top: 0;">${EMAIL_CONTENT.guest.greeting(firstName, lastName)}</h2>
               <p>${EMAIL_CONTENT.guest.intro}</p>
               
+              ${isOnlineTdc ? `
+              <div class="requirements" style="background: #ecfeff; border-left: 4px solid #0891b2; margin: 18px 0; border-radius: 8px;">
+                <h4 style="color: #0e7490; margin: 0 0 8px 0;">💻 Online TDC Provider Notice</h4>
+                <p style="margin: 0; font-size: 14px; color: #155e75;">
+                  Your Online TDC is handled by our partner providers <strong>drivetech.ph</strong> and <strong>OTDC.ph</strong>.
+                  Please wait up to <strong>30 minutes</strong> for your account activation email, and check your Inbox, Spam, and Promotions folders.
+                </p>
+              </div>
+              ${isPdcScheduleLocked ? `
+              <div class="requirements" style="background: #eff6ff; border-left: 4px solid #2563eb; margin: 12px 0 18px 0; border-radius: 8px;">
+                <h4 style="color: #1d4ed8; margin: 0 0 8px 0;">🗓️ PDC Scheduling Notice</h4>
+                <p style="margin: 0; font-size: 14px; color: #1e3a8a;">${pdcLockReason}</p>
+              </div>
+              ` : ''}
+              ` : `
               <div class="schedule-highlight">
                 <h3>${EMAIL_CONTENT.guest.scheduleHeading}</h3>
                 ${(hasMultiPdc || hasPrimarySchedule)
@@ -1200,6 +1642,7 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
                 <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">Please contact support if this persists.</div>
                 `}
               </div>
+              `}
 
               
               ${items.length > 0 ? `
@@ -1236,23 +1679,18 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
                   <span class="detail-label">Amount Paid:&nbsp;&nbsp;</span>
                   <span class="detail-value">₱${Number(amountPaid).toLocaleString()}</span>
                 </div>
+                ${isDownpayment && remainingBalanceDue > 0 ? `<div class="detail-row"><span class="detail-label">Remaining Balance:&nbsp;&nbsp;</span><span class="detail-value">₱${Number(remainingBalanceDue).toLocaleString()}</span></div>` : ''}
                 <div class="detail-row">
                   <span class="detail-label">Payment Status:&nbsp;&nbsp;</span>
                   <span class="detail-value">${paymentStatus}</span>
                 </div>
+                ${isPdcScheduleLocked ? `<div class="detail-row"><span class="detail-label">PDC Schedule:&nbsp;&nbsp;</span><span class="detail-value">${pdcLockReason}</span></div>` : ''}
               </div>
 
               ${isDownpayment ? `
               <div class="requirements" style="background: #e0f2fe; border-left: 4px solid #0284c7;">
                 <h4 style="color: #0369a1; margin-top: 0;">${EMAIL_CONTENT.downpaymentReminder.heading}</h4>
                 <p style="margin: 0; font-size: 14px; color: #0c4a6e;">${EMAIL_CONTENT.downpaymentReminder.note}</p>
-              </div>
-              ` : ''}
-
-              ${isB1B2 ? `
-              <div style="background: #eff6ff; border-left: 4px solid #2157da; padding: 12px 15px; margin: 15px 0; border-radius: 0 8px 8px 0; font-size: 13px;">
-                <strong style="color: #1e40af;">${EMAIL_CONTENT.vehicleRental.heading}</strong>
-                <p style="margin: 6px 0 0; color: #1e3a8a;">${EMAIL_CONTENT.vehicleRental.b1b2Note}</p>
               </div>
               ` : ''}
 
@@ -1263,12 +1701,14 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
               </div>
               ` : ''}
 
+              ${!isOnlineTdc ? `
               <div class="requirements">
                 <h4>${EMAIL_CONTENT.requirements.heading}</h4>
                 <ul>
                   ${(isTDC ? EMAIL_CONTENT.requirements.tdc : EMAIL_CONTENT.requirements.pdc).map(item => `<li>${item}</li>`).join('\n                  ')}
                 </ul>
               </div>
+              ` : ''}
 
               <div class="terms">
                 <h4>${EMAIL_CONTENT.terms.heading}</h4>
@@ -1285,13 +1725,13 @@ const sendGuestEnrollmentEmail = async (email, firstName, lastName, enrollmentDe
         </body>
         </html>
       `,
-      text: `Hello ${firstName} ${lastName}!\n\nYour enrollment has been successfully processed.\n\n${[hasPrimarySchedule ? `${courseName || 'Primary Schedule'}\nDay 1: ${formattedDate}\nSession: ${scheduleSession || 'N/A'}\nTime: ${scheduleTime || 'N/A'}${effectiveDate2 ? `\nDay 2: ${effectiveDate2}\nSession: ${effectiveSession2 || 'N/A'}\nTime: ${effectiveTime2 || 'N/A'}` : ''}` : '', hasMultiPdc
-        ? pdcSchedules.map((s, idx) => {
+      text: `Hello ${firstName} ${lastName}!\n\nYour enrollment has been successfully processed.\n\n${[isOnlineTdc ? `ONLINE TDC PROVIDER NOTICE:\nYour Online TDC is handled by drivetech.ph / OTDC.ph.\nPlease wait up to 30 minutes for your account activation email and check Inbox, Spam, and Promotions folders.${isPdcScheduleLocked ? `\n\nPDC SCHEDULING NOTICE:\n${pdcLockReason}` : ''}` : (hasPrimarySchedule ? `${primaryScheduleLabel}\nDay 1: ${formattedDate}\nSession: ${displayScheduleSession}\nTime: ${scheduleTime || 'N/A'}${effectiveDate2 ? `\nDay 2: ${effectiveDate2}\nSession: ${effectiveSession2 || 'N/A'}\nTime: ${effectiveTime2 || 'N/A'}` : ''}` : ''), hasMultiPdc
+        ? normalizedPdcSchedules.map((s, idx) => {
             const d1 = formatDisplayDate(s.scheduleDate);
             const d2 = formatDisplayDate(s.scheduleDate2);
-            return `${s.label || `PDC ${idx + 1}`}\nDay 1: ${d1}\nSession: ${s.scheduleSession || 'N/A'}\nTime: ${s.scheduleTime || 'N/A'}${d2 ? `\nDay 2: ${d2}\nSession: ${s.scheduleSession2 || 'N/A'}\nTime: ${s.scheduleTime2 || 'N/A'}` : ''}`;
+            return `${s.scheduleLabelDisplay || `PDC ${idx + 1}`}\nDay 1: ${d1}\nSession: ${s.scheduleSessionDisplay || 'N/A'}\nTime: ${s.scheduleTime || 'N/A'}${d2 ? `\nDay 2: ${d2}\nSession: ${s.scheduleSession2Display || 'N/A'}\nTime: ${s.scheduleTime2 || 'N/A'}` : ''}`;
           }).join('\n\n')
-        : ''].filter(Boolean).join('\n\n')}\nCourse: ${courseName} (${courseType})\n${hasCourseList ? `Enrolled Courses:\n${normalizedCourseList.map((c, idx) => `${idx + 1}. ${c?.name || `Course ${idx + 1}`} (${(c?.type || 'standard').toUpperCase()})`).join('\n')}\n` : ''}Branch: ${branchName}\n\n${isDownpayment ? `REMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n\n` : ''}${isB1B2 ? `VEHICLE RENTAL NOTE: For PDC - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}${isTricycle ? `VEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}Thank you for choosing Master Driving School!`,
+        : ''].filter(Boolean).join('\n\n')}\nCourse: ${courseName} (${courseType})\n${hasCourseList ? `Enrolled Courses:\n${normalizedCourseList.map((c, idx) => `${idx + 1}. ${c?.name || `Course ${idx + 1}`} (${(c?.type || 'standard').toUpperCase()})`).join('\n')}\n` : ''}Branch: ${branchName}\n\n${isDownpayment ? `${remainingBalanceDue > 0 ? `Remaining Balance: PHP ${Number(remainingBalanceDue).toLocaleString()}\n` : ''}REMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n\n` : ''}${isB1B2 ? `VEHICLE RENTAL NOTE: For PDC - B1/B2, students are required to rent their own VAN or L300 for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}${isTricycle ? `VEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}Thank you for choosing Master Driving School!`,
     };
 
     const info = await sendMailWithFallback(transporter, mailOptions);
@@ -1451,11 +1891,17 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
       balanceDue,
     } = receiptData;
 
+    const paidAmt = Math.max(0, Number(amountPaid || 0));
+    const courseAmt = Math.max(0, Number(coursePrice || 0));
+    const dueAmt = Math.max(0, Number(balanceDue || 0));
+    const resolvedIsFullPayment = Boolean(isFullPayment) && dueAmt <= 0.009;
+    const settledTotalAmt = resolvedIsFullPayment ? Math.max(courseAmt, paidAmt) : paidAmt;
+
     const formattedDate = paymentDate
       ? new Date(paymentDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
       : new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
-    const subject = isFullPayment
+    const subject = resolvedIsFullPayment
       ? EMAIL_CONTENT.receipt.subjectFull
       : EMAIL_CONTENT.receipt.subjectDown;
 
@@ -1513,13 +1959,13 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
             <div class="header">
               <h1>${EMAIL_CONTENT.schoolName}</h1>
               <h2 style="margin:0;font-size:16px;font-weight:400;opacity:.9;">
-                ${isFullPayment ? EMAIL_CONTENT.receipt.headerFull : EMAIL_CONTENT.receipt.headerDown}
+                ${resolvedIsFullPayment ? EMAIL_CONTENT.receipt.headerFull : EMAIL_CONTENT.receipt.headerDown}
               </h2>
             </div>
             <div class="content">
               <h2 style="margin-top:0;">${EMAIL_CONTENT.receipt.greeting(firstName, lastName)}</h2>
               <p>
-                ${isFullPayment
+                ${resolvedIsFullPayment
                   ? EMAIL_CONTENT.receipt.introFull
                   : EMAIL_CONTENT.receipt.introDown}
               </p>
@@ -1542,18 +1988,18 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
                 <div class="total-row">
                   <table class="total-inner">
                     <tr>
-                      <td class="total-label">${isFullPayment ? EMAIL_CONTENT.receipt.paidInFull : EMAIL_CONTENT.receipt.amountPaid}</td>
-                      <td class="total-value">₱${Number(amountPaid).toLocaleString()}</td>
+                      <td class="total-label">${resolvedIsFullPayment ? EMAIL_CONTENT.receipt.paidInFull : EMAIL_CONTENT.receipt.amountPaid}</td>
+                      <td class="total-value">₱${Number(settledTotalAmt).toLocaleString()}</td>
                     </tr>
                   </table>
                 </div>
               </div>
 
-              ${!isFullPayment && balanceDue > 0 ? `
+              ${!resolvedIsFullPayment && dueAmt > 0 ? `
               <div class="balance-box">
                 <h4>${EMAIL_CONTENT.receipt.balanceHeading}</h4>
-                <div class="balance-amount">₱${Number(balanceDue).toLocaleString()}</div>
-                <p style="margin:0;font-size:14px;color:#9a3412;">${EMAIL_CONTENT.receipt.balanceNote(balanceDue)}</p>
+                <div class="balance-amount">₱${Number(dueAmt).toLocaleString()}</div>
+                <p style="margin:0;font-size:14px;color:#9a3412;">${EMAIL_CONTENT.receipt.balanceNote(dueAmt)}</p>
                 <div class="steps">
                   <strong style="color:#92400e;">${EMAIL_CONTENT.receipt.balanceStepsHeading}</strong>
                   <ol>
@@ -1563,7 +2009,7 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
               </div>
               ` : ''}
 
-              ${isFullPayment ? `
+              ${resolvedIsFullPayment ? `
               <div class="success-badge">
                 <div style="font-size:32px;margin-bottom:8px;">${EMAIL_CONTENT.receipt.successBadge}</div>
                 <h3 style="color:#15803d;margin:0 0 6px 0;">${EMAIL_CONTENT.receipt.successHeading}</h3>
@@ -1641,6 +2087,166 @@ const sendTestEmail = async (email, html, subject) => {
   }
 };
 
+/**
+ * Send a PDC Schedule Assignment confirmation email to the student.
+ * @param {string} email
+ * @param {string} firstName
+ * @param {string} lastName
+ * @param {Object[]} pdcAssignments  - array of { courseName, courseType, pdcDate, pdcSession, pdcTime, pdcDate2, pdcSession2, pdcTime2 }
+ * @param {string} branchName
+ */
+const sendPdcScheduleAssignedEmail = async (email, firstName, lastName, pdcAssignments = [], branchName = '') => {
+  try {
+    const transporter = createTransporter();
+    const schoolName = EMAIL_CONTENT.schoolName || 'Master Driving School';
+
+    const formatDate = (d) => {
+      if (!d) return null;
+      try {
+        return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+      } catch { return d; }
+    };
+
+    const courseCardsHtml = pdcAssignments.map((a, idx) => {
+      const d1 = formatDate(a.pdcDate);
+      const d2 = formatDate(a.pdcDate2);
+      const hasDay2 = !!d2;
+      return `
+        <div style="background:#fff;border-radius:12px;border:1px solid #dbeafe;padding:20px 24px;margin-bottom:${idx < pdcAssignments.length - 1 ? '16px' : '0'};">
+          <div style="font-size:11px;font-weight:800;color:#10b981;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:8px;">
+            Course ${idx + 1}
+          </div>
+          <div style="font-size:16px;font-weight:800;color:#1e293b;margin-bottom:14px;line-height:1.3;">
+            ${a.courseName || 'PDC Course'}
+            ${a.courseType ? `<span style="font-size:12px;font-weight:600;color:#64748b;margin-left:6px;">(${a.courseType})</span>` : ''}
+          </div>
+          ${hasDay2 ? `
+            <div style="display:flex;gap:16px;flex-wrap:wrap;">
+              <div style="flex:1;min-width:140px;background:linear-gradient(135deg,#eff6ff,#e0e7ff);border-radius:10px;padding:14px 16px;border:1.5px solid #bfdbfe;">
+                <div style="font-size:10px;font-weight:800;color:#3b82f6;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">📅 Day 1</div>
+                <div style="font-size:17px;font-weight:800;color:#1e40af;margin-bottom:4px;">${d1}</div>
+                <div style="font-size:13px;color:#3b82f6;font-weight:600;">${a.pdcSession || ''}</div>
+                ${a.pdcTime ? `<div style="font-size:12px;color:#64748b;margin-top:3px;">${a.pdcTime}</div>` : ''}
+              </div>
+              <div style="flex:1;min-width:140px;background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-radius:10px;padding:14px 16px;border:1.5px solid #86efac;">
+                <div style="font-size:10px;font-weight:800;color:#10b981;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">📅 Day 2</div>
+                <div style="font-size:17px;font-weight:800;color:#15803d;margin-bottom:4px;">${d2}</div>
+                <div style="font-size:13px;color:#10b981;font-weight:600;">${a.pdcSession2 || a.pdcSession || ''}</div>
+                ${(a.pdcTime2 || a.pdcTime) ? `<div style="font-size:12px;color:#64748b;margin-top:3px;">${a.pdcTime2 || a.pdcTime}</div>` : ''}
+              </div>
+            </div>
+          ` : `
+            <div style="background:linear-gradient(135deg,#eff6ff,#e0e7ff);border-radius:10px;padding:14px 16px;border:1.5px solid #bfdbfe;">
+              <div style="font-size:10px;font-weight:800;color:#3b82f6;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">📅 Schedule</div>
+              <div style="font-size:17px;font-weight:800;color:#1e40af;margin-bottom:4px;">${d1}</div>
+              <div style="font-size:13px;color:#3b82f6;font-weight:600;">${a.pdcSession || ''}</div>
+              ${a.pdcTime ? `<div style="font-size:12px;color:#64748b;margin-top:3px;">${a.pdcTime}</div>` : ''}
+            </div>
+          `}
+        </div>
+      `;
+    }).join('');
+
+    const plainCourses = pdcAssignments.map((a, idx) => {
+      const d1 = formatDate(a.pdcDate);
+      const d2 = formatDate(a.pdcDate2);
+      let txt = `Course ${idx + 1}: ${a.courseName || 'PDC Course'}\n  Day 1: ${d1} — ${a.pdcSession || ''} ${a.pdcTime ? `(${a.pdcTime})` : ''}`;
+      if (d2) txt += `\n  Day 2: ${d2} — ${a.pdcSession2 || a.pdcSession || ''} ${(a.pdcTime2 || a.pdcTime) ? `(${a.pdcTime2 || a.pdcTime})` : ''}`;
+      return txt;
+    }).join('\n\n');
+
+    const mailOptions = {
+      from: getFromAddress(),
+      to: email,
+      subject: `Your PDC Schedule Has Been Assigned — ${schoolName}`,
+      html: `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body{font-family:Arial,sans-serif;line-height:1.6;color:#333;margin:0;padding:0}
+    .container{max-width:620px;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}
+    .header{background:linear-gradient(135deg,#1a4fba 0%,#3b82f6 100%);color:#fff;padding:32px 24px;text-align:center}
+    .header h1{margin:0 0 6px;font-size:26px}
+    .header p{margin:0;font-size:15px;opacity:.9}
+    .content{padding:32px 28px;background:#f8fafc}
+    .alert-box{background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:2px solid #22c55e;border-radius:12px;padding:18px 20px;margin-bottom:24px;text-align:center}
+    .alert-box .icon{font-size:36px;margin-bottom:8px}
+    .alert-box h2{color:#15803d;margin:0 0 6px;font-size:18px}
+    .alert-box p{margin:0;font-size:14px;color:#166534}
+    .section-title{font-size:12px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:1.2px;margin:0 0 14px}
+    .info-row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #f1f5f9;font-size:14px}
+    .info-row:last-child{border-bottom:none}
+    .info-label{color:#64748b;font-weight:600}
+    .info-value{color:#1f2937;font-weight:700;text-align:right}
+    .requirements{background:#fef3c7;border-left:4px solid #f59e0b;padding:15px 20px;margin:20px 0;border-radius:0 8px 8px 0}
+    .requirements h4{color:#92400e;margin:0 0 10px}
+    .requirements ul{margin:0;padding-left:20px}
+    .requirements li{padding:4px 0;color:#78350f;font-size:14px}
+    .footer{text-align:center;padding:20px;font-size:12px;color:#9ca3af;background:#f1f5f9}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>${schoolName}</h1>
+      <p>PDC Schedule Confirmation</p>
+    </div>
+    <div class="content">
+      <h2 style="margin-top:0">Hi ${firstName} ${lastName}! 👋</h2>
+      <div class="alert-box">
+        <div class="icon">🎉</div>
+        <h2>Your PDC Schedule is Confirmed!</h2>
+        <p>Your Practical Driving Course schedule has been assigned by our branch manager. Please review your schedule details below.</p>
+      </div>
+
+      <div class="section-title">Your PDC Schedule(s)</div>
+      ${courseCardsHtml}
+
+      ${branchName ? `
+      <div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:16px 20px;margin-top:20px;">
+        <div class="section-title">Branch Information</div>
+        <div class="info-row"><span class="info-label">Branch:&nbsp;&nbsp;</span><span class="info-value">${branchName}</span></div>
+      </div>` : ''}
+
+      <div class="requirements" style="margin-top:20px">
+        <h4>📋 What to Bring on Your First Day</h4>
+        <ul>
+          <li>Valid Government-Issued ID (Driver's License or any ID)</li>
+          <li>Student's Permit (if applicable)</li>
+          <li>Comfortable clothing suitable for driving</li>
+          <li>Any remaining balance payment (if downpayment was made)</li>
+        </ul>
+      </div>
+
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-top:16px;font-size:13px;color:#1e40af;">
+        ⏰ <strong>Important:</strong> Please arrive at least 10 minutes before your scheduled session. If you need to reschedule, contact the branch as soon as possible.
+      </div>
+
+      <p style="text-align:center;margin-top:24px">
+        <a href="${getFrontendUrl()}/profile" style="display:inline-block;padding:12px 28px;background:linear-gradient(135deg,#1a4fba,#3b82f6);color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">
+          View in My Account
+        </a>
+      </p>
+    </div>
+    <div class="footer">
+      <p>&copy; ${new Date().getFullYear()} ${schoolName}. All rights reserved.</p>
+      <p>This is an automated message — please do not reply directly to this email.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+      text: `Hi ${firstName} ${lastName}!\n\nYour PDC schedule has been assigned.\n\n${plainCourses}\n\n${branchName ? `Branch: ${branchName}\n\n` : ''}What to bring: Valid ID, Student's Permit (if any), comfortable clothing, and any remaining payment.\n\nThank you for choosing ${schoolName}!`,
+    };
+
+    const info = await sendMailWithFallback(transporter, mailOptions);
+    console.log('✅ PDC schedule assignment email sent to:', email);
+    return true;
+  } catch (error) {
+    console.error('❌ PDC schedule assignment email failed:', error.message);
+    throw error;
+  }
+};
+
 module.exports = {
   sendTestEmail,
   sendAddonsEmail,
@@ -1650,8 +2256,9 @@ module.exports = {
   generateRandomPassword,
   sendPasswordEmail,
   sendWalkInEnrollmentEmail,
-  sendGuestEnrollmentEmail,
+  sendEnrollmentEmail,
   sendNoShowEmail,
   sendNewsPromoEmail,
   sendPaymentReceiptEmail,
+  sendPdcScheduleAssignedEmail,
 };

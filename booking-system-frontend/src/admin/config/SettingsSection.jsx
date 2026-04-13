@@ -35,7 +35,7 @@ const SettingsCard = ({ icon, iconClass, title, badge, children }) => (
 );
 
 /* ─── main component ──────────────────────────────────────── */
-const SettingsSection = ({ settings, setSettings, onSave, onSettingChange }) => {
+const SettingsSection = ({ settings, setSettings, onSave, onSettingChange, isSuperAdmin = false }) => {
     const { theme, toggleTheme } = useTheme();
     const [saved, setSaved] = useState(false);
 
@@ -84,47 +84,48 @@ const SettingsSection = ({ settings, setSettings, onSave, onSettingChange }) => 
                         />
                     </SettingsCard>
 
-                    {/* ── 2. Branding ───────────────────────────────── */}
-                    <SettingsCard
-                        icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>}
-                        title="School Branding"
-                        iconClass="blue"
-                    >
-                        <FieldRow label="School Name">
-                            <input
-                                type="text"
-                                value={settings.siteName}
-                                onChange={e => set('siteName', e.target.value)}
-                                placeholder="e.g. Master Driving School"
-                            />
-                        </FieldRow>
-                        <FieldRow label="Tagline / Slogan">
-                            <input
-                                type="text"
-                                value={settings.tagline || ''}
-                                onChange={e => set('tagline', e.target.value)}
-                                placeholder="e.g. Building Champions on the Road"
-                            />
-                        </FieldRow>
-                        <div className="cfg-settings-2col">
-                            <FieldRow label="Support Email">
+                    {isSuperAdmin && (
+                        <SettingsCard
+                            icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>}
+                            title="School Branding"
+                            iconClass="blue"
+                        >
+                            <FieldRow label="School Name">
                                 <input
-                                    type="email"
-                                    value={settings.supportEmail}
-                                    onChange={e => set('supportEmail', e.target.value)}
-                                    placeholder="support@example.com"
+                                    type="text"
+                                    value={settings.siteName}
+                                    onChange={e => set('siteName', e.target.value)}
+                                    placeholder="e.g. Master Driving School"
                                 />
                             </FieldRow>
-                            <FieldRow label="Contact Number">
+                            <FieldRow label="Tagline / Slogan">
                                 <input
-                                    type="tel"
-                                    value={settings.contactNumber || ''}
-                                    onChange={e => set('contactNumber', e.target.value)}
-                                    placeholder="+63 900 000 0000"
+                                    type="text"
+                                    value={settings.tagline || ''}
+                                    onChange={e => set('tagline', e.target.value)}
+                                    placeholder="e.g. Building Champions on the Road"
                                 />
                             </FieldRow>
-                        </div>
-                    </SettingsCard>
+                            <div className="cfg-settings-2col">
+                                <FieldRow label="Support Email">
+                                    <input
+                                        type="email"
+                                        value={settings.supportEmail}
+                                        onChange={e => set('supportEmail', e.target.value)}
+                                        placeholder="support@example.com"
+                                    />
+                                </FieldRow>
+                                <FieldRow label="Contact Number">
+                                    <input
+                                        type="tel"
+                                        value={settings.contactNumber || ''}
+                                        onChange={e => set('contactNumber', e.target.value)}
+                                        placeholder="+63 900 000 0000"
+                                    />
+                                </FieldRow>
+                            </div>
+                        </SettingsCard>
+                    )}
 
                     {/* ── 3. Booking Rules ──────────────────────────── */}
                     <SettingsCard
@@ -133,33 +134,20 @@ const SettingsSection = ({ settings, setSettings, onSave, onSettingChange }) => 
                         iconClass="amber"
                         badge="Applied to new bookings"
                     >
-                        <div className="cfg-settings-2col">
-                            <FieldRow label="Max Students per Slot" hint="Applies to new schedule slots">
-                                <input
-                                    type="number"
-                                    min="1"
-                                    max="100"
-                                    value={settings.maxStudentsPerSlot}
-                                    onChange={e => set('maxStudentsPerSlot', Number(e.target.value))}
-                                />
-                            </FieldRow>
-                            <FieldRow label="Min Advance Booking (days)" hint="0 = book on the same day">
-                                <input
-                                    type="number"
-                                    min="0"
-                                    max="30"
-                                    value={settings.minBookingAdvanceDays}
-                                    onChange={e => set('minBookingAdvanceDays', Number(e.target.value))}
-                                />
-                            </FieldRow>
-                        </div>
-                        <FieldRow label="Auto-Cancel Unpaid Bookings After (days)" hint="Set to 0 to disable auto-cancellation">
+                        <FieldRow label="Max Students per Slot" hint="Fixed at 15 (hardcoded schedule capacity).">
                             <input
                                 type="number"
-                                min="0"
-                                max="60"
-                                value={settings.autoCancelDays}
-                                onChange={e => set('autoCancelDays', Number(e.target.value))}
+                                value={15}
+                                disabled
+                                readOnly
+                            />
+                        </FieldRow>
+                        <FieldRow label="Auto-Cancel Unpaid Bookings After (minutes)" hint="Fixed at 20 minutes and used by Payment/Profile timers.">
+                            <input
+                                type="number"
+                                value={20}
+                                disabled
+                                readOnly
                             />
                         </FieldRow>
                         <ToggleRow
@@ -171,58 +159,60 @@ const SettingsSection = ({ settings, setSettings, onSave, onSettingChange }) => 
                         />
                     </SettingsCard>
 
-                    {/* ── 4. Payment Settings ───────────────────────── */}
-                    <SettingsCard
-                        icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>}
-                        title="Payment Methods"
-                        iconClass="emerald"
-                    >
-                        <ToggleRow
-                            title="Enable Cash Payment"
-                            desc="Allow students to pay in cash at any branch."
-                            checked={settings.enableCash !== false}
-                            onChange={v => onSettingChange('enableCash', v)}
-                            accent="green"
-                        />
-                        <ToggleRow
-                            title="Require Payment Before Confirmation"
-                            desc="Keep bookings pending until payment is verified by admin."
-                            checked={settings.requirePaymentBeforeConfirm || false}
-                            onChange={v => onSettingChange('requirePaymentBeforeConfirm', v)}
-                            accent="amber"
-                        />
-                    </SettingsCard>
-
-                    {/* ── 5. Security & Access ──────────────────────── */}
-                    <SettingsCard
-                        icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>}
-                        title="Security & Access"
-                        iconClass="amber"
-                    >
-                        <ToggleRow
-                            title="Maintenance Mode"
-                            desc="Put the booking portal in maintenance — only admins can log in."
-                            checked={settings.maintenanceMode}
-                            onChange={v => onSettingChange('maintenanceMode', v)}
-                            accent="red"
-                        />
-                        <ToggleRow
-                            title="Auto-Verify New Registrations"
-                            desc="Automatically approve student accounts on sign-up."
-                            checked={settings.autoVerifyUsers}
-                            onChange={v => onSettingChange('autoVerifyUsers', v)}
-                            accent="green"
-                        />
-                        <FieldRow label="Session Timeout (minutes)" hint="Admin sessions expire after inactivity">
-                            <input
-                                type="number"
-                                min="5"
-                                max="480"
-                                value={settings.sessionTimeout}
-                                onChange={e => set('sessionTimeout', Number(e.target.value))}
+                    {isSuperAdmin && (
+                        <SettingsCard
+                            icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>}
+                            title="Payment Methods"
+                            iconClass="emerald"
+                        >
+                            <ToggleRow
+                                title="Enable Cash Payment"
+                                desc="Allow students to pay in cash at any branch."
+                                checked={settings.enableCash !== false}
+                                onChange={v => onSettingChange('enableCash', v)}
+                                accent="green"
                             />
-                        </FieldRow>
-                    </SettingsCard>
+                            <ToggleRow
+                                title="Require Payment Before Confirmation"
+                                desc="Keep bookings pending until payment is verified by admin."
+                                checked={settings.requirePaymentBeforeConfirm || false}
+                                onChange={v => onSettingChange('requirePaymentBeforeConfirm', v)}
+                                accent="amber"
+                            />
+                        </SettingsCard>
+                    )}
+
+                    {isSuperAdmin && (
+                        <SettingsCard
+                            icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>}
+                            title="Security & Access"
+                            iconClass="amber"
+                        >
+                            <ToggleRow
+                                title="Maintenance Mode"
+                                desc="Put the booking portal in maintenance — only admins can log in."
+                                checked={settings.maintenanceMode}
+                                onChange={v => onSettingChange('maintenanceMode', v)}
+                                accent="red"
+                            />
+                            <ToggleRow
+                                title="Auto-Verify New Registrations"
+                                desc="Automatically approve student accounts on sign-up."
+                                checked={settings.autoVerifyUsers}
+                                onChange={v => onSettingChange('autoVerifyUsers', v)}
+                                accent="green"
+                            />
+                            <FieldRow label="Session Timeout (minutes)" hint="Admin sessions expire after inactivity">
+                                <input
+                                    type="number"
+                                    min="5"
+                                    max="480"
+                                    value={settings.sessionTimeout}
+                                    onChange={e => set('sessionTimeout', Number(e.target.value))}
+                                />
+                            </FieldRow>
+                        </SettingsCard>
+                    )}
 
                     {/* ── 6. Notifications ──────────────────────────── */}
                     <SettingsCard
@@ -235,6 +225,13 @@ const SettingsSection = ({ settings, setSettings, onSave, onSettingChange }) => 
                             desc="Send real-time alerts inside the admin dashboard."
                             checked={settings.enableNotifications}
                             onChange={v => onSettingChange('enableNotifications', v)}
+                            accent="green"
+                        />
+                        <ToggleRow
+                            title="TDC Online Alerts"
+                            desc="Show reminder popups for pending TDC Online account setup only."
+                            checked={settings.tdcOnlineAlerts !== false}
+                            onChange={v => onSettingChange('tdcOnlineAlerts', v)}
                             accent="green"
                         />
                         <ToggleRow

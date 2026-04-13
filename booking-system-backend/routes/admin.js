@@ -23,12 +23,15 @@ const {
   getBranchPerformance,
   getNotifications,
   markBookingAsPaid,
+  assignPdcSchedule,
   sendReceiptEmail,
   getEmailContent,
   updateEmailContent,
   sendTestEmailRoute,
   sendAllEmailDesignsRoute,
   getTodayStudents,
+  getTdcOnlineStudents,
+  getPdcSchedulingQueue,
   getStudentDetail,
   getAddonsConfig,
   updateAddonsConfig,
@@ -51,6 +54,7 @@ const ROLE_PERMISSION_PRESETS = {
     'operations.schedules.tab.schedule',
     'operations.schedules.tab.summary',
     'operations.schedules.tab.noshow',
+    'operations.schedules.tab.tdc_online',
     'operations.bookings.manage',
     'operations.walk_in.manage',
     'operations.sales.manage',
@@ -167,6 +171,9 @@ router.get('/unpaid-bookings', getUnpaidBookings);
 // Mark booking as fully paid (collect remaining balance)
 router.patch('/bookings/:id/mark-paid', markBookingAsPaid);
 
+// Assign PDC schedule for CRM-gated bookings
+router.patch('/bookings/:id/assign-pdc', assignPdcSchedule);
+
 // Send payment receipt email
 router.post('/bookings/:id/send-receipt', sendReceiptEmail);
 
@@ -185,6 +192,15 @@ router.put('/addons-config', updateAddonsConfig);
 
 // Today's students with active schedule
 router.get('/today-students', getTodayStudents);
+
+// TDC Online students queue for provider onboarding
+router.get('/tdc-online-students', getTdcOnlineStudents);
+// Backward-compatible aliases for older frontend builds.
+router.get('/tdc_online_students', getTdcOnlineStudents);
+router.get('/online-tdc-students', getTdcOnlineStudents);
+
+// PDC scheduling queue (OTDC completed and locked for assignment)
+router.get('/pdc-scheduling-queue', getPdcSchedulingQueue);
 
 // Full student detail (personal info + bookings/payment)
 router.get('/student-detail/:studentId', getStudentDetail);

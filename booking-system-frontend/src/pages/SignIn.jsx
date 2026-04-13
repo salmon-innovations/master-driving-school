@@ -54,8 +54,6 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
       newErrors.email = 'Email is required'
     } else if (!/@/.test(formData.email)) {
       newErrors.email = 'Email must contain @'
-    } else if (!/\.com$/.test(formData.email.toLowerCase())) {
-      newErrors.email = 'Email must end with .com'
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       newErrors.email = 'Email format is invalid'
     }
@@ -287,7 +285,7 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
               <p className="text-xs text-red-500">{errors.terms}</p>
             )}
 
-            <div className="space-y-2">
+            <div className="space-y-2 flex flex-col items-center">
               <TurnstileWidget
                 onVerify={(token) => {
                   setTurnstileToken(token)

@@ -8,12 +8,13 @@ const {
   generateVerificationCode,
   sendVerificationEmail,
   sendWalkInEnrollmentEmail,
-  sendGuestEnrollmentEmail,
+  sendEnrollmentEmail,
   sendNoShowEmail,
   sendNewsPromoEmail,
   sendPaymentReceiptEmail,
   reloadEmailContent,
   sendTestEmail,
+  sendPdcScheduleAssignedEmail,
 } = require('../utils/emailService');
 
 const EMAIL_CONTENT_PATH = path.join(__dirname, '../config/emailContent.json');
@@ -67,6 +68,7 @@ const PERMISSION_GROUPS = [
       'operations.schedules.tab.schedule',
       'operations.schedules.tab.summary',
       'operations.schedules.tab.noshow',
+      'operations.schedules.tab.tdc_online',
     ],
   },
   {
@@ -90,6 +92,7 @@ const ROLE_PERMISSION_PRESETS = {
     'operations.schedules.tab.schedule',
     'operations.schedules.tab.summary',
     'operations.schedules.tab.noshow',
+    'operations.schedules.tab.tdc_online',
     'operations.bookings.manage',
     'operations.walk_in.manage',
     'operations.sales.manage',
@@ -159,7 +162,99 @@ const getUserBranchScope = async (user = {}) => {
   return { role, branchId, canViewAll: false };
 };
 
+const GLOBAL_B1B2_DAILY_CAPACITY = 2;
+const isB1B2CourseType = (courseType = '') => {
+  const src = String(courseType || '').toLowerCase();
+  return src.includes('b1') || src.includes('b2') || src.includes('van') || src.includes('l300');
+};
+
+const getGlobalB1B2BookedCount = async (dbClient, date, excludeStudentId = null) => {
+  const params = [date];
+  let excludeClause = '';
+  if (excludeStudentId) {
+    params.push(excludeStudentId);
+    excludeClause = ` AND se.student_id <> $${params.length}`;
+  }
+
+  const result = await dbClient.query(
+    `SELECT COUNT(DISTINCT se.student_id) AS booked_count
+       FROM schedule_enrollments se
+       JOIN schedule_slots ss ON ss.id = se.slot_id
+      WHERE ss.date = $1
+        AND (ss.course_type ILIKE '%B1%' OR ss.course_type ILIKE '%B2%' OR ss.course_type ILIKE '%VAN%' OR ss.course_type ILIKE '%L300%')
+        AND se.enrollment_status NOT IN ('cancelled', 'no-show')
+        ${excludeClause}`,
+    params
+  );
+
+  return Number(result.rows[0]?.booked_count || 0);
+};
+
+const assertB1B2CapacityForSlot = async (dbClient, slotId, excludeStudentId = null, slotRow = null) => {
+  let slot = slotRow;
+  if (!slot) {
+    const slotResult = await dbClient.query(
+      `SELECT id, date, course_type FROM schedule_slots WHERE id = $1 LIMIT 1`,
+      [slotId]
+    );
+    slot = slotResult.rows[0] || null;
+  }
+
+  if (!slot || !isB1B2CourseType(slot.course_type)) {
+    return;
+  }
+
+  const booked = await getGlobalB1B2BookedCount(dbClient, slot.date, excludeStudentId);
+  if (booked >= GLOBAL_B1B2_DAILY_CAPACITY) {
+    throw new Error(`The B1/B2 Van/L300 units are fully booked for ${slot.date} across all branches.`);
+  }
+};
+
 const isSameBranch = (left, right) => String(left || '') === String(right || '');
+
+const requestIncludesPdcCourse = async ({ courseCategory, courseId, courseIds }, db = pool) => {
+  if (String(courseCategory || '').toLowerCase() === 'pdc') {
+    return true;
+  }
+
+  const normalizedIds = [...new Set(
+    (Array.isArray(courseIds) ? courseIds : [courseId])
+      .filter(Boolean)
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0)
+  )];
+
+  if (normalizedIds.length === 0) {
+    return false;
+  }
+
+  const result = await db.query(
+    `SELECT 1
+       FROM courses
+      WHERE id = ANY($1::int[])
+        AND LOWER(COALESCE(category, '')) = 'pdc'
+      LIMIT 1`,
+    [normalizedIds]
+  );
+
+  return result.rows.length > 0;
+};
+
+const hasIncompleteOnlineTdcBooking = async (userId, db = pool) => {
+  const result = await db.query(
+    `SELECT 1
+       FROM bookings b
+       JOIN courses c ON c.id = b.course_id
+      WHERE b.user_id = $1
+        AND LOWER(COALESCE(c.category, '')) = 'tdc'
+        AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
+        AND LOWER(COALESCE(b.status, '')) NOT IN ('completed', 'cancelled')
+      LIMIT 1`,
+    [userId]
+  );
+
+  return result.rows.length > 0;
+};
 
 const getBookingAccessInScope = async (bookingId, scope, db = pool) => {
   const bookingRow = await db.query('SELECT id, branch_id FROM bookings WHERE id = $1', [bookingId]);
@@ -206,7 +301,7 @@ const getDashboardStats = async (req, res) => {
     // Get total enrolled students (from bookings + schedule_enrollments)
     const studentsResult = await pool.query(
       `SELECT COUNT(DISTINCT student_id) as total FROM (
-        SELECT user_id as student_id FROM bookings WHERE status IN ('confirmed', 'completed', 'paid', 'collectable')${bookingBranchFilter}
+        SELECT user_id as student_id FROM bookings WHERE status IN ('confirmed', 'completed', 'paid', 'partial_payment')${bookingBranchFilter}
         UNION
         SELECT se.student_id
         FROM schedule_enrollments se
@@ -216,22 +311,67 @@ const getDashboardStats = async (req, res) => {
     );
 
     // Get total revenue this month
-    const revenueResult = await pool.query(
-      `SELECT COALESCE(SUM(total_amount), 0) as total FROM bookings 
-       WHERE status IN ('confirmed', 'completed', 'paid', 'collectable')
-       ${bookingBranchFilter}
-       AND EXTRACT(MONTH FROM created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
-       AND EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)`
+    const isSuperAdmin = String(req.user.role || '').toLowerCase() === 'super_admin';
+    const rawRevenueResult = await pool.query(
+      `SELECT b.total_amount, b.notes, b.status, b.created_at, b.course_id, c.price as course_price 
+       FROM bookings b 
+       LEFT JOIN courses c ON b.course_id = c.id 
+      WHERE b.status IN ('confirmed', 'completed', 'paid', 'partial_payment') ${bookingBranchFilter}`
     );
 
-    // Get total revenue LAST month for growth rate
-    const lastMonthRevenueResult = await pool.query(
-      `SELECT COALESCE(SUM(total_amount), 0) as total FROM bookings 
-       WHERE status IN ('confirmed', 'completed', 'paid', 'collectable')
-       ${bookingBranchFilter}
-       AND created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
-       AND created_at < DATE_TRUNC('month', CURRENT_DATE)`
-    );
+    let currentRevCourse = 0;
+    let currentRevAddons = 0;
+    let currentRevConv = 0;
+    let lastMonthRevenue = 0;
+
+    const todayDate = new Date();
+    const currentMonth = todayDate.getMonth();
+    const currentYear = todayDate.getFullYear();
+    const lastMonthDate = new Date();
+    lastMonthDate.setMonth(currentMonth - 1);
+    const lastMonth = lastMonthDate.getMonth();
+    const lastMonthYear = lastMonthDate.getFullYear();
+
+    rawRevenueResult.rows.forEach(b => {
+      const d = new Date(b.created_at);
+      const isCurrent = d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      const isLast =  d.getMonth() === lastMonth && d.getFullYear() === lastMonthYear;
+
+      const tAmt = parseFloat(b.total_amount || 0);
+      let addrev = 0, conv = 0;
+
+      if (b.notes && typeof b.notes === 'string' && b.notes.trim().startsWith('{')) {
+        try {
+          const js = JSON.parse(b.notes);
+          if (js.convenienceFee) conv = parseFloat(js.convenienceFee);
+          if (Array.isArray(js.addonsDetailed)) {
+             addrev = js.addonsDetailed.reduce((sum, a) => sum + parseFloat(a.price || 0), 0);
+          }
+        } catch(e) {}
+      }
+
+      if (isCurrent) {
+        currentRevAddons += addrev;
+        currentRevConv += conv;
+        currentRevCourse += Math.max(0, tAmt - addrev - conv);
+      }
+      if (isLast) {
+        let l_addrev = 0, l_conv = 0;
+        if (b.notes && typeof b.notes === 'string' && b.notes.trim().startsWith('{')) {
+          try {
+            const js = JSON.parse(b.notes);
+            if (js.convenienceFee) l_conv = parseFloat(js.convenienceFee);
+            if (Array.isArray(js.addonsDetailed)) {
+               l_addrev = js.addonsDetailed.reduce((sum, a) => sum + parseFloat(a.price || 0), 0);
+            }
+          } catch(e) {}
+        }
+        let l_courseRev = Math.max(0, tAmt - l_addrev - l_conv);
+        lastMonthRevenue += isSuperAdmin ? tAmt : l_courseRev;
+      }
+    });
+
+    let currentRevenue = isSuperAdmin ? (currentRevCourse + currentRevAddons + currentRevConv) : currentRevCourse;
 
     // Get pending bookings count
     const pendingResult = await pool.query(
@@ -277,7 +417,7 @@ const getDashboardStats = async (req, res) => {
        FROM (
          SELECT user_id, COUNT(*) as booking_count
          FROM bookings
-         WHERE status IN ('confirmed', 'completed', 'paid', 'collectable')
+         WHERE status IN ('confirmed', 'completed', 'paid', 'partial_payment')
            ${bookingBranchFilter}
            AND created_at >= DATE_TRUNC('year', CURRENT_DATE)
          GROUP BY user_id
@@ -298,8 +438,6 @@ const getDashboardStats = async (req, res) => {
     );
 
     // Calculate Growth Rate
-    const currentRevenue = parseFloat(revenueResult.rows[0].total);
-    const lastMonthRevenue = parseFloat(lastMonthRevenueResult.rows[0].total);
     let growthRate = 0;
     if (lastMonthRevenue > 0) {
       growthRate = ((currentRevenue - lastMonthRevenue) / lastMonthRevenue) * 100;
@@ -312,6 +450,10 @@ const getDashboardStats = async (req, res) => {
       stats: {
         totalStudents: parseInt(studentsResult.rows[0].total),
         monthlyRevenue: currentRevenue,
+        addon_sales_total: isSuperAdmin ? currentRevAddons : 0,
+        convenience_fee_total: isSuperAdmin ? currentRevConv : 0,
+        course_revenue: currentRevCourse,
+        total_sales_with_addons_and_convenience: isSuperAdmin ? (currentRevCourse + currentRevAddons + currentRevConv) : currentRevCourse,
         pendingBookings: parseInt(pendingResult.rows[0].total),
         todayEnrollments: parseInt(todayEnrollmentsResult.rows[0].total),
 
@@ -548,7 +690,7 @@ const updateBookingStatus = async (req, res) => {
     const scope = await getUserBranchScope(req.user);
 
     // Validate status
-    const validStatuses = ['collectable', 'paid', 'cancelled', 'completed'];
+    const validStatuses = ['partial_payment', 'paid', 'cancelled', 'completed'];
     if (!validStatuses.includes(status.toLowerCase())) {
       return res.status(400).json({ error: 'Invalid status' });
     }
@@ -629,29 +771,68 @@ const getRevenueData = async (req, res) => {
       : '';
     if (!scope.canViewAll && scope.branchId) params.push(scope.branchId);
 
-    const result = await pool.query(`
+    const isSuperAdmin = String(req.user.role || '').toLowerCase() === 'super_admin';
+    const rawRevenue = await pool.query(`
       SELECT 
-        TO_CHAR(created_at, 'Mon') as name,
-        COALESCE(SUM(total_amount), 0) as revenue
-      FROM bookings
-      WHERE status IN ('confirmed', 'completed', 'paid', 'collectable')
+        EXTRACT(MONTH FROM b.created_at) as month_index,
+        TO_CHAR(b.created_at, 'Mon') as name,
+        b.total_amount, b.notes, b.created_at
+      FROM bookings b
+      WHERE b.status IN ('confirmed', 'completed', 'paid', 'partial_payment')
         ${branchClause}
-        AND created_at >= DATE_TRUNC('year', CURRENT_DATE)
-      GROUP BY TO_CHAR(created_at, 'Mon'), EXTRACT(MONTH FROM created_at)
-      ORDER BY EXTRACT(MONTH FROM created_at)
+        AND b.created_at >= DATE_TRUNC('year', CURRENT_DATE)
     `, params);
 
-    // If no data, return placeholder months
-    if (result.rows.length === 0) {
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const currentMonth = new Date().getMonth();
-      const placeholderData = months.slice(0, currentMonth + 1).map(name => ({ name, revenue: 0 }));
-      return res.json({ success: true, data: placeholderData });
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const currentMonthIndex = new Date().getMonth();
+    const monthData = {};
+    const addonBreakdownMap = {};
+    
+    let totalAddonsYear = 0;
+    let totalConvYear = 0;
+
+    rawRevenue.rows.forEach(r => {
+      const m = (parseInt(r.month_index) || 1) - 1;
+      const name = months[m];
+      if (!monthData[name]) monthData[name] = 0;
+
+      const tAmt = parseFloat(r.total_amount || 0);
+      let addrev = 0, conv = 0;
+
+      if (r.notes && typeof r.notes === 'string' && r.notes.trim().startsWith('{')) {
+        try {
+          const js = JSON.parse(r.notes);
+          if (js.convenienceFee) conv = parseFloat(js.convenienceFee);
+          if (Array.isArray(js.addonsDetailed)) {
+             js.addonsDetailed.forEach(a => {
+                const aPrice = parseFloat(a.price || 0);
+                addrev += aPrice;
+                if (!addonBreakdownMap[a.name]) addonBreakdownMap[a.name] = { count: 0, revenue: 0 };
+                addonBreakdownMap[a.name].count += 1;
+                addonBreakdownMap[a.name].revenue += aPrice;
+             });
+          }
+        } catch (e) {}
+      }
+      
+      let courseRev = Math.max(0, tAmt - addrev - conv);
+      totalAddonsYear += addrev;
+      totalConvYear += conv;
+
+      monthData[name] += isSuperAdmin ? (courseRev + addrev + conv) : courseRev;
+    });
+
+    const finalData = [];
+    for (let i = 0; i <= currentMonthIndex; i++) {
+        finalData.push({ name: months[i], revenue: monthData[months[i]] || 0 });
     }
+
+    const addon_breakdown = Object.keys(addonBreakdownMap).map(k => ({ name: k, ...addonBreakdownMap[k] })).sort((a,b) => b.revenue - a.revenue);
 
     res.json({
       success: true,
-      data: result.rows,
+      data: finalData,
+      addon_breakdown: isSuperAdmin ? addon_breakdown : []
     });
   } catch (error) {
     console.error('Get revenue data error:', error);
@@ -683,7 +864,7 @@ const getEnrollmentData = async (req, res) => {
         COUNT(DISTINCT CASE WHEN b.enrollment_type != 'walk-in' OR b.enrollment_type IS NULL THEN b.user_id END) as online
       FROM bookings b
       WHERE b.created_at >= DATE_TRUNC('year', CURRENT_DATE)
-      AND b.status IN ('confirmed', 'completed', 'paid', 'collectable')
+      AND b.status IN ('confirmed', 'completed', 'paid', 'partial_payment')
       ${bookingBranchClause}
       GROUP BY TO_CHAR(b.created_at, 'Mon'), EXTRACT(MONTH FROM b.created_at)
       ORDER BY EXTRACT(MONTH FROM b.created_at)
@@ -843,7 +1024,7 @@ const createUser = async (req, res) => {
     await ensureUserPermissionsColumn();
     const scope = await getUserBranchScope(req.user);
 
-    console.log('📝 CREATE USER REQUEST - Body:', req.body);
+    console.log('ðŸ“ CREATE USER REQUEST - Body:', req.body);
 
     const {
       firstName,
@@ -867,32 +1048,32 @@ const createUser = async (req, res) => {
       ? providedPermissions
       : getRoleDefaultPermissions(role);
 
-    console.log('📋 Extracted values:', { firstName, middleInitial, lastName, email, role, branch, contactNumber });
+    console.log('ðŸ“‹ Extracted values:', { firstName, middleInitial, lastName, email, role, branch, contactNumber });
 
     // Only allow creating Admin accounts.
     if (role !== 'admin') {
-      console.log('❌ Invalid role:', role);
+      console.log('âŒ Invalid role:', role);
       return res.status(403).json({ error: 'Can only create admin accounts' });
     }
 
     // Check if user already exists
-    console.log('🔍 Checking if user exists with email:', email);
+    console.log('ðŸ” Checking if user exists with email:', email);
     const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existingUser.rows.length > 0) {
-      console.log('❌ User already exists with email:', email);
+      console.log('âŒ User already exists with email:', email);
       return res.status(400).json({ error: 'User with this email already exists' });
     }
 
     // Generate random password
-    console.log('🔐 Generating random password...');
+    console.log('ðŸ” Generating random password...');
     const generatedPassword = generateRandomPassword();
-    console.log('✅ Password generated successfully');
+    console.log('âœ… Password generated successfully');
 
     // Hash password
-    console.log('🔒 Hashing password...');
+    console.log('ðŸ”’ Hashing password...');
     const bcrypt = require('bcryptjs');
     const hashedPassword = await bcrypt.hash(generatedPassword, 10);
-    console.log('✅ Password hashed successfully');
+    console.log('âœ… Password hashed successfully');
 
     // Prepare branch_id value. Admin can be assigned to all branches via branch = 'all'.
     const normalizedBranchValue = String(branch || '').trim().toLowerCase();
@@ -907,10 +1088,10 @@ const createUser = async (req, res) => {
         return res.status(403).json({ error: 'Branch managers can only create users in their assigned branch' });
       }
     }
-    console.log('🏢 Branch ID:', branchId);
+    console.log('ðŸ¢ Branch ID:', branchId);
 
     // Insert new user
-    console.log('💾 Inserting user into database...');
+    console.log('ðŸ’¾ Inserting user into database...');
     const result = await pool.query(
       `INSERT INTO users (
         first_name, middle_name, last_name, email, password, 
@@ -938,15 +1119,15 @@ const createUser = async (req, res) => {
         true, // Auto-verify admin accounts
       ]
     );
-    console.log('✅ User inserted successfully:', result.rows[0]);
+    console.log('âœ… User inserted successfully:', result.rows[0]);
 
     // Send password email (non-blocking)
     try {
-      console.log('📧 Sending password email to:', email);
+      console.log('ðŸ“§ Sending password email to:', email);
       await sendPasswordEmail(email, generatedPassword, firstName, role);
-      console.log('✅ Password email sent successfully to:', email);
+      console.log('âœ… Password email sent successfully to:', email);
     } catch (emailError) {
-      console.error('❌ Failed to send password email:', emailError);
+      console.error('âŒ Failed to send password email:', emailError);
       // Continue even if email fails - user is created
     }
 
@@ -957,9 +1138,9 @@ const createUser = async (req, res) => {
       passwordSent: true,
     });
   } catch (error) {
-    console.error('❌ CREATE USER ERROR - Full details:', error);
-    console.error('❌ Error message:', error.message);
-    console.error('❌ Error stack:', error.stack);
+    console.error('âŒ CREATE USER ERROR - Full details:', error);
+    console.error('âŒ Error message:', error.message);
+    console.error('âŒ Error stack:', error.stack);
     res.status(500).json({ error: 'Server error while creating user' });
   }
 };
@@ -1147,10 +1328,10 @@ const updateUser = async (req, res) => {
     if (isEmailChanged && newPassword) {
       try {
         await sendPasswordEmail(email, newPassword, firstName, role);
-        console.log('✅ New password email sent to updated email:', email);
+        console.log('âœ… New password email sent to updated email:', email);
         passwordSent = true;
       } catch (emailError) {
-        console.error('❌ Failed to send new password email:', emailError);
+        console.error('âŒ Failed to send new password email:', emailError);
         // Continue even if email fails
       }
     }
@@ -1276,37 +1457,62 @@ const resetUserPassword = async (req, res) => {
 const walkInEnrollment = async (req, res) => {
   const client = await pool.connect();
   try {
-    console.log('📝 WALK-IN ENROLLMENT REQUEST:', req.body);
+    console.log('ðŸ“ WALK-IN ENROLLMENT REQUEST:', req.body);
 
     const {
       firstName, middleName, lastName, age, gender, birthday,
       nationality, maritalStatus, address, zipCode, birthPlace,
       contactNumbers, email, emergencyContactPerson, emergencyContactNumber,
-      courseId, courseIds, courseCategory, courseType, courseTypePdc, branchId,
+      courseId, courseIds, pdcCourseIds = [], courseCategory, courseType, courseTypePdc, branchId,
       scheduleSlotId, scheduleDate,
       scheduleSlotId2, scheduleDate2,
       promoPdcSlotId2, promoPdcDate2,
       promoPdcSchedules = [],
+      pdcScheduleLockedUntilCompletion,
+      pdcScheduleLockReason,
       paymentMethod, amountPaid, paymentStatus,
       enrolledBy, addons = []
     } = req.body;
 
-    console.log('🔍 Walk-in enrollment received - TDC:', courseType, 'PDC:', courseTypePdc);
+    const normalizePaymentMethod = (method) => {
+      const m = String(method || '').trim().toLowerCase();
+      if (m === 'starpay' || m === 'starpay' || m === 'star pay') return 'StarPay';
+      if (m === 'gcash' || m === 'g-cash') return 'GCash';
+      if (m === 'metrobank' || m === 'metro bank') return 'MetroBank';
+      if (m === 'cash') return 'Cash';
+      return method || 'Cash';
+    };
+    const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
+    const isPromoPdcLocked = !!pdcScheduleLockedUntilCompletion;
+
+    console.log('ðŸ” Walk-in enrollment received - TDC:', courseType, 'PDC:', courseTypePdc);
 
     // Parse branchId to integer (comes as string from frontend select)
     const parsedBranchId = parseInt(branchId, 10);
+    const categoryNorm = String(courseCategory || '').toUpperCase();
+    const courseTypeNorm = String(courseType || '').toLowerCase();
+    const tdcScheduleLabelNorm = String(req.body?.tdcScheduleLabel || '').toLowerCase();
+    const lockReasonNorm = String(pdcScheduleLockReason || '').toLowerCase();
+    const hasOtdcMarker =
+      courseTypeNorm.includes('online')
+      || courseTypeNorm.includes('otdc')
+      || tdcScheduleLabelNorm.includes('online')
+      || tdcScheduleLabelNorm.includes('otdc');
+    const isOnlineTdcNoSchedule =
+      ((categoryNorm === 'TDC' || categoryNorm === 'PROMO') && hasOtdcMarker)
+      || (isPromoPdcLocked && (hasOtdcMarker || lockReasonNorm.includes('otdc')));
     const scope = await getUserBranchScope(req.user);
 
     // Validate required fields
-    if (!firstName || !lastName || !email || !courseId || !parsedBranchId || !scheduleSlotId || !scheduleDate) {
+    if (!firstName || !lastName || !email || !courseId || !parsedBranchId || (!isOnlineTdcNoSchedule && (!scheduleSlotId || !scheduleDate))) {
       const missing = [];
       if (!firstName) missing.push('firstName');
       if (!lastName) missing.push('lastName');
       if (!email) missing.push('email');
       if (!courseId) missing.push('courseId');
       if (!parsedBranchId) missing.push('branchId');
-      if (!scheduleSlotId) missing.push('scheduleSlotId');
-      if (!scheduleDate) missing.push('scheduleDate');
+      if (!isOnlineTdcNoSchedule && !scheduleSlotId) missing.push('scheduleSlotId');
+      if (!isOnlineTdcNoSchedule && !scheduleDate) missing.push('scheduleDate');
       return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
     }
 
@@ -1314,7 +1520,26 @@ const walkInEnrollment = async (req, res) => {
       return res.status(403).json({ error: 'Branch managers can only enroll walk-ins in their assigned branch' });
     }
 
+    const includesPdcCourse = await requestIncludesPdcCourse({ courseCategory, courseId, courseIds }, pool);
+    if (includesPdcCourse) {
+      const existingUserByEmail = await pool.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [email]);
+      if (existingUserByEmail.rows.length > 0) {
+        const blocked = await hasIncompleteOnlineTdcBooking(existingUserByEmail.rows[0].id, pool);
+        if (blocked) {
+          return res.status(403).json({
+            error: 'PDC enrollment is blocked. Student must complete Online TDC first. Mark it as Complete in CRM before enrolling to any PDC course.'
+          });
+        }
+      }
+    }
+
     const pdcSchedules = Array.isArray(promoPdcSchedules) ? promoPdcSchedules : [];
+    const resolvedTdcTypeFromLabel = (() => {
+      const src = String(req.body?.tdcScheduleLabel || '').toUpperCase();
+      if (src.includes('ONLINE')) return 'ONLINE';
+      if (src.includes('F2F')) return 'F2F';
+      return '';
+    })();
 
     const fallbackPdcDay1 = pdcSchedules.find(s => s?.scheduleSlotId && s?.scheduleDate) || null;
     const fallbackPdcDay2 = pdcSchedules.find(s => s?.promoPdcSlotId2 && s?.promoPdcDate2) || null;
@@ -1345,16 +1570,11 @@ const walkInEnrollment = async (req, res) => {
         if (slotAvailable <= 0) {
           return res.status(400).json({ error: `The selected slot on ${slotDate} is fully booked` });
         }
-        if (slotCourseType && (slotCourseType.toLowerCase().includes('b1') || slotCourseType.toLowerCase().includes('b2'))) {
-          const b1b2Check = await pool.query(`
-            SELECT 1 FROM schedule_slots 
-            WHERE date = $1 
-              AND (course_type ILIKE '%B1%' OR course_type ILIKE '%B2%')
-              AND branch_id IS NOT DISTINCT FROM $2
-              AND available_slots < total_capacity
-          `, [slotDate, slotBranchId]);
-          if (b1b2Check.rows.length > 0) {
-            return res.status(400).json({ error: `The B1/B2 unit is already fully booked for ${slotDate}.` });
+        if (slotCourseType && isB1B2CourseType(slotCourseType)) {
+          try {
+            await assertB1B2CapacityForSlot(pool, slotId);
+          } catch (capErr) {
+            return res.status(400).json({ error: capErr.message });
           }
         }
     }
@@ -1385,7 +1605,7 @@ const walkInEnrollment = async (req, res) => {
           emergencyContactPerson, emergencyContactNumber, userId
         ]
       );
-      console.log('✅ Existing user updated:', userId);
+      console.log('âœ… Existing user updated:', userId);
     } else {
       isNewUser = true;
       // 2. Generate password and verification code
@@ -1415,11 +1635,11 @@ const walkInEnrollment = async (req, res) => {
         ]
       );
       userId = userResult.rows[0].id;
-      console.log('✅ User created:', userId);
+      console.log('âœ… User created:', userId);
     }
 
     // 4. Create booking record
-    const bookingStatus = paymentStatus === 'Full Payment' ? 'paid' : 'collectable';
+    const bookingStatus = paymentStatus === 'Full Payment' ? 'paid' : 'partial_payment';
     const primaryCourseId = Array.isArray(courseIds) ? courseIds[0] : courseId;
     
     // Fetch all course details for accurate booking display and notes payload
@@ -1427,7 +1647,10 @@ const walkInEnrollment = async (req, res) => {
     let notesCourseList = [];
     let notesPdcSelections = {};
     try {
-      const idsToFetch = Array.isArray(courseIds) ? courseIds : [courseId];
+      const idsToFetch = [...new Set([
+        ...(Array.isArray(courseIds) ? courseIds : [courseId]),
+        ...(Array.isArray(pdcCourseIds) ? pdcCourseIds : []),
+      ].map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))];
       const courseMetaResult = await client.query(
         'SELECT id, name, category, course_type, price FROM courses WHERE id = ANY($1)',
         [idsToFetch]
@@ -1445,10 +1668,22 @@ const walkInEnrollment = async (req, res) => {
         .map((id) => {
           const meta = courseMetaById.get(Number(id));
           if (!meta) return null;
+          const selectedTdcType = String(courseType || '').toLowerCase() === 'promo-bundle'
+            ? resolvedTdcTypeFromLabel
+            : String(courseType || '');
+          const selectedPdcType = String(courseTypePdc || '');
+          let effectiveType = meta.course_type || '';
+
+          if (String(meta.category || '').toUpperCase() === 'TDC' && selectedTdcType) {
+            effectiveType = selectedTdcType;
+          } else if (String(meta.category || '').toUpperCase() === 'PDC' && selectedPdcType) {
+            effectiveType = selectedPdcType;
+          }
+
           return {
             id: meta.id,
             name: meta.name,
-            type: meta.course_type || '',
+            type: effectiveType,
             category: meta.category || '',
             price: Number(meta.price || 0),
           };
@@ -1459,11 +1694,16 @@ const walkInEnrollment = async (req, res) => {
         const resolvedCourseId = Number(schedule?.courseId) || null;
         const courseMeta = resolvedCourseId ? courseMetaById.get(resolvedCourseId) : null;
         const selectionKey = String(resolvedCourseId || `pdc_${idx + 1}`);
+        const resolvedLabel = String(schedule?.label || schedule?.courseName || '').trim();
+        const resolvedCourseName = String(schedule?.courseName || resolvedLabel || courseMeta?.name || `PDC Course ${idx + 1}`).trim();
+        const resolvedCourseType = String(schedule?.courseTypeDetailed || schedule?.courseType || courseMeta?.course_type || '').trim();
 
         notesPdcSelections[selectionKey] = {
           courseId: resolvedCourseId || schedule?.courseId || null,
-          courseName: courseMeta?.name || `PDC Course ${idx + 1}`,
-          courseType: courseMeta?.course_type || '',
+          label: resolvedLabel || resolvedCourseName,
+          courseName: resolvedCourseName,
+          courseType: resolvedCourseType,
+          transmission: schedule?.transmission || null,
           scheduleSlotId: schedule?.scheduleSlotId || null,
           promoPdcSlotId2: schedule?.promoPdcSlotId2 || null,
           pdcDate: schedule?.scheduleDate || null,
@@ -1479,7 +1719,11 @@ const walkInEnrollment = async (req, res) => {
         };
       });
 
-      if (Object.keys(notesPdcSelections).length === 0 && (resolvedScheduleDate2 || resolvedPromoPdcDate2)) {
+      const shouldStoreLegacyPdcSelection =
+        (Array.isArray(idsToFetch) && idsToFetch.length > 1)
+        || String(courseCategory || '').toUpperCase() === 'PROMO';
+
+      if (shouldStoreLegacyPdcSelection && Object.keys(notesPdcSelections).length === 0 && (resolvedScheduleDate2 || resolvedPromoPdcDate2)) {
         const fallbackPdcId = idsToFetch.find((id) => Number(id) !== Number(primaryCourseId));
         const fallbackMeta = fallbackPdcId ? courseMetaById.get(Number(fallbackPdcId)) : null;
         notesPdcSelections.legacy = {
@@ -1500,6 +1744,10 @@ const walkInEnrollment = async (req, res) => {
           },
         };
       }
+
+      if (isPromoPdcLocked) {
+        notesPdcSelections = {};
+      }
     } catch (e) {
       console.error('Error fetching combined names:', e);
       combinedCourseNames = 'Custom Bundle';
@@ -1514,6 +1762,58 @@ const walkInEnrollment = async (req, res) => {
       (a && typeof a === 'object' && (a.id === 'addon-tips' || (a.name && a.name.includes('Maintenance'))))
     );
 
+    const toAmount = (value) => {
+      if (value == null) return 0;
+      const numeric = Number(String(value).replace(/[^0-9.-]/g, ''));
+      return Number.isFinite(numeric) ? numeric : 0;
+    };
+
+    const normalizedCourseListForPricing = (() => {
+      const source = Array.isArray(req.body?.courseList) && req.body.courseList.length
+        ? req.body.courseList
+        : notesCourseList;
+      return (Array.isArray(source) ? source : []).map((item) => ({
+        id: item?.id || null,
+        name: item?.name || item?.courseName || item?.label || '',
+        type: item?.type || item?.courseType || '',
+        category: item?.category || '',
+        price: Math.max(0, toAmount(item?.finalPrice ?? item?.discountedPrice ?? item?.netPrice ?? item?.lineTotal ?? item?.price ?? item?.amount ?? item?.coursePrice ?? 0)),
+      }));
+    })();
+
+    const normalizedAddonsDetailed = (Array.isArray(addons) ? addons : []).map((addon) => ({
+      name: typeof addon === 'object' ? (addon?.name || addon?.id || 'Add-on') : String(addon || 'Add-on'),
+      price: Math.max(0, toAmount(typeof addon === 'object' ? addon?.price : 0)),
+    }));
+
+    const normalizedSubtotal = Math.max(0, toAmount(req.body?.subtotal));
+    const normalizedConvenienceFee = Math.max(0, toAmount(req.body?.convenienceFee));
+    let normalizedPromoDiscount = Math.max(0, toAmount(req.body?.promoDiscount));
+
+    const normalizedCourseTotal = normalizedCourseListForPricing.reduce((sum, item) => sum + Math.max(0, toAmount(item?.price)), 0);
+    const isPromoBundleRequest = String(courseType || '').toLowerCase().includes('promo-bundle') || String(courseCategory || '').toUpperCase().includes('PROMO');
+    if (normalizedPromoDiscount <= 0 && isPromoBundleRequest && normalizedCourseTotal > 0) {
+      normalizedPromoDiscount = Number((normalizedCourseTotal * 0.03).toFixed(2));
+    }
+
+    const normalizedBreakdownTotal = Math.max(0, Number((
+      (normalizedSubtotal > 0 ? normalizedSubtotal : normalizedCourseTotal + normalizedAddonsDetailed.reduce((s, a) => s + toAmount(a?.price), 0))
+      + normalizedConvenienceFee
+      - normalizedPromoDiscount
+    ).toFixed(2)));
+
+    const normalizedTotalAssessment = [
+      req.body?.totalAmount,
+      req.body?.finalTotal,
+      req.body?.grandTotal,
+      req.body?.assessedTotal,
+      normalizedBreakdownTotal,
+    ]
+      .map((v) => Math.max(0, toAmount(v)))
+      .find((v) => v > 0) || 0;
+
+    const bookingDateForRecord = scheduleDate || new Date().toISOString().slice(0, 10);
+
     const bookingResult = await client.query(
       `INSERT INTO bookings (
         user_id, course_id, branch_id, booking_date, 
@@ -1522,11 +1822,13 @@ const walkInEnrollment = async (req, res) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING id`,
       [
-        userId, primaryCourseId, parsedBranchId, scheduleDate,
-        amountPaid, paymentStatus, paymentMethod, bookingStatus,
+        userId, primaryCourseId, parsedBranchId, bookingDateForRecord,
+        amountPaid, paymentStatus, normalizedPaymentMethod, bookingStatus,
         'walk-in', courseType || (Array.isArray(courseIds) ? 'Bundle' : null), enrolledBy, 
         JSON.stringify({
           source: 'walk_in',
+          noScheduleRequired: isOnlineTdcNoSchedule,
+          isOnlineTdcNoSchedule,
           scheduleSlotId: scheduleSlotId || null,
           scheduleSlotId2: resolvedScheduleSlotId2 || null,
           promoPdcSlotId2: resolvedPromoPdcSlotId2 || null,
@@ -1534,23 +1836,34 @@ const walkInEnrollment = async (req, res) => {
           scheduleDate2: resolvedScheduleDate2 || null,
           promoPdcDate2: resolvedPromoPdcDate2 || null,
           pdcSelections: notesPdcSelections,
-          courseList: notesCourseList,
+          pdcCourseIds: [...new Set((Array.isArray(pdcCourseIds) ? pdcCourseIds : [])
+            .map((id) => Number(id))
+            .filter((id) => Number.isFinite(id) && id > 0))],
+          pdcScheduleLockedUntilCompletion: isPromoPdcLocked,
+          pdcScheduleLockReason: isPromoPdcLocked
+            ? (pdcScheduleLockReason || 'PDC schedule will be assigned by Admin/Superadmin after OTDC is marked complete.')
+            : null,
+          courseList: normalizedCourseListForPricing,
           paymentType: paymentStatus || null,
           hasReviewer: hasReviewerAddon,
           hasVehicleTips: hasVehicleTipsAddon,
           displayNotes: `Walk-In Enrollment: ${combinedCourseNames}`,
           combinedCourseNames,
           addonNames: (addons || []).map(a => typeof a === 'object' ? a.name : a).filter(Boolean).join(', '),
-          addonsDetailed: (addons || []).map(a => ({ name: a.name, price: a.price || 0 })),
+          addonsDetailed: normalizedAddonsDetailed,
           courseTypePdc,
-          courseTypeTdc: courseType,
-          subtotal: req.body.subtotal || 0,
-          promoDiscount: req.body.promoDiscount || 0,
-          convenienceFee: req.body.convenienceFee || 0
+          courseTypeTdc: notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'TDC')
+            ? (resolvedTdcTypeFromLabel || notesCourseList.find((item) => String(item?.category || '').toUpperCase() === 'TDC')?.type || courseType || null)
+            : null,
+          subtotal: normalizedSubtotal,
+          promoDiscount: normalizedPromoDiscount,
+          convenienceFee: normalizedConvenienceFee,
+          totalAmount: normalizedTotalAssessment,
+          initialAmountPaid: Math.max(0, toAmount(amountPaid))
         })
       ]
     );
-    console.log('✅ Booking created:', bookingResult.rows[0].id);
+    console.log('âœ… Booking created:', bookingResult.rows[0].id);
 
     // 6. Slot capacity management (Loops through all passed slots)
     const allSlots = [
@@ -1578,14 +1891,22 @@ const walkInEnrollment = async (req, res) => {
       const isNewEnrollment = enrollResult.rows[0].is_new_enrollment;
       
       if (isNewEnrollment) {
-        await client.query(
-          `UPDATE schedule_slots SET available_slots = GREATEST(available_slots - 1, 0), updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1`,
+        await assertB1B2CapacityForSlot(client, slot.id, userId);
+        const dec = await client.query(
+          `UPDATE schedule_slots
+              SET available_slots = available_slots - 1,
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+              AND available_slots > 0
+            RETURNING id`,
           [slot.id]
         );
-        console.log(`✅ New enrollment created & capacity updated for ${slot.label}`);
+        if (dec.rows.length === 0) {
+          throw new Error(`Selected slot ${slot.id} is already full.`);
+        }
+        console.log(`âœ… New enrollment created & capacity updated for ${slot.label}`);
       } else {
-        console.log(`✅ Existing enrollment updated/re-linked for ${slot.label} (no capacity change)`);
+        console.log(`âœ… Existing enrollment updated/re-linked for ${slot.label} (no capacity change)`);
       }
     }
 
@@ -1596,21 +1917,29 @@ const walkInEnrollment = async (req, res) => {
     const branchResult = await pool.query('SELECT name, address FROM branches WHERE id = $1', [parsedBranchId]);
     
     // Fetch slot details for up to 3 slots (TDC, PDC Day 1, PDC Day 2)
-    const slotResult = await pool.query('SELECT session, time_range, end_date FROM schedule_slots WHERE id = $1', [scheduleSlotId]);
+    const slotResult = scheduleSlotId
+      ? await pool.query('SELECT session, time_range, end_date FROM schedule_slots WHERE id = $1', [scheduleSlotId])
+      : { rows: [] };
     
     const courseNameEmail = combinedCourseNames || 'Driving Course';
     const courseCat = courseCategory || courseResult.rows[0]?.category || 'PDC';
     const branchName = branchResult.rows[0]?.name || 'N/A';
     const branchAddress = branchResult.rows[0]?.address || '';
-    const scheduleSession = slotResult.rows[0]?.session || 'N/A';
-    const scheduleTime = slotResult.rows[0]?.time_range || 'N/A';
-    const scheduleEndDate = slotResult.rows[0]?.end_date || null;
+    const scheduleSession = isOnlineTdcNoSchedule ? 'N/A (Online)' : (slotResult.rows[0]?.session || 'N/A');
+    const scheduleTime = isOnlineTdcNoSchedule ? 'Provider-managed' : (slotResult.rows[0]?.time_range || 'N/A');
+    const scheduleEndDate = isOnlineTdcNoSchedule ? null : (slotResult.rows[0]?.end_date || null);
 
-    // Get PDC Day 1 details
+    const isRegularPdc = String(courseCat || '').toUpperCase() === 'PDC';
+
+    // Resolve PDC details (regular single PDC vs promo/bundle payload shape)
     let pdcSession1 = null;
     let pdcTime1 = null;
     let pdcDate1 = null;
-    if (resolvedScheduleSlotId2 && resolvedScheduleDate2) {
+    if (isRegularPdc) {
+      pdcDate1 = scheduleDate || null;
+      pdcSession1 = slotResult.rows[0]?.session || null;
+      pdcTime1 = slotResult.rows[0]?.time_range || null;
+    } else if (resolvedScheduleSlotId2 && resolvedScheduleDate2) {
       const slot2Result = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [resolvedScheduleSlotId2]);
       pdcSession1 = slot2Result.rows[0]?.session || 'N/A';
       pdcTime1 = slot2Result.rows[0]?.time_range || 'N/A';
@@ -1621,7 +1950,12 @@ const walkInEnrollment = async (req, res) => {
     let pdcSession2 = null;
     let pdcTime2 = null;
     let pdcDate2 = null;
-    if (resolvedPromoPdcSlotId2 && resolvedPromoPdcDate2) {
+    if (isRegularPdc && resolvedScheduleSlotId2 && resolvedScheduleDate2) {
+      const pdcSlot2Result = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [resolvedScheduleSlotId2]);
+      pdcSession2 = pdcSlot2Result.rows[0]?.session || 'N/A';
+      pdcTime2 = pdcSlot2Result.rows[0]?.time_range || 'N/A';
+      pdcDate2 = resolvedScheduleDate2;
+    } else if (resolvedPromoPdcSlotId2 && resolvedPromoPdcDate2) {
       const promoSlot2Result = await pool.query('SELECT session, time_range FROM schedule_slots WHERE id = $1', [resolvedPromoPdcSlotId2]);
       pdcSession2 = promoSlot2Result.rows[0]?.session || 'N/A';
       pdcTime2 = promoSlot2Result.rows[0]?.time_range || 'N/A';
@@ -1643,14 +1977,26 @@ const walkInEnrollment = async (req, res) => {
 
     // 8. Send walk-in enrollment confirmation email
     try {
+      const resolvedTdcLabel = (() => {
+        const source = String(req.body?.tdcScheduleLabel || '').trim();
+        if (source) return source;
+        const tdc = notesCourseList.find((item) => String(item?.category || '').toUpperCase() === 'TDC');
+        if (!tdc) return 'TDC';
+        const tdcType = String(tdc?.type || '').toUpperCase();
+        return tdcType ? `TDC ${tdcType}` : 'TDC';
+      })();
+
       await sendWalkInEnrollmentEmail(email, firstName, lastName, generatedPassword, verificationCode, {
+        bookingId: bookingResult.rows[0].id,
         courseName: courseNameEmail,
+        courseList: normalizedCourseListForPricing,
         courseCategory: courseCat,
-        courseType,
+        courseType: (String(courseType || '').toLowerCase() === 'promo-bundle' ? (resolvedTdcTypeFromLabel || courseType) : courseType),
         courseTypePdc, // Pass both types for bundles
+        tdcLabel: resolvedTdcLabel,
         branchName,
         branchAddress,
-        scheduleDate,
+        scheduleDate: isOnlineTdcNoSchedule ? null : (scheduleDate || null),
         scheduleSession,
         scheduleTime,
         scheduleEndDate, // For TDC Auto-Day 2
@@ -1661,15 +2007,24 @@ const walkInEnrollment = async (req, res) => {
         pdcSession2,
         pdcTime2,
         pdcSchedules,
-        paymentMethod,
+        pdcScheduleLockedUntilCompletion: isPromoPdcLocked,
+        pdcScheduleLockReason: isPromoPdcLocked
+          ? (pdcScheduleLockReason || 'PDC schedule will be assigned by Admin/Superadmin after OTDC is marked complete.')
+          : null,
+        paymentMethod: normalizedPaymentMethod,
         amountPaid,
         paymentStatus,
         addonNames, // Added for accuracy in enrollment details box
+        addonsDetailed: normalizedAddonsDetailed,
+        subtotal: normalizedSubtotal,
+        promoDiscount: normalizedPromoDiscount,
+        convenienceFee: normalizedConvenienceFee,
+        totalAmount: normalizedTotalAssessment,
         isNewUser // Pass flag to control credentials display in email
       }, hasReviewer, hasVehicleTips);
-      console.log('✅ Enrollment email sent to:', email);
+      console.log('âœ… Enrollment email sent to:', email);
     } catch (emailError) {
-      console.error('⚠️ Failed to send enrollment email:', emailError.message);
+      console.error('âš ï¸ Failed to send enrollment email:', emailError.message);
       // Continue - enrollment still succeeded even if email fails
     }
 
@@ -1686,7 +2041,7 @@ const walkInEnrollment = async (req, res) => {
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('❌ Walk-in enrollment error:', error);
+    console.error('âŒ Walk-in enrollment error:', error);
 
     if (error.code === '23505') { // Unique violation
       if (error.constraint === 'schedule_enrollments_slot_id_student_id_key') {
@@ -1710,7 +2065,7 @@ const getAllTransactions = async (req, res) => {
       return res.json({ success: true, transactions: [] });
     }
 
-    const whereParts = ["b.status IN ('paid', 'collectable', 'confirmed', 'completed')"];
+    const whereParts = ["b.status IN ('paid', 'partial_payment', 'confirmed', 'completed')"];
     const queryParams = [];
     let paramIndex = 1;
 
@@ -1748,7 +2103,25 @@ const getAllTransactions = async (req, res) => {
     );
 
     const transactions = [];
+    const isSuperAdmin = String(req.user.role || '').toLowerCase() === 'super_admin';
+
     for (const row of result.rows) {
+      const tAmt = parseFloat(row.total_amount || 0);
+      let addrev = 0, conv = 0;
+
+      if (row.notes && typeof row.notes === 'string' && row.notes.trim().startsWith('{')) {
+        try {
+          const js = JSON.parse(row.notes);
+          if (js.convenienceFee) conv = parseFloat(js.convenienceFee);
+          if (Array.isArray(js.addonsDetailed)) {
+             addrev = js.addonsDetailed.reduce((sum, a) => sum + parseFloat(a.price || 0), 0);
+          }
+        } catch(e) {}
+      }
+
+      const courseRev = Math.max(0, tAmt - addrev - conv);
+      let finalAmt = isSuperAdmin ? tAmt : courseRev;
+
       // Full Payment bookings, confirmed (StarPay) and directly-paid bookings are Success
       const isPaid = row.status === 'paid' || row.status === 'confirmed' || row.status === 'completed' || row.payment_type === 'Full Payment';
       transactions.push({
@@ -1756,14 +2129,14 @@ const getAllTransactions = async (req, res) => {
         booking_id: row.id,
         student_name: row.student_name || 'Unknown',
         transaction_date: row.created_at,
-        amount: parseFloat(row.total_amount || 0),
+        amount: finalAmt,
         payment_method: row.payment_method || 'Cash',
         payment_type: row.payment_type || 'Full Payment',
-        status: isPaid ? 'Success' : 'Collectable',
+        status: isPaid ? 'Success' : 'Partial Payment',
         course_name: row.course_name || 'N/A',
         branch_name: row.branch_name || 'Unknown',
         branch_id: row.branch_id || null,
-        notes: row.notes || null
+        notes: isSuperAdmin ? row.notes : null
       });
 
       // Emit a separate row for the rescheduling fee if present in notes
@@ -1791,7 +2164,7 @@ const getAllTransactions = async (req, res) => {
   }
 };
 
-// Get unpaid/collectable bookings
+// Get unpaid/partial-payment bookings
 const getUnpaidBookings = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
@@ -1803,7 +2176,7 @@ const getUnpaidBookings = async (req, res) => {
     const requestedBranchId = branchId ? parseInt(branchId, 10) : null;
     const effectiveBranchId = scope.canViewAll ? requestedBranchId : scope.branchId;
 
-    const whereParts = ["b.status = 'collectable'", "b.payment_type != 'Full Payment'"];
+    const whereParts = ["b.status IN ('partial_payment')", "b.payment_type != 'Full Payment'"];
     const params = [];
     let paramIdx = 1;
     if (effectiveBranchId) {
@@ -1925,13 +2298,13 @@ const getFunnelData = async (req, res) => {
     const totalBookingsResult = await pool.query(
       `SELECT COUNT(DISTINCT user_id) as count
        FROM bookings
-       WHERE status IN ('confirmed', 'completed', 'paid', 'collectable') ${bookingBranchClause}`,
+      WHERE status IN ('confirmed', 'completed', 'paid', 'partial_payment') ${bookingBranchClause}`,
       params
     );
     const activeBookingsResult = await pool.query(
       `SELECT COUNT(DISTINCT user_id) as count
        FROM bookings
-       WHERE status IN ('confirmed', 'paid', 'collectable') ${bookingBranchClause}`,
+      WHERE status IN ('confirmed', 'paid', 'partial_payment') ${bookingBranchClause}`,
       params
     );
     const completedBookingsResult = await pool.query(
@@ -2032,7 +2405,7 @@ const getBranchPerformance = async (req, res) => {
       SELECT br.name as branch_name, COALESCE(SUM(b.total_amount), 0) as revenue
       FROM bookings b
       JOIN branches br ON b.branch_id = br.id
-      WHERE b.status IN ('confirmed', 'completed', 'paid', 'collectable')
+      WHERE b.status IN ('confirmed', 'completed', 'paid', 'partial_payment')
       ${branchClause}
       GROUP BY br.name
       ORDER BY revenue DESC
@@ -2077,10 +2450,53 @@ const markBookingAsPaid = async (req, res) => {
     const coursePrice = parseFloat(booking.course_price || 0);
     const previousAmount = parseFloat(booking.total_amount || 0);
     const isDownpaymentBooking = String(booking.payment_type || '').toLowerCase().includes('down');
+
+    let notesJson = {};
+    try {
+      notesJson = booking.notes && String(booking.notes).startsWith('{') ? JSON.parse(booking.notes) : {};
+    } catch (_) {
+      notesJson = {};
+    }
+
+    const toAmount = (value) => {
+      if (value == null) return 0;
+      const numeric = Number(String(value).replace(/[^0-9.-]/g, ''));
+      return Number.isFinite(numeric) ? numeric : 0;
+    };
+
+    const notesCourseTotal = (Array.isArray(notesJson?.courseList) ? notesJson.courseList : []).reduce((sum, item) => {
+      const line = item?.finalPrice ?? item?.discountedPrice ?? item?.netPrice ?? item?.lineTotal ?? item?.price ?? item?.amount ?? item?.coursePrice ?? 0;
+      return sum + Math.max(0, toAmount(line));
+    }, 0);
+    const notesAddonTotal = (Array.isArray(notesJson?.addonsDetailed) ? notesJson.addonsDetailed : []).reduce((sum, item) => {
+      return sum + Math.max(0, toAmount(item?.price || 0));
+    }, 0);
+
+    const notesPromo = Math.max(0, toAmount(notesJson?.promoDiscount || 0));
+    const notesConvenience = Math.max(0, toAmount(notesJson?.convenienceFee || 0));
+    const notesSubtotal = Math.max(0, toAmount(notesJson?.subtotal || 0));
+    const notesDerivedAssessment = Math.max(0, Number(((notesSubtotal > 0 ? notesSubtotal : (notesCourseTotal + notesAddonTotal)) + notesConvenience - notesPromo).toFixed(2)));
+    const explicitNotesAssessment = [
+      notesJson?.totalAmount,
+      notesJson?.grandTotal,
+      notesJson?.finalTotal,
+      notesJson?.assessedTotal,
+      notesJson?.payableAmount,
+      notesJson?.amountToPay,
+    ]
+      .map((v) => Math.max(0, toAmount(v)))
+      .find((v) => v > 0) || 0;
+
     const estimatedAssessment = isDownpaymentBooking && previousAmount > 0
       ? (previousAmount * 2)
       : coursePrice;
-    const targetAssessment = Math.max(estimatedAssessment, previousAmount, coursePrice);
+    const targetAssessment = Math.max(
+      explicitNotesAssessment,
+      notesDerivedAssessment,
+      estimatedAssessment,
+      previousAmount,
+      coursePrice
+    );
 
     let collectAmount = Number(amount_to_collect);
     if (!Number.isFinite(collectAmount) || collectAmount <= 0) {
@@ -2089,7 +2505,7 @@ const markBookingAsPaid = async (req, res) => {
 
     const nextTotalAmount = Math.min(targetAssessment, previousAmount + collectAmount);
     const remainingBalance = Math.max(0, Number((targetAssessment - nextTotalAmount).toFixed(2)));
-    const nextStatus = remainingBalance <= 0.009 ? 'paid' : 'collectable';
+    const nextStatus = remainingBalance <= 0.009 ? 'paid' : 'partial_payment';
     const nextPaymentType = nextStatus === 'paid' ? 'Full Payment' : 'Downpayment';
 
     const result = await pool.query(
@@ -2105,21 +2521,53 @@ const markBookingAsPaid = async (req, res) => {
       [nextStatus, Number(nextTotalAmount.toFixed(2)), nextPaymentType, payment_method || null, transaction_id || null, id]
     );
 
-    // Auto-enroll in schedule slot(s) if stored in notes (e.g. StarPay guest bookings)
+    try {
+      const paymentHistory = Array.isArray(notesJson.paymentHistory) ? notesJson.paymentHistory : [];
+      const collectedNow = Math.max(0, Number((nextTotalAmount - previousAmount).toFixed(2)));
+      if (!Number.isFinite(Number(notesJson.initialAmountPaid))) {
+        notesJson.initialAmountPaid = Math.max(0, Number(previousAmount.toFixed(2)));
+      }
+      paymentHistory.push({
+        at: new Date().toISOString(),
+        amount: collectedNow,
+        paymentMethod: payment_method || booking.payment_method || 'Cash',
+        transactionId: transaction_id || booking.transaction_id || null,
+        statusAfter: nextStatus,
+        totalPaidAfter: Math.max(0, Number(nextTotalAmount.toFixed(2))),
+      });
+      notesJson.paymentHistory = paymentHistory;
+
+      await pool.query(
+        `UPDATE bookings SET notes = $2 WHERE id = $1`,
+        [id, JSON.stringify(notesJson)]
+      );
+    } catch (notesErr) {
+      console.error('Payment history notes update failed (non-fatal):', notesErr.message);
+    }
+
+    // Auto-enroll in schedule slot(s) if stored in notes (e.g. older online StarPay bookings)
     try {
       const meta = JSON.parse(booking.notes || '{}');
       for (const key of ['scheduleSlotId', 'scheduleSlotId2']) {
         if (meta[key]) {
+          await assertB1B2CapacityForSlot(pool, meta[key], booking.user_id);
           await pool.query(
             `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
              VALUES ($1, $2, 'enrolled')
              ON CONFLICT (slot_id, student_id) DO NOTHING`,
             [meta[key], booking.user_id]
           );
-          await pool.query(
-            `UPDATE schedule_slots SET available_slots = GREATEST(available_slots - 1, 0) WHERE id = $1`,
+          const dec = await pool.query(
+            `UPDATE schedule_slots
+                SET available_slots = available_slots - 1
+              WHERE id = $1
+                AND available_slots > 0
+              RETURNING id`,
             [meta[key]]
           );
+          if (dec.rows.length === 0) {
+            throw new Error(`Selected slot ${meta[key]} is already full.`);
+          }
         }
       }
     } catch (enrollErr) {
@@ -2139,11 +2587,12 @@ const markBookingAsPaid = async (req, res) => {
         );
         if (userResult.rows.length > 0) {
           const u = userResult.rows[0];
+          const receiptPaymentAmount = Math.max(0, Number((nextTotalAmount - previousAmount).toFixed(2)));
           await sendPaymentReceiptEmail(u.email, u.first_name, u.last_name, {
             bookingId: id,
             transactionId: transaction_id || `TXN-${new Date().getFullYear()}-${String(id).padStart(3, '0')}`,
             courseName: u.course_name || 'N/A',
-            amountPaid: nextTotalAmount,
+            amountPaid: receiptPaymentAmount,
             coursePrice: targetAssessment,
             paymentMethod: payment_method || 'Cash',
             paymentDate: new Date(),
@@ -2171,6 +2620,309 @@ const markBookingAsPaid = async (req, res) => {
   }
 };
 
+const assignPdcSchedule = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { assignments } = req.body || {};
+    const scope = await getUserBranchScope(req.user);
+
+    const access = await getBookingAccessInScope(id, scope);
+    if (!access.exists) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    if (!access.allowed) {
+      return res.status(403).json({ error: 'Access denied for this branch booking' });
+    }
+
+    if (!Array.isArray(assignments) || assignments.length === 0) {
+      return res.status(400).json({ error: 'At least one PDC assignment is required.' });
+    }
+
+    await client.query('BEGIN');
+
+    const bookingResult = await client.query(
+      `SELECT id, user_id, branch_id, status, notes, updated_at
+       FROM bookings
+       WHERE id = $1
+       FOR UPDATE`,
+      [id]
+    );
+
+    if (bookingResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    const booking = bookingResult.rows[0];
+    const status = String(booking.status || '').toLowerCase();
+
+    let notesJson = {};
+    try {
+      notesJson = booking.notes && String(booking.notes).startsWith('{') ? JSON.parse(booking.notes) : {};
+    } catch {
+      notesJson = {};
+    }
+
+    const isPdcLockedByOtdc = !!notesJson?.pdcScheduleLockedUntilCompletion;
+
+    if (isPdcLockedByOtdc && status !== 'completed') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'OTDC must be marked complete before assigning PDC schedules for this booking.' });
+    }
+
+    if (!isPdcLockedByOtdc && !['paid', 'confirmed', 'completed'].includes(status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Booking must be paid/confirmed/completed before assigning PDC schedule.' });
+    }
+
+    const getDateOnlyString = (input) => {
+      const d = new Date(input || Date.now());
+      d.setHours(0, 0, 0, 0);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
+    let minSchedDateFromCompletion = null;
+    if (isPdcLockedByOtdc) {
+      const completedBase = new Date(booking.updated_at || Date.now());
+      completedBase.setHours(0, 0, 0, 0);
+      completedBase.setDate(completedBase.getDate() + 2);
+      minSchedDateFromCompletion = getDateOnlyString(completedBase);
+    }
+
+    const normalizedAssignments = assignments.map((item, idx) => {
+      const slot1 = Number(item?.scheduleSlotId || item?.pdcSlot || 0);
+      const slot2Raw = item?.promoPdcSlotId2 || item?.pdcSlot2 || null;
+      const slot2 = slot2Raw ? Number(slot2Raw) : null;
+      const key = String(item?.courseKey || item?.courseId || `pdc_${idx + 1}`);
+      return {
+        courseKey: key,
+        courseId: item?.courseId || null,
+        courseName: item?.courseName || `PDC Course ${idx + 1}`,
+        courseType: item?.courseType || '',
+        pdcDate: item?.pdcDate || item?.scheduleDate || null,
+        pdcDate2: item?.pdcDate2 || item?.promoPdcDate2 || null,
+        scheduleSlotId: slot1,
+        promoPdcSlotId2: slot2,
+      };
+    });
+
+    // Only assignments with a slot1 are processed; others are silently skipped (partial allowed)
+    const validAssignments = normalizedAssignments.filter(item => !!item.scheduleSlotId);
+    if (validAssignments.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'At least one PDC course must have a Day 1 slot assigned.' });
+    }
+
+    const slotIds = [...new Set(
+      normalizedAssignments
+        .flatMap((item) => [item.scheduleSlotId, item.promoPdcSlotId2])
+        .filter(Boolean)
+        .map((v) => Number(v))
+    )];
+
+    const slotMap = new Map();
+    if (slotIds.length > 0) {
+      const slotsResult = await client.query(
+        `SELECT id, branch_id, type, date, end_date, session, time_range, available_slots, course_type
+         FROM schedule_slots
+         WHERE id = ANY($1::int[])`,
+        [slotIds]
+      );
+
+      slotsResult.rows.forEach((slot) => {
+        slotMap.set(Number(slot.id), slot);
+      });
+    }
+
+    const ensureEnrollment = async (slotId) => {
+      const slotMeta = slotMap.get(Number(slotId));
+      const existing = await client.query(
+        `SELECT id, enrollment_status
+         FROM schedule_enrollments
+         WHERE slot_id = $1 AND student_id = $2
+         LIMIT 1`,
+        [slotId, booking.user_id]
+      );
+
+      if (existing.rows.length === 0) {
+        await assertB1B2CapacityForSlot(client, slotId, booking.user_id, slotMeta);
+        const dec = await client.query(
+          `UPDATE schedule_slots
+           SET available_slots = available_slots - 1
+           WHERE id = $1 AND available_slots > 0
+           RETURNING id`,
+          [slotId]
+        );
+        if (dec.rows.length === 0) {
+          throw new Error('Selected slot is already full.');
+        }
+        await client.query(
+          `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status, booking_id)
+           VALUES ($1, $2, 'enrolled', $3)`,
+          [slotId, booking.user_id, booking.id]
+        );
+        return;
+      }
+
+      const prevStatus = String(existing.rows[0].enrollment_status || '').toLowerCase();
+      if (prevStatus === 'cancelled' || prevStatus === 'no-show') {
+        await assertB1B2CapacityForSlot(client, slotId, booking.user_id, slotMeta);
+        const dec = await client.query(
+          `UPDATE schedule_slots
+           SET available_slots = available_slots - 1
+           WHERE id = $1 AND available_slots > 0
+           RETURNING id`,
+          [slotId]
+        );
+        if (dec.rows.length === 0) {
+          throw new Error('Selected slot is already full.');
+        }
+      }
+
+      await client.query(
+        `UPDATE schedule_enrollments
+         SET enrollment_status = 'enrolled',
+             booking_id = $2
+         WHERE id = $1`,
+        [existing.rows[0].id, booking.id]
+      );
+    };
+
+    const nextPdcSelections = {
+      ...(notesJson?.pdcSelections && typeof notesJson.pdcSelections === 'object' ? notesJson.pdcSelections : {}),
+    };
+
+    for (const item of validAssignments) {
+      const slot1 = slotMap.get(Number(item.scheduleSlotId));
+      if (!slot1) {
+        throw new Error(`Slot ${item.scheduleSlotId} not found.`);
+      }
+      if (String(slot1.type || '').toLowerCase() !== 'pdc') {
+        throw new Error(`Slot ${item.scheduleSlotId} is not a PDC slot.`);
+      }
+      if (booking.branch_id && slot1.branch_id && Number(slot1.branch_id) !== Number(booking.branch_id)) {
+        throw new Error('Selected PDC slot does not match booking branch.');
+      }
+      if (minSchedDateFromCompletion && String(slot1.date || '') < minSchedDateFromCompletion) {
+        throw new Error(`PDC scheduling can start on ${minSchedDateFromCompletion} based on OTDC completion date.`);
+      }
+
+      await ensureEnrollment(Number(item.scheduleSlotId));
+
+      let slot2 = null;
+      if (item.promoPdcSlotId2) {
+        slot2 = slotMap.get(Number(item.promoPdcSlotId2));
+        if (!slot2) {
+          throw new Error(`Slot ${item.promoPdcSlotId2} not found.`);
+        }
+        if (String(slot2.type || '').toLowerCase() !== 'pdc') {
+          throw new Error(`Slot ${item.promoPdcSlotId2} is not a PDC slot.`);
+        }
+        if (booking.branch_id && slot2.branch_id && Number(slot2.branch_id) !== Number(booking.branch_id)) {
+          throw new Error('Selected PDC Day 2 slot does not match booking branch.');
+        }
+        if (minSchedDateFromCompletion && String(slot2.date || '') < minSchedDateFromCompletion) {
+          throw new Error(`PDC scheduling can start on ${minSchedDateFromCompletion} based on OTDC completion date.`);
+        }
+        await ensureEnrollment(Number(item.promoPdcSlotId2));
+      }
+
+      nextPdcSelections[item.courseKey] = {
+        courseId: item.courseId,
+        courseName: item.courseName,
+        courseType: item.courseType,
+        pdcDate: item.pdcDate || slot1.date || null,
+        pdcSlot: Number(item.scheduleSlotId),
+        pdcSlotDetails: {
+          id: Number(item.scheduleSlotId),
+          session: slot1.session,
+          type: slot1.type,
+          time: slot1.time_range,
+          time_range: slot1.time_range,
+          date: slot1.date,
+          end_date: slot1.end_date || null,
+        },
+        pdcDate2: slot2 ? (item.pdcDate2 || slot2.date || null) : null,
+        pdcSlot2: slot2 ? Number(item.promoPdcSlotId2) : null,
+        pdcSlotDetails2: slot2 ? {
+          id: Number(item.promoPdcSlotId2),
+          session: slot2.session,
+          type: slot2.type,
+          time: slot2.time_range,
+          time_range: slot2.time_range,
+          date: slot2.date,
+          end_date: slot2.end_date || null,
+        } : null,
+      };
+    }
+
+    const updatedNotes = {
+      ...notesJson,
+      pdcSelections: nextPdcSelections,
+      pdcScheduleLockedUntilCompletion: false,
+      pdcScheduleAssignedAt: new Date().toISOString(),
+      pdcScheduleAssignedBy: req.user?.id || null,
+    };
+
+    await client.query(
+      `UPDATE bookings
+       SET notes = $2,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [booking.id, JSON.stringify(updatedNotes)]
+    );
+
+    await client.query('COMMIT');
+
+    // Send PDC schedule confirmation email (non-fatal)
+    try {
+      const studentResult = await pool.query(
+        `SELECT u.first_name, u.last_name, u.email, br.name AS branch_name
+         FROM bookings b
+         JOIN users u ON b.user_id = u.id
+         LEFT JOIN branches br ON b.branch_id = br.id
+         WHERE b.id = $1`, [booking.id]
+      );
+      if (studentResult.rows.length > 0) {
+        const stu = studentResult.rows[0];
+        const emailAssignments = Object.values(nextPdcSelections).map(sel => ({
+          courseName:  sel.courseName,
+          courseType:  sel.courseType,
+          pdcDate:     sel.pdcDate,
+          pdcSession:  sel.pdcSlotDetails?.session,
+          pdcTime:     sel.pdcSlotDetails?.time_range,
+          pdcDate2:    sel.pdcDate2 || null,
+          pdcSession2: sel.pdcSlotDetails2?.session || null,
+          pdcTime2:    sel.pdcSlotDetails2?.time_range || null,
+        }));
+        await sendPdcScheduleAssignedEmail(
+          stu.email, stu.first_name, stu.last_name,
+          emailAssignments, stu.branch_name || ''
+        );
+      }
+    } catch (emailErr) {
+      console.error('PDC schedule email (non-fatal):', emailErr.message);
+    }
+
+    return res.json({
+      success: true,
+      message: 'PDC schedule assigned successfully.',
+      bookingId: booking.id,
+      pdcSelections: nextPdcSelections,
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Assign PDC schedule error:', error);
+    return res.status(500).json({ error: error.message || 'Server error while assigning PDC schedule' });
+  } finally {
+    client.release();
+  }
+};
+
 // Send payment receipt email on demand (admin action)
 const sendReceiptEmail = async (req, res) => {
   try {
@@ -2186,7 +2938,7 @@ const sendReceiptEmail = async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT b.id, b.total_amount, b.payment_type, b.payment_method, b.status, b.created_at,
+      `SELECT b.id, b.total_amount, b.payment_type, b.payment_method, b.status, b.created_at, b.notes,
               u.first_name, u.last_name, u.email,
               c.name AS course_name, c.price AS course_price
        FROM bookings b
@@ -2201,19 +2953,68 @@ const sendReceiptEmail = async (req, res) => {
     }
 
     const row = result.rows[0];
-    const isFullPayment = row.status === 'paid' || row.payment_type === 'Full Payment';
-    const coursePrice = parseFloat(row.course_price || 0);
-    const amountPaid = parseFloat(row.total_amount || 0);
-    const balanceDue = Math.max(0, coursePrice - amountPaid);
+    const amountPaid = Math.max(0, parseFloat(row.total_amount || 0));
+    const baseCoursePrice = Math.max(0, parseFloat(row.course_price || 0));
+    const paymentTypeRaw = String(row.payment_type || '').toLowerCase();
+    const isDownpayment = paymentTypeRaw.includes('down');
+
+    let notesJson = {};
+    try {
+      notesJson = row.notes ? JSON.parse(row.notes) : {};
+    } catch (_) {
+      notesJson = {};
+    }
+
+    const toAmount = (value) => {
+      if (value == null) return 0;
+      const numeric = Number(String(value).replace(/[^0-9.-]/g, ''));
+      return Number.isFinite(numeric) ? numeric : 0;
+    };
+
+    const notesCourseTotal = (Array.isArray(notesJson?.courseList) ? notesJson.courseList : []).reduce((sum, item) => {
+      const line = item?.finalPrice ?? item?.discountedPrice ?? item?.netPrice ?? item?.lineTotal ?? item?.price ?? item?.amount ?? item?.coursePrice ?? 0;
+      return sum + Math.max(0, toAmount(line));
+    }, 0);
+    const notesAddonTotal = (Array.isArray(notesJson?.addonsDetailed) ? notesJson.addonsDetailed : []).reduce((sum, item) => {
+      return sum + Math.max(0, toAmount(item?.price || 0));
+    }, 0);
+
+    const notesPromo = Math.max(0, toAmount(notesJson?.promoDiscount || 0));
+    const notesConvenience = Math.max(0, toAmount(notesJson?.convenienceFee || 0));
+    const notesSubtotal = Math.max(0, toAmount(notesJson?.subtotal || 0));
+    const notesDerivedAssessment = Math.max(0, Number(((notesSubtotal > 0 ? notesSubtotal : (notesCourseTotal + notesAddonTotal)) + notesConvenience - notesPromo).toFixed(2)));
+    const explicitNotesAssessment = [notesJson?.totalAmount, notesJson?.grandTotal, notesJson?.finalTotal, notesJson?.assessedTotal]
+      .map((v) => Math.max(0, toAmount(v)))
+      .find((v) => v > 0) || 0;
+
+    const coursePrice = explicitNotesAssessment > 0
+      ? explicitNotesAssessment
+      : (notesDerivedAssessment > 0 ? notesDerivedAssessment : baseCoursePrice);
+    const balanceDue = Math.max(0, Number((coursePrice - amountPaid).toFixed(2)));
+    const isFullPayment = !isDownpayment && (row.status === 'paid' || balanceDue <= 0.009);
+
+    const paymentHistory = Array.isArray(notesJson?.paymentHistory) ? notesJson.paymentHistory : [];
+    const lastPayment = paymentHistory.length > 0 ? paymentHistory[paymentHistory.length - 1] : null;
+    const initialAmountPaid = Math.max(0, toAmount(notesJson?.initialAmountPaid || 0));
+    const inferredCollectedNow = initialAmountPaid > 0 && amountPaid > initialAmountPaid
+      ? Math.max(0, Number((amountPaid - initialAmountPaid).toFixed(2)))
+      : 0;
+    const amountPaidForReceipt = Math.max(
+      0,
+      toAmount(lastPayment?.amount || 0) || inferredCollectedNow || amountPaid
+    );
+    const receiptTxnId = String(lastPayment?.transactionId || '').trim() || `TXN-${new Date(row.created_at).getFullYear()}-${String(row.id).padStart(3, '0')}`;
+    const receiptPaymentDate = lastPayment?.at || row.created_at;
+    const receiptPaymentMethod = lastPayment?.paymentMethod || row.payment_method || 'Cash';
 
     await sendPaymentReceiptEmail(row.email, row.first_name, row.last_name, {
       bookingId: row.id,
-      transactionId: `TXN-${new Date(row.created_at).getFullYear()}-${String(row.id).padStart(3, '0')}`,
+      transactionId: receiptTxnId,
       courseName: row.course_name || 'N/A',
-      amountPaid,
+      amountPaid: amountPaidForReceipt,
       coursePrice,
-      paymentMethod: row.payment_method || 'Cash',
-      paymentDate: row.created_at,
+      paymentMethod: receiptPaymentMethod,
+      paymentDate: receiptPaymentDate,
       isFullPayment,
       balanceDue,
     });
@@ -2225,7 +3026,7 @@ const sendReceiptEmail = async (req, res) => {
   }
 };
 
-// Get notifications — payment and enrollment events filtered by branch role
+// Get notifications â€” payment and enrollment events filtered by branch role
 const getNotifications = async (req, res) => {
   try {
     const scope = await getUserBranchScope(req.user);
@@ -2247,18 +3048,31 @@ const getNotifications = async (req, res) => {
         c.name AS course_name,
         br.name AS branch_name,
         b.created_at AS time,
-
         -- Determine notification category
         CASE
           WHEN b.notes IS NOT NULL AND b.notes ~ '^\\{'
             AND (b.notes::jsonb->>'rescheduled') = 'true'
           THEN 'reschedule'
+          WHEN LOWER(COALESCE(b.status, '')) <> 'completed'
+            AND b.notes IS NOT NULL AND b.notes ~ '^\\{'
+            AND (
+              (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
+              OR (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
+            )
+            OR (
+              LOWER(COALESCE(b.status, '')) <> 'completed'
+              AND (
+              LOWER(COALESCE(c.category, '')) = 'tdc'
+              AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
+              )
+            )
+          THEN 'online_tdc_account_setup'
           WHEN b.payment_type = 'Full Payment'
             AND b.status IN ('paid', 'confirmed', 'completed')
           THEN 'payment_full'
           WHEN b.payment_type = 'Downpayment'
             OR (b.payment_type IS NOT NULL AND b.payment_type <> 'Full Payment'
-                AND b.status = 'collectable')
+                AND b.status IN ('partial_payment'))
           THEN 'payment_down'
           ELSE 'enrollment'
         END AS notif_type,
@@ -2268,13 +3082,27 @@ const getNotifications = async (req, res) => {
           WHEN b.notes IS NOT NULL AND b.notes ~ '^\\{'
             AND (b.notes::jsonb->>'rescheduled') = 'true'
           THEN 'Reschedule Request'
+          WHEN LOWER(COALESCE(b.status, '')) <> 'completed'
+            AND b.notes IS NOT NULL AND b.notes ~ '^\\{'
+            AND (
+              (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
+              OR (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
+            )
+            OR (
+              LOWER(COALESCE(b.status, '')) <> 'completed'
+              AND (
+              LOWER(COALESCE(c.category, '')) = 'tdc'
+              AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
+              )
+            )
+          THEN 'Online TDC Account Setup Needed'
           WHEN b.payment_type = 'Full Payment'
             AND b.status IN ('paid', 'confirmed', 'completed')
           THEN 'Full Payment Received'
           WHEN b.payment_type = 'Downpayment'
             OR (b.payment_type IS NOT NULL AND b.payment_type <> 'Full Payment'
-                AND b.status = 'collectable')
-          THEN 'Downpayment Received'
+                AND b.status IN ('partial_payment'))
+          THEN 'Partial Payment Received'
           ELSE 'New Student Enrollment'
         END AS title,
 
@@ -2286,18 +3114,34 @@ const getNotifications = async (req, res) => {
             || ' requested a reschedule for '
             || COALESCE(c.name, 'a course')
             || ' at ' || COALESCE(br.name, 'branch')
+          WHEN LOWER(COALESCE(b.status, '')) <> 'completed'
+            AND b.notes IS NOT NULL AND b.notes ~ '^\\{'
+            AND (
+              (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
+              OR (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
+            )
+            OR (
+              LOWER(COALESCE(b.status, '')) <> 'completed'
+              AND (
+              LOWER(COALESCE(c.category, '')) = 'tdc'
+              AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
+              )
+            )
+          THEN 'Student ' || u.first_name || ' ' || u.last_name
+            || ' enrolled in Online TDC at ' || COALESCE(br.name, 'branch')
+            || '. Please register provider account access, and schedule PDC only after OTDC completion is marked in CRM.'
           WHEN b.payment_type = 'Full Payment'
             AND b.status IN ('paid', 'confirmed', 'completed')
           THEN u.first_name || ' ' || u.last_name
-            || ' paid ₱' || TO_CHAR(COALESCE(b.total_amount, 0), 'FM999,999,990.00')
+            || ' paid â‚±' || TO_CHAR(COALESCE(b.total_amount, 0), 'FM999,999,990.00')
             || ' in full for ' || COALESCE(c.name, 'a course')
             || ' at ' || COALESCE(br.name, 'branch')
             || ' via ' || COALESCE(b.payment_method, 'Online')
           WHEN b.payment_type = 'Downpayment'
             OR (b.payment_type IS NOT NULL AND b.payment_type <> 'Full Payment'
-                AND b.status = 'collectable')
+                AND b.status IN ('partial_payment'))
           THEN u.first_name || ' ' || u.last_name
-            || ' made a ₱' || TO_CHAR(COALESCE(b.total_amount, 0), 'FM999,999,990.00')
+            || ' made a â‚±' || TO_CHAR(COALESCE(b.total_amount, 0), 'FM999,999,990.00')
             || ' downpayment for ' || COALESCE(c.name, 'a course')
             || ' at ' || COALESCE(br.name, 'branch')
           ELSE
@@ -2310,7 +3154,7 @@ const getNotifications = async (req, res) => {
       JOIN users u ON b.user_id = u.id
       LEFT JOIN courses c ON b.course_id = c.id
       LEFT JOIN branches br ON b.branch_id = br.id
-      WHERE b.status IN ('paid', 'collectable', 'confirmed', 'completed')
+      WHERE b.status IN ('paid', 'partial_payment', 'confirmed', 'completed')
         ${branchCondition}
       ORDER BY b.created_at DESC
       LIMIT 50
@@ -2322,6 +3166,7 @@ const getNotifications = async (req, res) => {
       payment_full: 'success',
       payment_down: 'warning',
       reschedule:   'info',
+      online_tdc_account_setup: 'warning',
       enrollment:   'info',
     };
 
@@ -2346,7 +3191,7 @@ const getNotifications = async (req, res) => {
   }
 };
 
-// ── Email content config endpoints ───────────────────────────────────────────
+// â”€â”€ Email content config endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const getEmailContent = async (req, res) => {
   try {
     const data = JSON.parse(fs.readFileSync(EMAIL_CONTENT_PATH, 'utf8'));
@@ -2420,7 +3265,7 @@ const sendAllEmailDesignsRoute = async (req, res) => {
     await sendVerificationEmail(email, '654321', firstName, 'Password Reset');
     await sendPasswordEmail(email, 'Temp#1234', firstName, 'admin');
     await sendWalkInEnrollmentEmail(email, firstName, lastName, 'Temp#1234', '112233', enrollmentDetails);
-    await sendGuestEnrollmentEmail(email, firstName, lastName, enrollmentDetails, true, true);
+    await sendEnrollmentEmail(email, firstName, lastName, enrollmentDetails, true, true);
     await sendNoShowEmail(email, firstName, lastName, {
       courseName: 'PDC B1/B2 (Manual)',
       scheduleDate: sampleDate,
@@ -2553,6 +3398,323 @@ const getTodayStudents = async (req, res) => {
   }
 };
 
+const getTdcOnlineStudents = async (req, res) => {
+  try {
+    const requestedBranchId = req.query.branch_id ? parseInt(req.query.branch_id, 10) : null;
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, data: [], total: 0 });
+    }
+
+    const branchId = scope.canViewAll ? requestedBranchId : scope.branchId;
+
+    const result = await pool.query(
+      `SELECT
+        b.id AS booking_id,
+        b.status AS booking_status,
+        b.booking_date,
+        b.created_at,
+        b.total_amount,
+        COALESCE(b.payment_type, 'N/A') AS payment_type,
+        COALESCE(b.payment_method, 'N/A') AS payment_method,
+        COALESCE(b.enrollment_type, 'online') AS enrollment_type,
+        b.course_type,
+        c.name AS course_name,
+        c.category AS course_category,
+        u.id AS student_id,
+        TRIM(u.first_name || ' ' || COALESCE(u.middle_name || ' ', '') || u.last_name) AS student_name,
+        u.email,
+        u.contact_numbers,
+        b.branch_id,
+        br.name AS branch_name
+      FROM bookings b
+      JOIN users u ON u.id = b.user_id
+      LEFT JOIN courses c ON c.id = b.course_id
+      LEFT JOIN branches br ON br.id = b.branch_id
+      WHERE (
+          (
+            LOWER(COALESCE(c.category, '')) = 'tdc'
+            AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
+          )
+          OR (
+            b.notes IS NOT NULL
+            AND b.notes ~ '^\\{'
+            AND (
+              (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
+              OR EXISTS (
+                SELECT 1
+                FROM jsonb_array_elements(COALESCE(b.notes::jsonb->'courseList', '[]'::jsonb)) AS cl(item)
+                WHERE LOWER(COALESCE(cl.item->>'category', '')) = 'tdc'
+                  AND LOWER(COALESCE(cl.item->>'type', '')) LIKE '%online%'
+              )
+            )
+          )
+        )
+        AND LOWER(COALESCE(b.status, '')) IN ('pending', 'confirmed', 'paid', 'partial_payment')
+        AND ($1::int IS NULL OR b.branch_id = $1::int)
+      ORDER BY b.created_at DESC`,
+      [branchId]
+    );
+
+    return res.json({
+      success: true,
+      data: result.rows,
+      total: result.rows.length,
+    });
+  } catch (error) {
+    console.error('Get TDC online students error:', error);
+    return res.status(500).json({ error: 'Server error while fetching TDC online students' });
+  }
+};
+
+const getPdcSchedulingQueue = async (req, res) => {
+  try {
+    const isSpecificPdcName = (name = '') => {
+      const raw = String(name || '').trim();
+      if (!raw) return false;
+      if (/^(pdc\s*course(\s*\d+)?|pdc|4\s*pdc)$/i.test(raw)) return false;
+      return true;
+    };
+
+    const applyTransmissionToName = (name = '', courseType = '') => {
+      const cleanName = String(name || '').trim();
+      const cleanType = String(courseType || '').trim();
+      if (!cleanName) return cleanName;
+      if (!cleanType) return cleanName;
+      const lowerName = cleanName.toLowerCase();
+      const lowerType = cleanType.toLowerCase();
+      if (lowerName.includes(lowerType)) return cleanName;
+      return `${cleanName} - ${cleanType}`;
+    };
+
+    const requestedBranchId = req.query.branch_id ? parseInt(req.query.branch_id, 10) : null;
+    const scope = await getUserBranchScope(req.user);
+    if (isScopedWithoutBranch(scope)) {
+      return res.json({ success: true, data: [], total: 0 });
+    }
+
+    const branchId = scope.canViewAll ? requestedBranchId : scope.branchId;
+
+    const result = await pool.query(
+      `SELECT
+        b.id,
+        b.notes,
+        b.course_type,
+        b.updated_at,
+        b.created_at,
+        c.name AS course_name,
+        u.email AS student_email,
+        u.contact_numbers AS student_contact,
+        TRIM(u.first_name || ' ' || COALESCE(u.middle_name || ' ', '') || u.last_name) AS student_name,
+        b.branch_id,
+        br.name AS branch_name
+      FROM bookings b
+      JOIN users u ON u.id = b.user_id
+      LEFT JOIN courses c ON c.id = b.course_id
+      LEFT JOIN branches br ON br.id = b.branch_id
+      WHERE LOWER(COALESCE(b.status, '')) = 'completed'
+        AND b.notes IS NOT NULL
+        AND b.notes ~ '^\\{'
+        AND (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
+        AND ($1::int IS NULL OR b.branch_id = $1::int)
+      ORDER BY b.updated_at DESC, b.created_at DESC`,
+      [branchId]
+    );
+
+    const rows = Array.isArray(result?.rows) ? result.rows : [];
+
+    const allPdcCourseIds = [...new Set(
+      rows
+        .flatMap((row) => {
+          let notesJson = {};
+          try {
+            notesJson = row?.notes && String(row.notes).startsWith('{') ? JSON.parse(row.notes) : {};
+          } catch {
+            notesJson = {};
+          }
+          return Array.isArray(notesJson?.pdcCourseIds)
+            ? notesJson.pdcCourseIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+            : [];
+        })
+    )];
+
+    const pdcCourseNameById = new Map();
+    if (allPdcCourseIds.length > 0) {
+      const pdcRes = await pool.query('SELECT id, name, course_type FROM courses WHERE id = ANY($1::int[])', [allPdcCourseIds]);
+      pdcRes.rows.forEach((course) => {
+        pdcCourseNameById.set(Number(course.id), {
+          name: course.name,
+          courseType: course.course_type || '',
+        });
+      });
+    }
+
+    const isTwoDayVariant = (courseName = '', courseType = '') => {
+      const src = `${courseName} ${courseType}`.toUpperCase();
+      if (src.includes('MOTOR') || src.includes('MOTORCYCLE')) return false;
+      if (src.includes('AUTOMATIC') || src.includes('MANUAL')) return true;
+      if (src.includes('CAR') || src.includes('B1') || src.includes('B2') || src.includes('VAN') || src.includes('L300')) return true;
+      if (src.includes('TRICYCLE') || src.includes('V1') || src.includes('A1')) return true;
+      return false;
+    };
+
+    const toInputDate = (value) => {
+      if (!value) return '';
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return '';
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    const addDays = (dateStr, days = 0) => {
+      if (!dateStr) return '';
+      const d = new Date(`${dateStr}T00:00:00`);
+      if (Number.isNaN(d.getTime())) return '';
+      d.setDate(d.getDate() + Number(days || 0));
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    const data = rows.map((row) => {
+      let notesJson = {};
+      try {
+        notesJson = row?.notes && String(row.notes).startsWith('{') ? JSON.parse(row.notes) : {};
+      } catch {
+        notesJson = {};
+      }
+
+      const pdcSelections = Object.entries(notesJson?.pdcSelections || {}).map(([key, value], idx) => ({
+        key: String(key || `pdc_${idx + 1}`),
+        courseId: value?.courseId || null,
+        courseName: value?.courseName || '',
+        courseType: value?.courseType || '',
+      }));
+
+      const fromCourseList = (Array.isArray(notesJson?.courseList) ? notesJson.courseList : [])
+        .filter((item) => String(item?.category || '').toUpperCase() === 'PDC')
+        .map((item, idx) => ({
+          key: String(item?.id || `pdc_list_${idx + 1}`),
+          courseId: item?.id || null,
+          courseName: item?.name || '',
+          courseType: item?.type || '',
+        }));
+
+      const fromPdcIds = (Array.isArray(notesJson?.pdcCourseIds) ? notesJson.pdcCourseIds : [])
+        .map((id, idx) => {
+          const numId = Number(id);
+          const courseMeta = pdcCourseNameById.get(numId);
+          return {
+            key: `pdc_id_${numId || idx + 1}`,
+            courseId: Number.isFinite(numId) ? numId : null,
+            courseName: courseMeta?.name || '',
+            courseType: courseMeta?.courseType || '',
+          };
+        });
+
+      const fromCombinedNames = String(notesJson?.combinedCourseNames || row?.course_name || '')
+        .split('+')
+        .map((name) => String(name || '').trim())
+        .filter(Boolean)
+        .filter((name) => {
+          const src = name.toUpperCase();
+          if (src.includes('TDC') || src.includes('OTDC') || src.includes('THEORETICAL')) return false;
+          if (src.includes('PROMO') || src.includes('BUNDLE')) return false;
+          return (
+            src.includes('PDC')
+            || src.includes('A1')
+            || src.includes('TRICYCLE')
+            || src.includes('B1')
+            || src.includes('B2')
+            || src.includes('VAN')
+            || src.includes('L300')
+            || src.includes('CAR')
+            || src.includes('MOTOR')
+          );
+        })
+        .map((name, idx) => ({
+          key: `pdc_combined_${idx + 1}`,
+          courseId: null,
+          courseName: name,
+          courseType: '',
+        }));
+
+      // Strict waterfall: use the first source that produces results.
+      // This prevents the same course appearing twice with different name formats
+      // (e.g. "PDC-(A1-TRICYCLE)-V1-Tricycle" from pdcSelections vs
+      //       "PDC-(A1-TRICYCLE)" from courseList).
+      let bestSource;
+      if (pdcSelections.filter((item) => isSpecificPdcName(item?.courseName)).length > 0) {
+        bestSource = pdcSelections;
+      } else if (fromPdcIds.filter((item) => isSpecificPdcName(item?.courseName)).length > 0) {
+        bestSource = fromPdcIds;
+      } else if (fromCourseList.filter((item) => isSpecificPdcName(item?.courseName)).length > 0) {
+        // When falling back to courseList, restrict to pdcCourseIds if available
+        const pdcIdSet = new Set(
+          (Array.isArray(notesJson?.pdcCourseIds) ? notesJson.pdcCourseIds : [])
+            .map((id) => Number(id))
+            .filter((id) => Number.isFinite(id) && id > 0)
+        );
+        bestSource = pdcIdSet.size > 0
+          ? fromCourseList.filter((item) => pdcIdSet.has(Number(item?.courseId)))
+          : fromCourseList;
+        if (bestSource.length === 0) bestSource = fromCourseList;
+      } else {
+        bestSource = fromCombinedNames;
+      }
+
+      const seen = new Set();
+      const pdcCourses = bestSource
+        .filter((item) => isSpecificPdcName(item?.courseName || ''))
+        .filter((item) => {
+          // Deduplicate by normalized base name (strip transmission suffix) + courseId
+          const baseName = String(item?.courseName || '').toLowerCase().trim()
+            .replace(/\s+/g, ' ')
+            .replace(/\s*-\s*(automatic|manual|mt|at|v1-tricycle|b1-van\/b2-l300)\s*$/i, '');
+          const key = `${String(item?.courseId || '')}::${baseName}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .map((item, idx) => ({
+          key: item.key || `pdc_${idx + 1}`,
+          courseId: item.courseId || null,
+          courseName: applyTransmissionToName(item.courseName, item.courseType),
+          courseType: item.courseType || '',
+          requiresDay2: isTwoDayVariant(item.courseName, item.courseType),
+        }));
+
+      const completedDate = toInputDate(row?.updated_at || row?.created_at || null);
+
+      return {
+        id: row.id,
+        student_name: row.student_name,
+        student_email: row.student_email,
+        student_contact: row.student_contact,
+        branch_name: row.branch_name,
+        branch_id: row.branch_id,
+        course_name: row.course_name,
+        course_type: row.course_type,
+        completedDate,
+        minScheduleDate: addDays(completedDate, 2),
+        notesJson,
+        locked: true,
+        hasOnlineTdc: true,
+        hasPdc: pdcCourses.length > 0,
+        pdcCourses: pdcCourses.length > 0
+          ? pdcCourses
+          : [{ key: 'pdc_1', courseId: null, courseName: 'PDC Course', courseType: '', requiresDay2: false }],
+      };
+    });
+
+    return res.json({
+      success: true,
+      data,
+      total: data.length,
+    });
+  } catch (error) {
+    console.error('Get PDC scheduling queue error:', error);
+    return res.status(500).json({ error: 'Server error while fetching PDC scheduling queue' });
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getAllBookings,
@@ -2574,14 +3736,15 @@ module.exports = {
   getBranchPerformance,
   getNotifications,
   markBookingAsPaid,
+  assignPdcSchedule,
   sendReceiptEmail,
   getEmailContent,
   updateEmailContent,
   sendTestEmailRoute,
 };
 
-// ─── Student summary detail ────────────────────────────────────────────────
-// ── Add-ons config endpoints ──────────────────────────────────────────────
+// â”€â”€â”€ Student summary detail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Add-ons config endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const getAddonsConfig = async (req, res) => {
   try {
     if (!fs.existsSync(ADDONS_CONFIG_PATH)) {
@@ -2691,7 +3854,7 @@ const getDatabaseBackup = async (req, res) => {
       cmd = `${dumpPath} -h ${DB_HOST || 'localhost'} -p ${DB_PORT || 5432} -U ${DB_USER || 'postgres'} --inserts -F p -f "${filepath}" ${DB_NAME}`;
     }
     
-    console.log(`🚀 Starting DB backup to ${filename}...`);
+    console.log(`ðŸš€ Starting DB backup to ${filename}...`);
     exec(cmd, (error, stdout, stderr) => {
       // Clear password from env after use
       delete process.env.PGPASSWORD;
@@ -2823,7 +3986,7 @@ const clearDatabase = async (req, res) => {
     // Start a transaction for safety
     await pool.query('BEGIN');
     
-    console.log('🚮 Clearing database (Students & Bookings)...');
+    console.log('ðŸš® Clearing database (Students & Bookings)...');
     
     // Delete in order due to foreign key constraints
     await pool.query('DELETE FROM schedule_enrollments');
@@ -2860,7 +4023,7 @@ const importSQLBackup = async (req, res) => {
       cmd = `${psqlPath} -h ${DB_HOST || 'localhost'} -p ${DB_PORT || 5432} -U ${DB_USER || 'postgres'} -d ${DB_NAME} -f "${filepath}"`;
     }
 
-    console.log(`📥 Importing SQL backup from ${file.originalname}...`);
+    console.log(`ðŸ“¥ Importing SQL backup from ${file.originalname}...`);
     exec(cmd, (error, stdout, stderr) => {
       delete process.env.PGPASSWORD;
       // Also delete the temp uploaded file
@@ -3042,12 +4205,15 @@ module.exports = {
   getBranchPerformance,
   getNotifications,
   markBookingAsPaid,
+  assignPdcSchedule,
   sendReceiptEmail,
   getEmailContent,
   updateEmailContent,
   sendTestEmailRoute,
   sendAllEmailDesignsRoute,
   getTodayStudents,
+  getTdcOnlineStudents,
+  getPdcSchedulingQueue,
   getStudentDetail,
   getAddonsConfig,
   updateAddonsConfig,
@@ -3059,4 +4225,5 @@ module.exports = {
   importStudentsCSV,
   importTransactionsCSV,
 };
+
 

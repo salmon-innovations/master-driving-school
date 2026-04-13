@@ -2,10 +2,18 @@ import { useState, useEffect } from "react"
 import { useNotification } from "../context/NotificationContext"
 import { schedulesAPI } from "../services/api"
 
-function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, preSelectedBranch, setSelectedCourseForSchedule }) {
+function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, preSelectedBranch, setSelectedCourseForSchedule, setScheduleSelection }) {
   const { showNotification } = useNotification()
   const [availabilityLoading, setAvailabilityLoading] = useState(false)
   const [hasAvailableSlots, setHasAvailableSlots] = useState(true)
+  const getCartItemKey = (item) => `${item.id}::${String(item.type || 'online')}`
+  const primaryCourse = cart[0]
+  const primaryIsTdc = !!primaryCourse && (
+    primaryCourse.category === 'TDC' ||
+    (primaryCourse.name || '').toLowerCase().includes('tdc') ||
+    (primaryCourse.shortName || '').toLowerCase().includes('tdc')
+  )
+  const primaryIsOnlineTdc = primaryIsTdc && String(primaryCourse?.type || '').toLowerCase() === 'online'
 
   // Check availability for the first cart item whenever cart or branch changes
   useEffect(() => {
@@ -23,6 +31,13 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
         const category = primaryCourse.category || ''
         const selectedType = primaryCourse.type || ''
         const isTDC = category === 'TDC' || name.includes('tdc') || shortName.includes('tdc')
+        const isOnlineTdc = isTDC && String(selectedType).toLowerCase() === 'online'
+        if (isOnlineTdc) {
+          setHasAvailableSlots(true)
+          setAvailabilityLoading(false)
+          return
+        }
+
         const slotType = isTDC ? 'TDC' : 'PDC'
         const slots = await schedulesAPI.getSlotsByDate(null, preSelectedBranch.id, slotType)
         const today = new Date()
@@ -59,18 +74,25 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
   }, [cart.length, preSelectedBranch?.id, cart[0]?.id])
 
 
-  const removeFromCart = (id) => {
-    setCart(cart.filter(item => item.id !== id))
+  const removeFromCart = (id, type = 'online') => {
+    const targetKey = `${id}::${String(type || 'online')}`
+    setCart((prevCart) => prevCart.filter((item) => getCartItemKey(item) !== targetKey))
   }
 
-  const updateQuantity = (id, change) => {
-    setCart(cart.map(item => {
-      if (item.id === id) {
-        const newQuantity = item.quantity + change
-        return newQuantity > 0 ? { ...item, quantity: newQuantity } : item
-      }
-      return item
-    }).filter(item => item.quantity > 0))
+  const updateQuantity = (id, type, change) => {
+    const targetKey = `${id}::${String(type || 'online')}`
+    setCart((prevCart) => {
+      const next = prevCart
+        .map((item) => {
+          if (getCartItemKey(item) !== targetKey) return item
+          const currentQty = Number(item.quantity) || 1
+          const nextQty = currentQty + Number(change || 0)
+          return { ...item, quantity: nextQty }
+        })
+        .filter((item) => (Number(item.quantity) || 0) > 0)
+
+      return next
+    })
   }
 
   const calculateItemTotals = (item) => {
@@ -122,7 +144,7 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
 
     cart.forEach(item => {
       const totals = calculateItemTotals(item);
-      const qty = item.quantity;
+      const qty = Number(item.quantity) || 1;
       baseCoursePriceTotal += totals.calcBasePrice * qty;
       reviewerTotal += totals.reviewerPrice * qty;
       vehicleTipsTotal += totals.vehicleTipsPrice * qty;
@@ -157,7 +179,7 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
   const orderTotals = getOrderTotals();
 
   const getTotalItems = () => {
-    return cart.reduce((total, item) => total + item.quantity, 0)
+    return cart.reduce((total, item) => total + (Number(item.quantity) || 1), 0)
   }
 
   const handleCheckout = () => {
@@ -168,12 +190,21 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
       return
     }
     if (cart.length > 0) {
-      const isGuestCheckout = localStorage.getItem('isGuestCheckout') === 'true'
+      const persistPostVerifyRedirect = (target, isOnlineTdc = false) => {
+        const payload = {
+          next: target,
+          source: 'cart',
+          isOnlineTdcNoSchedule: Boolean(isOnlineTdc),
+          createdAt: Date.now(),
+        }
+        sessionStorage.setItem('postVerifyRedirect', JSON.stringify(payload))
+        localStorage.setItem('postVerifyRedirect', JSON.stringify(payload))
+      }
 
-      // Guests must complete profile first, then continue to schedule/payment with cart preserved.
-      if (!isLoggedIn && !isGuestCheckout) {
+      if (!isLoggedIn) {
+        persistPostVerifyRedirect('schedule')
         setShowCart(false)
-        onNavigate('guest-enrollment')
+        onNavigate('signup')
         window.scrollTo({ top: 0, behavior: 'smooth' })
         return
       }
@@ -213,9 +244,17 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
           typeOptions: tdcItem.typeOptions,
           hasTypeOption: true,
         })
+        setScheduleSelection(null)
       } else {
         // Default the calendar view to the first course in the cart.
         const primaryCourse = cart[0]
+        const primaryType = String(primaryCourse.type || 'standard')
+        const isPrimaryTdc =
+          primaryCourse.category === 'TDC' ||
+          (primaryCourse.name || '').toLowerCase().includes('tdc') ||
+          (primaryCourse.shortName || '').toLowerCase().includes('tdc')
+        const isOnlineTdc = isPrimaryTdc && primaryType.toLowerCase() === 'online'
+
         setSelectedCourseForSchedule({
           id: primaryCourse.id,
           name: primaryCourse.name,
@@ -225,8 +264,23 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
           category: primaryCourse.category,
           typeOptions: primaryCourse.typeOptions,
           hasTypeOption: primaryCourse.hasTypeOption,
-          selectedType: primaryCourse.type || 'standard',
+          selectedType: primaryType,
         })
+
+        if (isOnlineTdc) {
+          setScheduleSelection({
+            noScheduleRequired: true,
+            isOnlineTdcNoSchedule: true,
+            providerName: 'drivetech.ph / OTDC.ph',
+          })
+          persistPostVerifyRedirect('payment', true)
+          setShowCart(false)
+          onNavigate('payment')
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+          return
+        }
+
+        setScheduleSelection(null)
       }
 
       setShowCart(false);
@@ -272,15 +326,15 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                             {item.type && (
                               <p className="text-xs text-[#2157da] font-medium mt-1 uppercase">{item.type}</p>
                             )}
-                            {/* All courses require a schedule, removing conditional TDC badge */}
+                            {/* Online TDC uses external provider and does not require local schedule selection */}
                             <div className="flex items-center gap-1 mt-2">
                               <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md font-semibold">
-                                📅 Schedule Required
+                                {primaryIsOnlineTdc ? '♾ Online Provider (No Schedule)' : '📅 Schedule Required'}
                               </span>
                             </div>
                           </div>
                           <button
-                            onClick={() => removeFromCart(item.id)}
+                            onClick={() => removeFromCart(item.id, item.type)}
                             className="text-gray-400 hover:text-red-500 text-xl font-bold ml-2 transition-colors"
                           >
                             ×
@@ -288,17 +342,17 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                         </div>
 
                         <div className="flex justify-between items-center mt-3">
-                          <span className="text-[#2157da] font-bold text-base">₱{(totals.finalItemPrice * item.quantity).toLocaleString()}</span>
+                          <span className="text-[#2157da] font-bold text-base">₱{(totals.finalItemPrice * (Number(item.quantity) || 1)).toLocaleString()}</span>
                           <div className="flex items-center gap-2 bg-white rounded-md border border-gray-300">
                             <button
-                              onClick={() => updateQuantity(item.id, -1)}
+                              onClick={() => updateQuantity(item.id, item.type, -1)}
                               className="w-7 h-7 flex items-center justify-center hover:bg-gray-100 transition-colors text-gray-600"
                             >
                               −
                             </button>
-                            <span className="w-6 text-center text-sm font-semibold">{item.quantity}</span>
+                            <span className="w-6 text-center text-sm font-semibold">{Number(item.quantity) || 1}</span>
                             <button
-                              onClick={() => updateQuantity(item.id, 1)}
+                              onClick={() => updateQuantity(item.id, item.type, 1)}
                               className="w-7 h-7 flex items-center justify-center hover:bg-gray-100 transition-colors text-gray-600"
                             >
                               +
@@ -381,13 +435,13 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
 
                   <button
                     onClick={handleCheckout}
-                    disabled={!preSelectedBranch || availabilityLoading || !hasAvailableSlots}
+                    disabled={!preSelectedBranch || availabilityLoading || (!hasAvailableSlots && !primaryIsOnlineTdc)}
                     className={`w-full py-3 rounded-full font-bold transition-all ${
                       !preSelectedBranch
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : availabilityLoading
                           ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          : !hasAvailableSlots
+                          : !hasAvailableSlots && !primaryIsOnlineTdc
                             ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                             : 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b] cursor-pointer'
                     }`}
@@ -396,9 +450,9 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                       ? 'Select Branch First'
                       : availabilityLoading
                         ? 'Checking slots...'
-                        : !hasAvailableSlots
+                        : !hasAvailableSlots && !primaryIsOnlineTdc
                           ? 'No Available Slots'
-                          : '📅 Select Schedule'
+                          : (primaryIsOnlineTdc ? 'Proceed to Payment' : '📅 Select Schedule')
                     }
                   </button>
                 </>

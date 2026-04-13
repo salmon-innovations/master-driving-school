@@ -1,16 +1,31 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { normalizeNotificationText } from '../utils/notificationText';
 
 const NotificationContext = createContext();
 
 export const NotificationProvider = ({ children }) => {
     const [notification, setNotification] = useState(null);
+    const timeoutRef = useRef(null);
 
-    const showNotification = useCallback((message, type = 'info') => {
-        setNotification({ message, type });
-        // Auto-hide after 3 seconds
-        setTimeout(() => {
+    const showNotification = useCallback((message, type = 'info', durationMs = 3000) => {
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+        }
+
+        setNotification({ message: normalizeNotificationText(message), type });
+
+        timeoutRef.current = setTimeout(() => {
             setNotification(null);
-        }, 3000);
+            timeoutRef.current = null;
+        }, durationMs);
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (timeoutRef.current) {
+                clearTimeout(timeoutRef.current);
+            }
+        };
     }, []);
 
     const closeNotification = useCallback(() => {

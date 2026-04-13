@@ -1,6 +1,160 @@
 const pool = require('../config/db');
 const { sendNoShowEmail, sendPaymentReceiptEmail } = require('../utils/emailService');
 
+const GLOBAL_B1B2_DAILY_CAPACITY = 2;
+
+const isB1B2CourseType = (courseType = '') => {
+  const src = String(courseType || '').toLowerCase();
+  return src.includes('b1') || src.includes('b2') || src.includes('van') || src.includes('l300');
+};
+
+const extractSlotIdsFromNotes = (notes) => {
+  let meta = notes;
+  if (typeof meta === 'string') {
+    try {
+      meta = JSON.parse(meta);
+    } catch {
+      return [];
+    }
+  }
+  if (!meta || typeof meta !== 'object') return [];
+
+  const slotIds = [];
+  if (meta.scheduleSlotId) slotIds.push(meta.scheduleSlotId);
+  if (meta.scheduleSlotId2) slotIds.push(meta.scheduleSlotId2);
+
+  const pdcSelections = meta.pdcSelections || {};
+  Object.values(pdcSelections).forEach((sel) => {
+    if (sel?.pdcSlot) slotIds.push(sel.pdcSlot);
+    if (sel?.pdcSlot2) slotIds.push(sel.pdcSlot2);
+    if (sel?.slot) slotIds.push(sel.slot);
+    if (sel?.slot2) slotIds.push(sel.slot2);
+  });
+
+  return [...new Set(slotIds.filter(Boolean).map((id) => Number(id)).filter((id) => Number.isFinite(id)))];
+};
+
+const extractSecondDaySlotIdsFromNotes = (notes) => {
+  let meta = notes;
+  if (typeof meta === 'string') {
+    try {
+      meta = JSON.parse(meta);
+    } catch {
+      return [];
+    }
+  }
+  if (!meta || typeof meta !== 'object') return [];
+
+  const secondDayIds = [];
+  if (meta.scheduleSlotId2) secondDayIds.push(meta.scheduleSlotId2);
+  if (meta.promoPdcSlotId2) secondDayIds.push(meta.promoPdcSlotId2);
+
+  const pdcSelections = meta.pdcSelections || {};
+  Object.values(pdcSelections).forEach((sel) => {
+    if (sel?.pdcSlot2) secondDayIds.push(sel.pdcSlot2);
+    if (sel?.slot2) secondDayIds.push(sel.slot2);
+    if (sel?.promoPdcSlotId2) secondDayIds.push(sel.promoPdcSlotId2);
+  });
+
+  return [...new Set(secondDayIds.filter(Boolean).map((id) => Number(id)).filter((id) => Number.isFinite(id)))];
+};
+
+const getGlobalB1B2BookedCount = async (client, date, excludeStudentId = null) => {
+  const db = client && typeof client.query === 'function' ? client : pool;
+  const enrolledResult = await db.query(
+    `SELECT COUNT(DISTINCT se.student_id) AS booked_count
+       FROM schedule_enrollments se
+       JOIN schedule_slots ss ON ss.id = se.slot_id
+      WHERE ss.date = $1
+        AND (ss.course_type ILIKE '%B1%' OR ss.course_type ILIKE '%B2%' OR ss.course_type ILIKE '%VAN%' OR ss.course_type ILIKE '%L300%')
+        AND se.enrollment_status NOT IN ('cancelled', 'no-show')`,
+    [date]
+  );
+
+  const enrolledCount = Number(enrolledResult.rows[0]?.booked_count || 0);
+
+  const pendingBookings = await db.query(
+    `SELECT user_id, notes
+       FROM bookings
+      WHERE LOWER(COALESCE(status, '')) = 'pending'
+        AND created_at >= NOW() - INTERVAL '20 minutes'`
+  );
+
+  const pendingSlotIds = [...new Set(
+    pendingBookings.rows.flatMap((row) => extractSlotIdsFromNotes(row.notes))
+  )];
+  const pendingHolders = new Set();
+  if (pendingSlotIds.length > 0) {
+    const slotMetaResult = await db.query(
+      `SELECT id, to_char(date, 'YYYY-MM-DD') AS date, course_type
+         FROM schedule_slots
+        WHERE id = ANY($1::int[])`,
+      [pendingSlotIds]
+    );
+
+    const slotMetaById = new Map();
+    slotMetaResult.rows.forEach((row) => {
+      slotMetaById.set(Number(row.id), row);
+    });
+
+    pendingBookings.rows.forEach((row) => {
+      if (excludeStudentId != null && String(row.user_id) === String(excludeStudentId)) return;
+      const slotIds = extractSlotIdsFromNotes(row.notes);
+      const hasMatchingB1B2Slot = slotIds.some((slotId) => {
+        const meta = slotMetaById.get(Number(slotId));
+        if (!meta) return false;
+        return String(meta.date) === String(date) && isB1B2CourseType(meta.course_type);
+      });
+      if (hasMatchingB1B2Slot) {
+        pendingHolders.add(String(row.user_id));
+      }
+    });
+  }
+
+  const activeBookings = await db.query(
+    `SELECT user_id, notes
+       FROM bookings
+      WHERE LOWER(COALESCE(status, '')) IN ('pending', 'partial_payment', 'paid', 'confirmed', 'completed')`
+  );
+
+  const secondDaySlotsByUser = [];
+  activeBookings.rows.forEach((row) => {
+    if (excludeStudentId != null && String(row.user_id) === String(excludeStudentId)) return;
+    const secondDayIds = extractSecondDaySlotIdsFromNotes(row.notes);
+    if (secondDayIds.length > 0) {
+      secondDaySlotsByUser.push({ userId: row.user_id, slotIds: secondDayIds });
+    }
+  });
+
+  const secondDaySlotIds = [...new Set(secondDaySlotsByUser.flatMap((entry) => entry.slotIds))];
+  if (secondDaySlotIds.length > 0) {
+    const secondDayMeta = await db.query(
+      `SELECT id, to_char(date, 'YYYY-MM-DD') AS date, course_type
+         FROM schedule_slots
+        WHERE id = ANY($1::int[])`,
+      [secondDaySlotIds]
+    );
+    const secondDayMetaById = new Map();
+    secondDayMeta.rows.forEach((row) => {
+      secondDayMetaById.set(Number(row.id), row);
+    });
+
+    const hasSecondDayLock = secondDaySlotsByUser.some((entry) => {
+      return entry.slotIds.some((slotId) => {
+        const meta = secondDayMetaById.get(Number(slotId));
+        if (!meta) return false;
+        return String(meta.date) === String(date) && isB1B2CourseType(meta.course_type);
+      });
+    });
+
+    if (hasSecondDayLock) {
+      return GLOBAL_B1B2_DAILY_CAPACITY;
+    }
+  }
+
+  return enrolledCount + pendingHolders.size;
+};
+
 const getRequestBranchScope = async (req) => {
   if (!req.user || !req.user.id) {
     return { role: null, branchId: null, canViewAll: true };
@@ -70,15 +224,24 @@ const getSlotsByDate = async (req, res) => {
         ss.type,
         ss.session,
         ss.time_range,
-        ss.total_capacity,
         CASE
-          WHEN (ss.course_type ILIKE '%B1%' OR ss.course_type ILIKE '%B2%') AND EXISTS (
-            SELECT 1 FROM schedule_slots other
-            WHERE other.date = ss.date
-              AND (other.course_type ILIKE '%B1%' OR other.course_type ILIKE '%B2%')
-              AND other.branch_id IS NOT DISTINCT FROM ss.branch_id
-              AND other.available_slots < other.total_capacity
-          ) THEN 0
+          WHEN (ss.course_type ILIKE '%B1%' OR ss.course_type ILIKE '%B2%' OR ss.course_type ILIKE '%VAN%' OR ss.course_type ILIKE '%L300%')
+            THEN ${GLOBAL_B1B2_DAILY_CAPACITY}
+          ELSE ss.total_capacity
+        END AS total_capacity,
+        CASE
+          WHEN (ss.course_type ILIKE '%B1%' OR ss.course_type ILIKE '%B2%' OR ss.course_type ILIKE '%VAN%' OR ss.course_type ILIKE '%L300%') THEN
+            GREATEST(
+              0,
+              ${GLOBAL_B1B2_DAILY_CAPACITY} - (
+                SELECT COUNT(DISTINCT se2.student_id)
+                FROM schedule_enrollments se2
+                JOIN schedule_slots other ON other.id = se2.slot_id
+                WHERE other.date = ss.date
+                  AND (other.course_type ILIKE '%B1%' OR other.course_type ILIKE '%B2%' OR other.course_type ILIKE '%VAN%' OR other.course_type ILIKE '%L300%')
+                  AND se2.enrollment_status NOT IN ('cancelled', 'no-show')
+              )
+            )
           ELSE ss.available_slots
         END as available_slots,
         ss.branch_id,
@@ -139,8 +302,33 @@ const getSlotsByDate = async (req, res) => {
     query += ' GROUP BY ss.id ORDER BY ss.date, ss.time_range';
 
     const result = await pool.query(query, params);
+    const slots = result.rows || [];
+    const b1b2Dates = [...new Set(
+      slots
+        .filter((slot) => isB1B2CourseType(slot.course_type))
+        .map((slot) => slot.date)
+        .filter(Boolean)
+    )];
 
-    res.json(result.rows);
+    const engagedByDate = new Map();
+    for (const slotDate of b1b2Dates) {
+      const engaged = await getGlobalB1B2BookedCount(pool, slotDate);
+      engagedByDate.set(slotDate, engaged);
+    }
+
+    const normalized = slots.map((slot) => {
+      if (!isB1B2CourseType(slot.course_type)) {
+        return slot;
+      }
+      const engaged = engagedByDate.get(slot.date) || 0;
+      return {
+        ...slot,
+        total_capacity: GLOBAL_B1B2_DAILY_CAPACITY,
+        available_slots: Math.max(0, GLOBAL_B1B2_DAILY_CAPACITY - engaged),
+      };
+    });
+
+    res.json(normalized);
   } catch (error) {
     console.error('Get slots error:', error);
     res.status(500).json({ error: 'Server error while fetching slots' });
@@ -219,11 +407,17 @@ const createSlot = async (req, res) => {
       return res.status(200).json(existingSlot.rows[0]);
     }
 
+    const isB1B2 = String(type || '').toLowerCase() === 'pdc' && isB1B2CourseType(course_type);
+    const effectiveTotalCapacity = isB1B2 ? GLOBAL_B1B2_DAILY_CAPACITY : Number(total_capacity);
+    const effectiveAvailableSlots = isB1B2
+      ? GLOBAL_B1B2_DAILY_CAPACITY
+      : Number(available_slots || effectiveTotalCapacity);
+
     const result = await pool.query(
       `INSERT INTO schedule_slots (date, end_date, type, session, time_range, total_capacity, available_slots, branch_id, course_type, transmission)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [date, formattedEndDate, type, session, time_range, total_capacity, available_slots || total_capacity, resolvedBranchId, course_type || null, transmission || null]
+      [date, formattedEndDate, type, session, time_range, effectiveTotalCapacity, effectiveAvailableSlots, resolvedBranchId, course_type || null, transmission || null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -270,13 +464,30 @@ const updateSlot = async (req, res) => {
       return res.status(403).json({ error: 'Access denied for this branch' });
     }
 
+    const existingSlot = await pool.query('SELECT date, course_type FROM schedule_slots WHERE id = $1', [id]);
+    if (existingSlot.rows.length === 0) {
+      return res.status(404).json({ error: 'Slot not found' });
+    }
+
+    const effectiveCourseType = course_type || existingSlot.rows[0].course_type || null;
+    const isB1B2 = String(type || '').toLowerCase() === 'pdc' && isB1B2CourseType(effectiveCourseType);
+    const requestedCapacity = Number(total_capacity);
+    const requestedAvailable = Number(available_slots);
+    const effectiveTotalCapacity = isB1B2 ? GLOBAL_B1B2_DAILY_CAPACITY : requestedCapacity;
+
+    let effectiveAvailableSlots = requestedAvailable;
+    if (isB1B2) {
+      const bookedGlobal = await getGlobalB1B2BookedCount(pool, existingSlot.rows[0].date);
+      effectiveAvailableSlots = Math.max(0, GLOBAL_B1B2_DAILY_CAPACITY - bookedGlobal);
+    }
+
     const result = await pool.query(
       `UPDATE schedule_slots 
        SET type = $1, session = $2, time_range = $3, total_capacity = $4, available_slots = $5,
            branch_id = COALESCE($6, branch_id), updated_at = CURRENT_TIMESTAMP, course_type = $8, transmission = $9
        WHERE id = $7
        RETURNING *`,
-      [type, session, time_range, total_capacity, available_slots, resolvedBranchId, id, course_type || null, transmission || null]
+      [type, session, time_range, effectiveTotalCapacity, effectiveAvailableSlots, resolvedBranchId, id, course_type || null, transmission || null]
     );
 
     if (result.rows.length === 0) {
@@ -387,22 +598,11 @@ const enrollStudent = async (req, res) => {
       return res.status(400).json({ error: 'No available slots' });
     }
 
-    // B1/B2 Per-Branch Capacity Check
-    // Each branch manages its own B1/B2 slots independently.
-    if (course_type && (course_type.toLowerCase().includes('b1') || course_type.toLowerCase().includes('b2'))) {
-      const slotBranchRow = await pool.query('SELECT branch_id FROM schedule_slots WHERE id = $1', [slotId]);
-      const slotBranchId = slotBranchRow.rows[0]?.branch_id || null;
-
-      const b1b2Check = await pool.query(`
-        SELECT 1 FROM schedule_slots 
-        WHERE date = $1 
-          AND (course_type ILIKE '%B1%' OR course_type ILIKE '%B2%')
-          AND branch_id IS NOT DISTINCT FROM $2
-          AND available_slots < total_capacity
-      `, [date, slotBranchId]);
-
-      if (b1b2Check.rows.length > 0) {
-        return res.status(400).json({ error: 'The B1/B2 Van/L300 unit is already fully booked for this date at this branch.' });
+    // B1/B2 global daily capacity check across all branches and sessions.
+    if (isB1B2CourseType(course_type)) {
+      const bookedGlobal = await getGlobalB1B2BookedCount(pool, date);
+      if (bookedGlobal >= GLOBAL_B1B2_DAILY_CAPACITY) {
+        return res.status(400).json({ error: 'The B1/B2 Van/L300 units are fully booked for this date across all branches.' });
       }
     }
 
@@ -685,7 +885,7 @@ const rescheduleEnrollment = async (req, res) => {
 
     // 2. Validate new slot has capacity
     const newSlotRow = await client.query(
-      `SELECT id, available_slots FROM schedule_slots WHERE id = $1`,
+      `SELECT id, available_slots, date, course_type FROM schedule_slots WHERE id = $1`,
       [new_slot_id]
     );
     if (newSlotRow.rows.length === 0) {
@@ -695,6 +895,14 @@ const rescheduleEnrollment = async (req, res) => {
     if (newSlotRow.rows[0].available_slots <= 0) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Target slot is full' });
+    }
+
+    if (isB1B2CourseType(newSlotRow.rows[0].course_type)) {
+      const bookedGlobal = await getGlobalB1B2BookedCount(client, newSlotRow.rows[0].date, old.student_id);
+      if (bookedGlobal >= GLOBAL_B1B2_DAILY_CAPACITY) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'The B1/B2 Van/L300 units are fully booked for this date across all branches.' });
+      }
     }
 
     // 3. Cancel old enrollment and restore its capacity (if it was an active seat)
@@ -770,7 +978,7 @@ const rescheduleEnrollment = async (req, res) => {
          JOIN schedule_slots ss ON ss.id = se.slot_id
          LEFT JOIN bookings b ON b.user_id = se.student_id
            AND b.payment_type NOT IN ('Reschedule Fee')
-           AND b.status IN ('paid','collectable','confirmed')
+           AND b.status IN ('paid','partial_payment','confirmed')
          WHERE se.id = $1
          ORDER BY b.created_at DESC NULLS LAST
          LIMIT 1`,
@@ -971,7 +1179,7 @@ const getUnassignedPdcStudents = async (req, res) => {
       JOIN users u ON b.user_id = u.id
       JOIN courses c ON b.course_id = c.id
       WHERE (c.category ILIKE $1 OR c.category ILIKE '%Promo%')
-        AND b.status IN ('paid', 'confirmed', 'collectable')
+        AND b.status IN ('paid', 'confirmed', 'partial_payment')
         ${courseTypeFilter}
         ${branchFilter}
         AND NOT EXISTS (
@@ -1028,18 +1236,55 @@ const payRemainingBalance = async (req, res) => {
     const coursePrice = parseFloat(booking.course_price || 0);
     const previousAmount = parseFloat(booking.total_amount || 0);
 
+    let notesJson = {};
+    try {
+      notesJson = booking.notes && String(booking.notes).startsWith('{') ? JSON.parse(booking.notes) : {};
+    } catch (_) {
+      notesJson = {};
+    }
+
+    const toAmount = (value) => {
+      if (value == null) return 0;
+      const numeric = Number(String(value).replace(/[^0-9.-]/g, ''));
+      return Number.isFinite(numeric) ? numeric : 0;
+    };
+
+    const notesCourseTotal = (Array.isArray(notesJson?.courseList) ? notesJson.courseList : []).reduce((sum, item) => {
+      const line = item?.finalPrice ?? item?.discountedPrice ?? item?.netPrice ?? item?.lineTotal ?? item?.price ?? item?.amount ?? item?.coursePrice ?? 0;
+      return sum + Math.max(0, toAmount(line));
+    }, 0);
+    const notesAddonTotal = (Array.isArray(notesJson?.addonsDetailed) ? notesJson.addonsDetailed : []).reduce((sum, item) => {
+      return sum + Math.max(0, toAmount(item?.price || 0));
+    }, 0);
+    const notesPromo = Math.max(0, toAmount(notesJson?.promoDiscount || 0));
+    const notesConvenience = Math.max(0, toAmount(notesJson?.convenienceFee || 0));
+    const notesSubtotal = Math.max(0, toAmount(notesJson?.subtotal || 0));
+    const notesDerivedAssessment = Math.max(0, Number(((notesSubtotal > 0 ? notesSubtotal : (notesCourseTotal + notesAddonTotal)) + notesConvenience - notesPromo).toFixed(2)));
+    const explicitNotesAssessment = [
+      notesJson?.totalAmount,
+      notesJson?.grandTotal,
+      notesJson?.finalTotal,
+      notesJson?.assessedTotal,
+      notesJson?.payableAmount,
+      notesJson?.amountToPay,
+    ]
+      .map((v) => Math.max(0, toAmount(v)))
+      .find((v) => v > 0) || 0;
+
+    const assessedTotal = Math.max(explicitNotesAssessment, notesDerivedAssessment, coursePrice, previousAmount);
+
     const normalizedChoice = String(payment_type || '').toLowerCase();
     const wantsDownpayment = ['downpayment', 'down payment', 'down-payment'].includes(normalizedChoice);
     const isPending = String(booking.status || '').toLowerCase() === 'pending';
 
     let nextStatus = 'paid';
     let nextPaymentType = 'Full Payment';
-    let amountPaid = coursePrice;
+    let amountPaid = assessedTotal;
 
     if (isPending && wantsDownpayment) {
-      nextStatus = 'collectable';
+      nextStatus = 'partial_payment';
       nextPaymentType = 'Downpayment';
-      amountPaid = Math.max(0, coursePrice * 0.5);
+      amountPaid = Math.max(0, assessedTotal * 0.5);
     }
 
     await pool.query(
@@ -1054,16 +1299,41 @@ const payRemainingBalance = async (req, res) => {
     );
 
     try {
+      const notesJson = booking.notes && String(booking.notes).startsWith('{') ? JSON.parse(booking.notes) : {};
+      const paymentHistory = Array.isArray(notesJson.paymentHistory) ? notesJson.paymentHistory : [];
+      const collectedNow = Math.max(0, Number((amountPaid - previousAmount).toFixed(2)));
+      if (!Number.isFinite(Number(notesJson.initialAmountPaid))) {
+        notesJson.initialAmountPaid = Math.max(0, Number(previousAmount.toFixed(2)));
+      }
+      paymentHistory.push({
+        at: new Date().toISOString(),
+        amount: collectedNow,
+        paymentMethod: payment_method || booking.payment_method || 'Online',
+        transactionId: null,
+        statusAfter: nextStatus,
+        totalPaidAfter: Math.max(0, Number(amountPaid.toFixed(2))),
+      });
+      notesJson.paymentHistory = paymentHistory;
+      await pool.query(
+        `UPDATE bookings SET notes = $2 WHERE id = $1`,
+        [bookingId, JSON.stringify(notesJson)]
+      );
+    } catch (notesErr) {
+      console.error('Payment history notes update failed (non-fatal):', notesErr.message);
+    }
+
+    try {
+      const collectedNow = Math.max(0, Number((amountPaid - previousAmount).toFixed(2)));
       await sendPaymentReceiptEmail(booking.email, booking.first_name, booking.last_name, {
         bookingId: booking.id,
         transactionId: `TXN-${new Date().getFullYear()}-${String(booking.id).padStart(3, '0')}`,
         courseName: booking.course_name || 'N/A',
-        amountPaid,
-        coursePrice,
+        amountPaid: nextStatus === 'paid' ? collectedNow : amountPaid,
+        coursePrice: assessedTotal,
         paymentMethod: payment_method || 'Online',
         paymentDate: new Date(),
         isFullPayment: nextStatus === 'paid',
-        balanceDue: Math.max(0, coursePrice - amountPaid),
+        balanceDue: Math.max(0, assessedTotal - amountPaid),
       });
     } catch (emailErr) {
       console.error('Receipt email failed (non-fatal):', emailErr.message);
@@ -1071,13 +1341,13 @@ const payRemainingBalance = async (req, res) => {
 
     res.json({
       success: true,
-      message: nextStatus === 'collectable'
-        ? 'Downpayment received successfully! Remaining balance is now collectable.'
+      message: nextStatus === 'partial_payment'
+        ? 'Downpayment received successfully! Remaining balance is still due (Partial Payment).'
         : 'Payment processed successfully! A receipt has been sent to your email.',
       status: nextStatus,
       payment_type: nextPaymentType,
       amount_paid: amountPaid,
-      balance_due: Math.max(0, coursePrice - amountPaid),
+      balance_due: Math.max(0, assessedTotal - amountPaid),
       balance_collected: Math.max(0, amountPaid - previousAmount),
     });
   } catch (error) {

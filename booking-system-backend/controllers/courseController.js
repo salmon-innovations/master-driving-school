@@ -5,6 +5,70 @@ const path = require('path');
 // ─── Course Config (categories & types) ─────────────────────────────────────
 const CONFIG_FILE = path.join(__dirname, '../config/course_config.json');
 
+const normalizePromoPdcName = (value) => {
+  const cleaned = String(value || '').trim();
+  const lower = cleaned.toLowerCase();
+  if (!cleaned) return '';
+  if (lower === 'motorcycle') return 'PDC Motor Manual';
+  if (lower === 'manual' || lower === 'carmt' || lower === 'car mt' || lower === 'pdc car manual') return 'PDC Car Manual';
+  if (lower === 'automatic' || lower === 'carat' || lower === 'car at' || lower === 'pdc car automatic') return 'PDC Car Automatic';
+  if (lower === 'v1-tricycle' || lower === 'a1-tricycle' || lower === 'pdc a1-tricycle') return 'PDC A1-Tricycle';
+  if (lower === 'b1-van/b2 - l300' || lower === 'b1-van/b2-l300' || lower === 'pdc b1-van/b2-l300') return 'PDC B1-Van/B2-L300';
+  return cleaned;
+};
+
+const buildBundleKey = (tdcPart, pdcParts) => {
+  const normalizedPdcParts = [...new Set((pdcParts || []).map(v => normalizePromoPdcName(v)).filter(Boolean))].sort();
+  if (!tdcPart || normalizedPdcParts.length === 0) return '';
+  return `${String(tdcPart).trim()}+${normalizedPdcParts.join('|')}`;
+};
+
+const normalizeBundleEntry = (entry) => {
+  if (!entry) return null;
+
+  if (typeof entry === 'string') {
+    const [tdcPart, pdcRaw = ''] = entry.split('+');
+    const pdcParts = pdcRaw.split('|').map(v => normalizePromoPdcName(v)).filter(Boolean);
+    const key = buildBundleKey(tdcPart, pdcParts);
+    if (!key) return null;
+    return {
+      value: key,
+      key,
+      tdcPart: String(tdcPart || '').trim(),
+      pdcParts: [...new Set(pdcParts)].sort(),
+      label: `${String(tdcPart || '').trim()} TDC + ${[...new Set(pdcParts)].sort().join(', ')} PDC`,
+    };
+  }
+
+  if (typeof entry === 'object') {
+    const rawValue = String(entry.value || '').trim();
+    const tdcPart = String(entry.tdcPart || '').trim() || (rawValue.includes('+') ? rawValue.split('+')[0].trim() : '');
+    const rawPdcParts = Array.isArray(entry.pdcParts)
+      ? entry.pdcParts
+      : (rawValue.includes('+') ? rawValue.split('+')[1].split('|') : []);
+    const pdcParts = [...new Set(rawPdcParts.map(v => normalizePromoPdcName(v)).filter(Boolean))].sort();
+    const key = buildBundleKey(tdcPart, pdcParts);
+    if (!key) return null;
+    return {
+      value: key,
+      key,
+      tdcPart,
+      pdcParts,
+      label: String(entry.label || '').trim() || `${tdcPart} TDC + ${pdcParts.join(', ')} PDC`,
+    };
+  }
+
+  return null;
+};
+
+const normalizeCourseConfig = (rawConfig) => {
+  const merged = { ...DEFAULT_COURSE_CONFIG, ...(rawConfig || {}) };
+  const bundleTypes = (Array.isArray(merged.bundleTypes) ? merged.bundleTypes : [])
+    .map(normalizeBundleEntry)
+    .filter(Boolean);
+  return { ...merged, bundleTypes };
+};
+
 const DEFAULT_COURSE_CONFIG = {
   categories: ['Basic', 'TDC', 'PDC', 'Promo'],
   tdcTypes: [
@@ -17,31 +81,24 @@ const DEFAULT_COURSE_CONFIG = {
     { value: 'V1-Tricycle', label: 'V1-Tricycle' },
     { value: 'B1-Van/B2 - L300', label: 'B1 - Van/B2 - L300' },
   ],
-  bundleTypes: [
-    { value: 'F2F+Motorcycle', label: 'F2F TDC + MOTOR (Motorcycle PDC)' },
-    { value: 'F2F+CarAT', label: 'F2F TDC + CAR AT (Car Automatic PDC)' },
-    { value: 'F2F+CarMT', label: 'F2F TDC + CAR MT (Car Manual PDC)' },
-    { value: 'Online+Motorcycle', label: 'OTDC + MOTOR (Motorcycle PDC)' },
-    { value: 'Online+CarAT', label: 'OTDC + CAR AT (Car Automatic PDC)' },
-    { value: 'Online+CarMT', label: 'OTDC + CAR MT (Car Manual PDC)' },
-  ],
+  bundleTypes: [],
 };
 
 const loadCourseConfig = () => {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
       const saved = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-      return { ...DEFAULT_COURSE_CONFIG, ...saved };
+      return normalizeCourseConfig(saved);
     }
   } catch (e) {
     console.error('Failed to load course config:', e.message);
   }
-  return DEFAULT_COURSE_CONFIG;
+  return normalizeCourseConfig(DEFAULT_COURSE_CONFIG);
 };
 
 const saveCourseConfig = (config) => {
   try {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(normalizeCourseConfig(config), null, 2));
   } catch (e) {
     console.error('Failed to save course config:', e.message);
     throw new Error('Failed to persist course configuration');
@@ -50,7 +107,7 @@ const saveCourseConfig = (config) => {
 
 const getCourseConfig = async (req, res) => {
   try {
-    res.json({ success: true, config: loadCourseConfig() });
+    res.json({ success: true, config: normalizeCourseConfig(loadCourseConfig()) });
   } catch (error) {
     res.status(500).json({ error: 'Failed to read course configuration' });
   }
@@ -68,17 +125,19 @@ const updateCourseConfig = async (req, res) => {
       bundleTypes: bundleTypes ?? current.bundleTypes,
     };
 
+    const normalizedUpdated = normalizeCourseConfig(updated);
+
     // If categories changed, update the DB check constraint
     const oldSorted = [...current.categories].sort().join(',');
-    const newSorted = [...updated.categories].sort().join(',');
+    const newSorted = [...normalizedUpdated.categories].sort().join(',');
     if (categories && oldSorted !== newSorted) {
-      const catList = updated.categories.map(c => `'${c.replace(/'/g, "''")}'`).join(', ');
+      const catList = normalizedUpdated.categories.map(c => `'${c.replace(/'/g, "''")}'`).join(', ');
       await pool.query('ALTER TABLE courses DROP CONSTRAINT IF EXISTS courses_category_check');
       await pool.query(`ALTER TABLE courses ADD CONSTRAINT courses_category_check CHECK (category IN (${catList}))`);
     }
 
-    saveCourseConfig(updated);
-    res.json({ success: true, config: updated });
+    saveCourseConfig(normalizedUpdated);
+    res.json({ success: true, config: normalizedUpdated });
   } catch (error) {
     console.error('Update course config error:', error);
     res.status(500).json({ error: error.message || 'Failed to update course configuration' });

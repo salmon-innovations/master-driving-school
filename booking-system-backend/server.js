@@ -27,6 +27,11 @@ pool.query('SELECT NOW()', (err, res) => {
       .then(() => console.log('✅ branch_prices column ready'))
       .catch(e => console.warn('⚠️  branch_prices migration skipped:', e.message));
 
+    // Multi-PDC promo bundles can produce long course_type keys; ensure column can store full values.
+    pool.query('ALTER TABLE courses ALTER COLUMN course_type TYPE TEXT')
+      .then(() => console.log('✅ courses.course_type set to TEXT'))
+      .catch(e => console.warn('⚠️  course_type TEXT migration skipped:', e.message));
+
     // Ensure avatar column exists on users table
     pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT')
       .then(() => console.log('✅ avatar column ready'))
@@ -100,7 +105,6 @@ app.use(hpp());
 app.use('/api', apiLimiter);
 app.use('/api/auth/login', authLoginLimiter);
 app.use('/api/auth/register', authRegisterLimiter);
-app.use('/api/auth/guest-checkout', authRegisterLimiter);
 app.use('/api/auth/resend-code', authRecoveryLimiter);
 app.use('/api/auth/forgot-password', authRecoveryLimiter);
 app.use('/api/auth/verify-email', authRecoveryLimiter);
@@ -127,6 +131,7 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/api/crm', require('./routes/crm'));
 app.use('/api/roles', require('./routes/roles'));
 app.use('/api/testimonials', require('./routes/testimonials'));
+app.use('/api/promos', require('./routes/promoRoutes'));
 app.use('/api/starpay', require('./routes/starpay')); // StarPay payment gateway
 
 // TEST ROUTE - ABSOLUTE PRIORITY

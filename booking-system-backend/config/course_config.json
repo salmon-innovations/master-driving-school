@@ -1,0 +1,62 @@
+{
+  "categories": [
+    "Basic",
+    "TDC",
+    "PDC",
+    "Promo"
+  ],
+  "tdcTypes": [
+    {
+      "value": "F2F",
+      "label": "F2F (Face-to-Face)"
+    },
+    {
+      "value": "Online",
+      "label": "Online"
+    }
+  ],
+  "pdcTypes": [
+    {
+      "value": "Automatic",
+      "label": "Automatic"
+    },
+    {
+      "value": "Manual",
+      "label": "Manual"
+    },
+    {
+      "value": "A1-Tricycle",
+      "label": "A1-Tricycle"
+    },
+    {
+      "value": "B1-Van/B2 - L300",
+      "label": "B1 - Van/B2 - L300"
+    }
+  ],
+  "bundleTypes": [
+    {
+      "value": "F2F+PDC A1-Tricycle|PDC B1-Van/B2-L300|PDC Car Manual|PDC Motor Manual",
+      "key": "F2F+PDC A1-Tricycle|PDC B1-Van/B2-L300|PDC Car Manual|PDC Motor Manual",
+      "tdcPart": "F2F",
+      "pdcParts": [
+        "PDC A1-Tricycle",
+        "PDC B1-Van/B2-L300",
+        "PDC Car Manual",
+        "PDC Motor Manual"
+      ],
+      "label": "F2F TDC + 4 PDC"
+    },
+    {
+      "value": "Online+PDC A1-Tricycle|PDC B1-Van/B2-L300|PDC Car Automatic|PDC Motor Automatic",
+      "key": "Online+PDC A1-Tricycle|PDC B1-Van/B2-L300|PDC Car Automatic|PDC Motor Automatic",
+      "tdcPart": "Online",
+      "pdcParts": [
+        "PDC A1-Tricycle",
+        "PDC B1-Van/B2-L300",
+        "PDC Car Automatic",
+        "PDC Motor Automatic"
+      ],
+      "label": "OTDC + 4 PDC"
+    }
+  ]
+}

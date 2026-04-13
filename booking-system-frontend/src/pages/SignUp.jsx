@@ -51,6 +51,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
   const [turnstileToken, setTurnstileToken] = useState('')
+  const enrollmentReminder = 'Please make sure all details are correct, as this will be used to process your enrollment.'
 
   const calculateAge = (birthday) => {
     if (!birthday) return ''
@@ -218,6 +219,11 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
       handlePrev()
       return
     }
+    const lastVisitedPage = sessionStorage.getItem('lastVisitedPage')
+    if (lastVisitedPage && !['signup', 'verify-email'].includes(lastVisitedPage)) {
+      onNavigate(lastVisitedPage)
+      return
+    }
     onNavigate('signin')
   }
 
@@ -227,6 +233,18 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
     if (Object.keys(newErrors).length === 0) {
       setLoading(true)
       try {
+        const existingRedirect = sessionStorage.getItem('postVerifyRedirect') || localStorage.getItem('postVerifyRedirect')
+        if (!existingRedirect) {
+          const fallbackPayload = {
+            next: 'schedule',
+            source: 'signup',
+            isOnlineTdcNoSchedule: false,
+            createdAt: Date.now(),
+          }
+          sessionStorage.setItem('postVerifyRedirect', JSON.stringify(fallbackPayload))
+          localStorage.setItem('postVerifyRedirect', JSON.stringify(fallbackPayload))
+        }
+
         const response = await authAPI.register({ ...formData, turnstileToken })
         showNotification('Registration successful! Please verify your email.', 'success')
         setPendingVerificationEmail(formData.email)
@@ -258,7 +276,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
-            {currentStep > 1 ? 'Back to Previous Step' : 'Back to Login'}
+            {currentStep > 1 ? 'Back to Previous Step' : 'Back'}
           </button>
 
           <div className="mt-12 max-w-2xl mx-auto">
@@ -302,6 +320,10 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
                   />
                 ))}
               </div>
+            </div>
+
+            <div className="mb-6 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+              <p className="text-sm font-medium text-blue-800">{enrollmentReminder}</p>
             </div>
 
             {/* General Error Message */}
@@ -502,7 +524,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
                       value={formData.email}
                       onChange={handleChange}
                       className={`w-full px-4 py-3 bg-gray-50 border ${errors.email ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:ring-2 focus:ring-[#2157da] outline-none transition-all`}
-                      placeholder="example@gmail.com"
+                      placeholder="example@domain.com"
                     />
                     {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email}</p>}
                   </div>
@@ -604,7 +626,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
                   {errors.confirmPassword && <p className="text-xs text-red-500 mt-1">{errors.confirmPassword}</p>}
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-2 flex flex-col items-center mt-4">
                   <TurnstileWidget
                     onVerify={(token) => {
                       setTurnstileToken(token)

@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { sendGuestEnrollmentEmail } = require('../utils/emailService');
+const { sendEnrollmentEmail } = require('../utils/emailService');
 
 // Create new booking
 const createBooking = async (req, res) => {
@@ -14,7 +14,7 @@ const createBooking = async (req, res) => {
     }
 
     // Automatically set status to 'paid' if payment type is Full Payment
-    const status = paymentType === 'Full Payment' ? 'paid' : 'collectable';
+    const status = paymentType === 'Full Payment' ? 'paid' : 'partial_payment';
 
     // Format booking time properly (e.g., convert 'N/A' to null)
     let validBookingTime = (bookingTime === 'N/A' || !bookingTime) ? null : bookingTime;
@@ -66,10 +66,13 @@ const createBooking = async (req, res) => {
             const u = userQ.rows[0];
             const b = branchQ.rows[0];
             const c = courseQ.rows[0];
-            const { sendGuestEnrollmentEmail } = require('../utils/emailService');
+            const { sendEnrollmentEmail } = require('../utils/emailService');
             
-            await sendGuestEnrollmentEmail(u.email, u.first_name, u.last_name, {
+            await sendEnrollmentEmail(u.email, u.first_name, u.last_name, {
+              bookingId: result.rows[0]?.id || null,
                 courseName: c.name,
+              courseList: Array.isArray(req.body.courseList) ? req.body.courseList : [],
+              addonsDetailed: Array.isArray(req.body.addonsDetailed) ? req.body.addonsDetailed : [],
                 courseCategory: c.category || req.body.courseCategory || 'PDC',
                 courseType: c.type || req.body.courseType || 'f2f',
                 branchName: b.name,
@@ -85,6 +88,10 @@ const createBooking = async (req, res) => {
                 paymentMethod: paymentMethod || 'Cash',
                 amountPaid: totalAmount,
                 paymentStatus: paymentType || 'Full Payment',
+                subtotal: req.body.subtotal || 0,
+                promoDiscount: req.body.promoDiscount || 0,
+                convenienceFee: req.body.convenienceFee || 0,
+                totalAmount: req.body.totalAmount || totalAmount || 0,
             }, hasReviewer, hasVehicleTips);
         }
     } catch (e) {
@@ -167,7 +174,7 @@ const updateBookingStatus = async (req, res) => {
     const userId = req.user.id;
 
     // Validate status
-    const validStatuses = ['collectable', 'paid', 'cancelled'];
+    const validStatuses = ['partial_payment', 'paid', 'cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }

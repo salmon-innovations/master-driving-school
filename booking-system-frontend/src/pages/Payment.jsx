@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react"
 import { useNotification } from "../context/NotificationContext"
 import { authAPI, bookingsAPI, schedulesAPI, starpayAPI } from "../services/api"
+import { getPaymentAutoCancelMinutes } from "../utils/systemSettings"
 
 function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, scheduleSelection }) {
   const { showNotification } = useNotification()
@@ -93,10 +94,11 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
   const [paymentFailReason, setPaymentFailReason] = useState('cancelled')
   const [receiptCart, setReceiptCart] = useState([])
   const pollRef = useRef(null)
+  const [paymentAutoCancelMinutes, setPaymentAutoCancelMinutes] = useState(() => getPaymentAutoCancelMinutes())
 
   const activeCart = showPaymentSuccess ? receiptCart : cart;
 
-  const isGuestCheckout = localStorage.getItem('isGuestCheckout') === 'true' && !isLoggedIn
+  const isOnlineTdcNoSchedule = !!scheduleSelection?.isOnlineTdcNoSchedule
 
   const calculateItemTotals = (item) => {
     let calcBasePrice = parseFloat(item.price) || 0;
@@ -205,11 +207,10 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     // Do not enforce auth/cart guards while showing final result screens.
     if (showPaymentSuccess || showPaymentFailed) return
 
-    const isGuest = localStorage.getItem('isGuestCheckout') === 'true'
-    if (!isLoggedIn && !isGuest) {
-      showNotification("Please sign in to proceed with payment", "error")
+    if (!isLoggedIn) {
+      showNotification("Please sign up or sign in to proceed with payment", "error")
       handleReleaseLocks()
-      onNavigate("signin")
+      onNavigate("signup")
       return
     }
     if (activeCart.length === 0 && !showPaymentSuccess) {
@@ -241,14 +242,24 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
   }, [])
 
   useEffect(() => {
+    const syncSettings = () => setPaymentAutoCancelMinutes(getPaymentAutoCancelMinutes())
+    window.addEventListener('storage', syncSettings)
+    window.addEventListener('mds-admin-settings-updated', syncSettings)
+    return () => {
+      window.removeEventListener('storage', syncSettings)
+      window.removeEventListener('mds-admin-settings-updated', syncSettings)
+    }
+  }, [])
+
+  useEffect(() => {
     if (starpayQR && qrStatus === 'pending') {
-      if (!qrExpiresAt) setQrExpiresAt(Date.now() + (20 * 60 * 1000))
+      if (!qrExpiresAt) setQrExpiresAt(Date.now() + (paymentAutoCancelMinutes * 60 * 1000))
       const tick = setInterval(() => setQrNow(Date.now()), 1000)
       return () => clearInterval(tick)
     }
 
     if (!starpayQR && qrExpiresAt) setQrExpiresAt(null)
-  }, [starpayQR, qrStatus, qrExpiresAt])
+  }, [starpayQR, qrStatus, qrExpiresAt, paymentAutoCancelMinutes])
 
   const qrSecondsLeft = qrExpiresAt ? Math.max(0, Math.floor((qrExpiresAt - qrNow) / 1000)) : null
   const qrMinutesLeft = qrSecondsLeft != null ? Math.floor(qrSecondsLeft / 60) : null
@@ -324,9 +335,6 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       return `${y}-${m}-${day}`;
     };
 
-    const isGuest = localStorage.getItem('isGuestCheckout') === 'true'
-    const guestDataStr = localStorage.getItem('guestEnrollmentData')
-
     try {
       if (paymentMethod !== 'starpay') {
         showNotification('Only StarPay is supported right now.', 'error')
@@ -340,71 +348,38 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         return
       }
 
-      let paymentResponse
-      if (isLoggedIn) {
-        const courseList = activeCart.map((item) => ({
-          name: item?.name || 'N/A',
-          type: item?.type || 'standard',
-          category: item?.category || null,
-        }))
-        paymentResponse = await starpayAPI.createPayment({
-          courseId: activeCart[0]?.id,
-          courseName: activeCart[0]?.name,
-          branchId: preSelectedBranch?.id,
-          branchName: preSelectedBranch?.name,
-          branchAddress: preSelectedBranch?.address,
-          courseCategory: activeCart[0]?.category,
-          courseType: activeCart[0]?.type,
-          amount: finalAmount,
-          paymentType: paymentType === 'full' ? 'Full Payment' : 'Downpayment',
-          scheduleSlotId: scheduleSelection.slot || scheduleSelection.slotDetails?.id,
-          scheduleDate: formatDate(scheduleSelection.date || scheduleSelection.slotDetails?.date),
-          scheduleSession: scheduleSelection.slotDetails?.session || null,
-          scheduleTime: scheduleSelection.slotDetails?.time_range || scheduleSelection.slotDetails?.time || 'N/A',
-          scheduleSlotId2: scheduleSelection.slot2 || scheduleSelection.slotDetails2?.id,
-          scheduleDate2: formatDate(scheduleSelection.date2 || scheduleSelection.slotDetails2?.date),
-          scheduleSession2: scheduleSelection.slotDetails2?.session || null,
-          scheduleTime2: scheduleSelection.slotDetails2?.time_range || scheduleSelection.slotDetails2?.time || null,
-          pdcSelections: scheduleSelection.pdcSelections || {},
-          courseList,
-          hasReviewer: totalsData.reviewerTotal > 0,
-          hasVehicleTips: totalsData.vehicleTipsTotal > 0,
-        })
-      } else if (isGuest && guestDataStr) {
-        const guestData = JSON.parse(guestDataStr)
-        const courseList = activeCart.map((item) => ({
-          name: item?.name || 'N/A',
-          type: item?.type || 'standard',
-          category: item?.category || null,
-        }))
-        paymentResponse = await starpayAPI.createGuestPayment({
-          ...guestData,
-          courseId: activeCart[0].id,
-          courseName: activeCart[0].name,
-          branchId: preSelectedBranch?.id || guestData.branchId,
-          branchName: preSelectedBranch?.name || guestData.branchName,
-          courseCategory: activeCart[0].category,
-          courseType: activeCart[0].type,
-          scheduleSlotId: scheduleSelection.slot || scheduleSelection.slotDetails?.id,
-          scheduleDate: formatDate(scheduleSelection.date || scheduleSelection.slotDetails?.date),
-          scheduleSession: scheduleSelection.slotDetails?.session || null,
-          scheduleSlotId2: scheduleSelection.slot2 || scheduleSelection.slotDetails2?.id,
-          scheduleDate2: formatDate(scheduleSelection.date2 || scheduleSelection.slotDetails2?.date),
-          scheduleSession2: scheduleSelection.slotDetails2?.session || null,
-          scheduleTime: scheduleSelection.slotDetails?.time_range || scheduleSelection.slotDetails?.time || 'N/A',
-          scheduleTime2: scheduleSelection.slotDetails2?.time_range || scheduleSelection.slotDetails2?.time || null,
-          pdcSelections: scheduleSelection.pdcSelections || {},
-          courseList,
-          amount: finalAmount,
-          paymentType: paymentType === 'full' ? 'Full Payment' : 'Downpayment',
-          hasReviewer: totalsData.reviewerTotal > 0,
-          hasVehicleTips: totalsData.vehicleTipsTotal > 0,
-        })
-      } else {
-        showNotification('Guest profile is missing. Please complete guest enrollment first.', 'error')
-        setIsProcessing(false)
-        return
-      }
+      const courseList = activeCart.map((item) => ({
+        name: item?.name || 'N/A',
+        type: item?.type || 'standard',
+        category: item?.category || null,
+      }))
+      const paymentResponse = await starpayAPI.createPayment({
+        courseId: activeCart[0]?.id,
+        courseName: activeCart[0]?.name,
+        branchId: preSelectedBranch?.id,
+        branchName: preSelectedBranch?.name,
+        branchAddress: preSelectedBranch?.address,
+        courseCategory: activeCart[0]?.category,
+        courseType: activeCart[0]?.type,
+        amount: finalAmount,
+        paymentType: paymentType === 'full' ? 'Full Payment' : 'Downpayment',
+        scheduleSlotId: scheduleSelection.slot || scheduleSelection.slotDetails?.id,
+        scheduleDate: formatDate(scheduleSelection.date || scheduleSelection.slotDetails?.date),
+        scheduleSession: scheduleSelection.slotDetails?.session || null,
+        scheduleTime: scheduleSelection.slotDetails?.time_range || scheduleSelection.slotDetails?.time || 'N/A',
+        scheduleSlotId2: scheduleSelection.slot2 || scheduleSelection.slotDetails2?.id,
+        scheduleDate2: formatDate(scheduleSelection.date2 || scheduleSelection.slotDetails2?.date),
+        scheduleSession2: scheduleSelection.slotDetails2?.session || null,
+        scheduleTime2: scheduleSelection.slotDetails2?.time_range || scheduleSelection.slotDetails2?.time || null,
+        pdcSelections: scheduleSelection.pdcSelections || {},
+        noScheduleRequired: !!scheduleSelection.noScheduleRequired,
+        isOnlineTdcNoSchedule: !!scheduleSelection.isOnlineTdcNoSchedule,
+        pdcScheduleLockedUntilCompletion: !!scheduleSelection.pdcScheduleLockedUntilCompletion,
+        pdcScheduleLockReason: scheduleSelection.pdcScheduleLockReason || null,
+        courseList,
+        hasReviewer: totalsData.reviewerTotal > 0,
+        hasVehicleTips: totalsData.vehicleTipsTotal > 0,
+      })
 
       const msgId = paymentResponse?.msgId
       const codeUrl = paymentResponse?.codeUrl
@@ -497,7 +472,13 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                 <span className="text-base">✅</span>
                 <div>
                   <p className="font-bold">Payment Alert</p>
-                  <p>Your training schedule details were sent to your email. Please check your inbox (and Spam or Promotions folder).</p>
+                  {isOnlineTdcNoSchedule ? (
+                    <p>
+                      Your Online TDC provider onboarding details are being prepared. Please wait up to 30 minutes for the account email from drivetech.ph / OTDC.ph, then check your inbox, Spam, and Promotions folders.
+                    </p>
+                  ) : (
+                    <p>Your training schedule details were sent to your email. Please check your inbox (and Spam or Promotions folder).</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -618,8 +599,6 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
             <div className="w-full flex flex-col sm:flex-row gap-4">
               <button
                 onClick={() => {
-                  localStorage.removeItem('isGuestCheckout')
-                  localStorage.removeItem('guestEnrollmentData')
                   setCart([])
                   onNavigate('profile')
                 }}
@@ -633,8 +612,6 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
 
               <button
                 onClick={() => {
-                  localStorage.removeItem('isGuestCheckout')
-                  localStorage.removeItem('guestEnrollmentData')
                   setCart([])
                   onNavigate('home')
                 }}
@@ -965,7 +942,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                     </div>
                     {paymentMethod === 'starpay' && (
                       <p className="text-center text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 font-semibold">
-                        StarPay session expires in 20 minutes. Unpaid transactions are automatically cancelled.
+                        StarPay session expires in {paymentAutoCancelMinutes} minutes. Unpaid transactions are automatically cancelled.
                       </p>
                     )}
                   </div>
@@ -1006,7 +983,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                     )}
 
                     {/* Schedule */}
-                    {scheduleSelection && (
+                    {scheduleSelection && !isOnlineTdcNoSchedule && (
                       <div className="space-y-2">
                         {/* TDC Schedule Container */}
                         <div className="p-3 bg-white/5 rounded-xl border border-white/10">
@@ -1120,6 +1097,20 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                           Change Schedule
                         </button>
+                      </div>
+                    )}
+
+                    {isOnlineTdcNoSchedule && (
+                      <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                        <div className="flex items-start gap-2">
+                          <span className="text-base">💻</span>
+                          <div>
+                            <p className="text-[10px] font-black text-green-400 uppercase tracking-widest">Online TDC Provider</p>
+                            <p className="text-[11px] text-white/85 mt-1">
+                              No branch schedule selection is required. Please wait up to 30 minutes for your provider account email from drivetech.ph / OTDC.ph.
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     )}
 
