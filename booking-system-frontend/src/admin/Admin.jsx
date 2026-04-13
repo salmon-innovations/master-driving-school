@@ -1,16 +1,34 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import './css/Dashboard.css';
 import Sidebar from './components/Sidebar';
-import Schedule from './Schedule';
-import Booking from './Booking';
-import SalePayment from './SalePayment';
-import UserManagement from './User';
-import WalkInEnrollment from './WalkInEnrollment';
-import CourseManagement from './CourseManagement';
-import Configuration from './Configuration';
-import NewsEvents from './NewsEvents';
-import AnalyticsReports from './AnalyticsReports';
-import CRMManagement from './CRM';
+
+// Lazy-load heavy admin pages for code-splitting — each loads only when first visited.
+const Schedule         = lazy(() => import('./Schedule'));
+const Booking          = lazy(() => import('./Booking'));
+const SalePayment      = lazy(() => import('./SalePayment'));
+const UserManagement   = lazy(() => import('./User'));
+const WalkInEnrollment = lazy(() => import('./WalkInEnrollment'));
+const CourseManagement = lazy(() => import('./CourseManagement'));
+const Configuration    = lazy(() => import('./Configuration'));
+const NewsEvents       = lazy(() => import('./NewsEvents'));
+const AnalyticsReports = lazy(() => import('./AnalyticsReports'));
+const CRMManagement    = lazy(() => import('./CRM'));
+
+// Minimal inline fallback — shown while the lazy chunk is downloading.
+const TabLoadingFallback = () => (
+    <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        height: '60vh', flexDirection: 'column', gap: '16px',
+        color: 'var(--secondary-text)',
+    }}>
+        <div style={{
+            width: '40px', height: '40px', border: '3px solid var(--border-color)',
+            borderTopColor: 'var(--primary-color)', borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite',
+        }} />
+        <span style={{ fontSize: '0.9rem' }}>Loading...</span>
+    </div>
+);
 import { useTheme } from '../context/ThemeContext';
 import { useNotification } from '../context/NotificationContext';
 import { authAPI, adminAPI, notificationsAPI, MEDIA_BASE_URL, branchesAPI } from '../services/api';
@@ -383,16 +401,18 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
     // Fetch notifications on mount and auto-refresh every 30s.
     useEffect(() => {
-        fetchNotifications();
-        const interval = setInterval(fetchNotifications, 30000);
-        return () => clearInterval(interval);
+    fetchNotifications();
+    // Poll every 45 s — reduced from 30 s to lower Render Starter request count
+    const interval = setInterval(fetchNotifications, 45000);
+    return () => clearInterval(interval);
     }, []);
 
     // When notifications dropdown is open, poll faster so urgent items appear quickly.
     useEffect(() => {
-        if (!showNotifications) return undefined;
-        const interval = setInterval(fetchNotifications, 10000);
-        return () => clearInterval(interval);
+    if (!showNotifications) return undefined;
+    // Poll every 20 s when panel open (was 10 s) — still fast enough to show new items
+    const interval = setInterval(fetchNotifications, 20000);
+    return () => clearInterval(interval);
     }, [showNotifications]);
 
     // Zero-click path: if a new Online TDC alert arrives while on dashboard,
@@ -1726,26 +1746,30 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
                     </>
                 ) : activeTab === 'schedules' ? (
+                    <Suspense fallback={<TabLoadingFallback />}>
                     <Schedule
                         onNavigate={setActiveTab}
                         currentUserPermissions={effectiveAdminPermissions}
                         currentUserRole={adminProfile.rawRole}
                         navigationTarget={scheduleNavigationTarget}
                     />
+                    </Suspense>
                 ) : activeTab === 'bookings' ? (
-                    <Booking />
+                    <Suspense fallback={<TabLoadingFallback />}><Booking /></Suspense>
                 ) : activeTab === 'sales' ? (
-                    <SalePayment />
+                    <Suspense fallback={<TabLoadingFallback />}><SalePayment /></Suspense>
 
                 ) : activeTab === 'news' ? (
-                    <NewsEvents />
+                    <Suspense fallback={<TabLoadingFallback />}><NewsEvents /></Suspense>
                 ) : activeTab === 'walk-in' ? (
+                    <Suspense fallback={<TabLoadingFallback />}>
                     <WalkInEnrollment
                         adminProfile={adminProfile}
                         onEnroll={(newEnrollee) => {
                             setEnrollees(prev => [newEnrollee, ...prev]);
                         }}
                     />
+                    </Suspense>
                 ) : activeTab === 'profile' ? (
                     <div className="profile-view-container">
                         <div className="profile-header-card">
@@ -1824,32 +1848,40 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         </div>
                     </div>
                 ) : activeTab === 'settings' ? (
+                    <Suspense fallback={<TabLoadingFallback />}>
                     <Configuration
                         initialTab="settings"
                         currentUserPermissions={effectiveAdminPermissions}
                         currentUserRole={adminProfile.rawRole}
                     />
+                    </Suspense>
                 ) : activeTab === 'users' ? (
+                    <Suspense fallback={<TabLoadingFallback />}>
                     <UserManagement currentUserPermissions={effectiveAdminPermissions} currentUserRole={adminProfile.rawRole} />
+                    </Suspense>
                 ) : activeTab === 'courses' ? (
+                    <Suspense fallback={<TabLoadingFallback />}>
                     <CourseManagement
                         currentUserPermissions={effectiveAdminPermissions}
                         currentUserRole={adminProfile.rawRole}
                         currentUserBranchId={adminProfile.branchId}
                     />
+                    </Suspense>
                 ) : activeTab === 'branches' ? (
+                    <Suspense fallback={<TabLoadingFallback />}>
                     <Configuration
                         currentUserPermissions={effectiveAdminPermissions}
                         currentUserRole={adminProfile.rawRole}
                     />
+                    </Suspense>
                 ) : activeTab === 'analytics' ? (
+                    <Suspense fallback={<TabLoadingFallback />}>
                     <AnalyticsReports onNavigate={setActiveTab} />
+                    </Suspense>
                 ) : activeTab === 'best-selling-courses' ? (
                     renderBestSellingCoursesSection()
                 ) : activeTab === 'crm' ? (
-                    <CRMManagement />
-                ) : activeTab === 'news' ? (
-                    <NewsEvents />
+                    <Suspense fallback={<TabLoadingFallback />}><CRMManagement /></Suspense>
                 ) : activeTab === 'notifications' ? (
                     <NotificationPage
                         notifications={notifications}
