@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { bustCache } = require('../config/db');
 const { createRepayment, queryRepayment, verifySignature } = require('../utils/starpayService');
 const { sendEnrollmentEmail, sendAddonsEmail } = require('../utils/emailService');
 
@@ -703,6 +704,17 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
         }
     } catch (enrollErr) {
         console.error('[StarPay] Enrollment processing error:', enrollErr.message);
+    }
+
+    // --- BUST DASHBOARD CACHE LIVE ---
+    try {
+        bustCache('stats:super_admin:all', 'stats:admin:all');
+        const userBranchRow = await pool.query('SELECT branch_id FROM users WHERE id = $1', [studentId]);
+        if (userBranchRow.rows.length > 0 && userBranchRow.rows[0].branch_id) {
+            bustCache(`stats:admin:${userBranchRow.rows[0].branch_id}`);
+        }
+    } catch (cacheErr) {
+        console.error('[StarPay] Cache Bust error:', cacheErr.message);
     }
 
     console.log(`[StarPay] Booking ${bookingId} fulfilled via sync/webhook (₱${amountPhp})`);

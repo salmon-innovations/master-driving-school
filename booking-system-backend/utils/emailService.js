@@ -1200,6 +1200,22 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
                   Please expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.
                 </p>
               </div>
+
+              <div class="requirements" style="background: #fdfae6; border-left: 4px solid #f59e0b; margin: 15px 0; border-radius: 8px; padding: 15px;">
+                <h4 style="color: #b45309; margin: 0 0 10px 0;">SELF-PACED ONLINE THEORETICAL DRIVING COURSE (OTDC)</h4>
+                <p style="margin: 0 0 15px 0; font-size: 14px; color: #78350f;">Pwede nyo itong gawin kahit kailan, saan, at paano nyo gusto.</p>
+                <div style="font-weight: bold; color: #92400e; margin-bottom: 8px;">Step-by-Step Guide:</div>
+                <ol style="margin: 0; padding-left: 20px; font-size: 13px; color: #78350f; line-height: 1.6;">
+                  <li><strong>Check your Email</strong><br/>After payment, makakatanggap kayo ng OTDC link sa inyong email.</li>
+                  <li style="margin-top: 8px;"><strong>Complete the Modules</strong><br/>May 3 modules<br/>Each module has 20–30 videos<br/>Panoorin lahat ng videos tungkol sa LTO road safety rules and regulations</li>
+                  <li style="margin-top: 8px;"><strong>Take the Exams</strong><br/>May exam after bawat module<br/>Kailangan maipasa para makapag proceed sa next module</li>
+                  <li style="margin-top: 8px;"><strong>Final Step (Branch Visit)</strong><br/>Kapag tapos na ang 3 modules<br/>Pumunta sa branch kung saan kayo nag-enroll<br/>Para sa Final Assessment at TDC Certificate</li>
+                </ol>
+                <div style="margin-top: 15px; font-size: 13px; font-weight: bold; color: #991b1b; text-align: center;">
+                  Reminder:<br/>Tapusin within 30 days para maiwasan ang account deactivation.
+                </div>
+              </div>
+
               ${isPdcScheduleLocked ? `
               <div class="requirements" style="background: #eff6ff; border-left: 4px solid #2563eb; margin: 12px 0 18px 0; border-radius: 8px;">
                 <h4 style="color: #1d4ed8; margin: 0 0 8px 0;">🗓️ PDC Scheduling Notice</h4>
@@ -1358,7 +1374,8 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
     // Construct plain text version
     let plainText = `Hello ${firstName} ${lastName}!\n\nYour walk-in enrollment has been successfully processed.\n`;
     if (isOnlineTdc) {
-      plainText += `\nONLINE TDC PROVIDER NOTICE:\nPlease expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.\n`;
+      plainText += `\nONLINE TDC PROVIDER NOTICE:\nPlease expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.\n\nSELF-PACED ONLINE THEORETICAL DRIVING COURSE (OTDC)\nPwede nyo itong gawin kahit kailan, saan, at paano nyo gusto.\n\nStep-by-Step Guide:\n1. Check your Email\n   After payment, makakatanggap kayo ng OTDC link sa inyong email.\n2. Complete the Modules\n   May 3 modules. Each module has 20–30 videos.\n   Panoorin lahat ng videos tungkol sa LTO road safety rules and regulations.\n3. Take the Exams\n   May exam after bawat module.\n   Kailangan maipasa para makapag proceed sa next module.\n4. Final Step (Branch Visit)\n   Kapag tapos na ang 3 modules, pumunta sa branch kung saan kayo nag-enroll para sa Final Assessment at TDC Certificate.\n\nReminder:\nTapusin within 30 days para maiwasan ang account deactivation.\n`;
+
       if (isPdcScheduleLocked) {
         plainText += `\nPDC SCHEDULING NOTICE:\n${pdcLockReason}\n`;
       }
@@ -1623,6 +1640,21 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
                   Please expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.
                 </p>
               </div>
+
+              <div class="requirements" style="background: #fdfae6; border-left: 4px solid #f59e0b; margin: 15px 0; border-radius: 8px; padding: 15px;">
+                <h4 style="color: #b45309; margin: 0 0 10px 0;">SELF-PACED ONLINE THEORETICAL DRIVING COURSE (OTDC)</h4>
+                <p style="margin: 0 0 15px 0; font-size: 14px; color: #78350f;">Pwede nyo itong gawin kahit kailan, saan, at paano nyo gusto.</p>
+                <div style="font-weight: bold; color: #92400e; margin-bottom: 8px;">Step-by-Step Guide:</div>
+                <ol style="margin: 0; padding-left: 20px; font-size: 13px; color: #78350f; line-height: 1.6;">
+                  <li><strong>Check your Email</strong><br/>After payment, makakatanggap kayo ng OTDC link sa inyong email.</li>
+                  <li style="margin-top: 8px;"><strong>Complete the Modules</strong><br/>May 3 modules<br/>Each module has 20–30 videos<br/>Panoorin lahat ng videos tungkol sa LTO road safety rules and regulations</li>
+                  <li style="margin-top: 8px;"><strong>Take the Exams</strong><br/>May exam after bawat module<br/>Kailangan maipasa para makapag proceed sa next module</li>
+                  <li style="margin-top: 8px;"><strong>Final Step (Branch Visit)</strong><br/>Kapag tapos na ang 3 modules<br/>Pumunta sa branch kung saan kayo nag-enroll<br/>Para sa Final Assessment at TDC Certificate</li>
+                </ol>
+                <div style="margin-top: 15px; font-size: 13px; font-weight: bold; color: #991b1b; text-align: center;">
+                  Reminder:<br/>Tapusin within 30 days para maiwasan ang account deactivation.
+                </div>
+              </div>
               ${isPdcScheduleLocked ? `
               <div class="requirements" style="background: #eff6ff; border-left: 4px solid #2563eb; margin: 12px 0 18px 0; border-radius: 8px;">
                 <h4 style="color: #1d4ed8; margin: 0 0 8px 0;">🗓️ PDC Scheduling Notice</h4>
@@ -1723,7 +1755,7 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
         </body>
         </html>
       `,
-      text: `Hello ${firstName} ${lastName}!\n\nYour enrollment has been successfully processed.\n\n${[isOnlineTdc ? `ONLINE TDC PROVIDER NOTICE:\nPlease expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.${isPdcScheduleLocked ? `\n\nPDC SCHEDULING NOTICE:\n${pdcLockReason}` : ''}` : (hasPrimarySchedule ? `${primaryScheduleLabel}\nDay 1: ${formattedDate}\nSession: ${displayScheduleSession}\nTime: ${scheduleTime || 'N/A'}${effectiveDate2 ? `\nDay 2: ${effectiveDate2}\nSession: ${effectiveSession2 || 'N/A'}\nTime: ${effectiveTime2 || 'N/A'}` : ''}` : ''), hasMultiPdc
+      text: `Hello ${firstName} ${lastName}!\n\nYour enrollment has been successfully processed.\n\n${[isOnlineTdc ? `ONLINE TDC PROVIDER NOTICE:\nPlease expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.\n\nSELF-PACED ONLINE THEORETICAL DRIVING COURSE (OTDC)\nPwede nyo itong gawin kahit kailan, saan, at paano nyo gusto.\n\nStep-by-Step Guide:\n1. Check your Email\n   After payment, makakatanggap kayo ng OTDC link sa inyong email.\n2. Complete the Modules\n   May 3 modules. Each module has 20–30 videos.\n   Panoorin lahat ng videos tungkol sa LTO road safety rules and regulations.\n3. Take the Exams\n   May exam after bawat module.\n   Kailangan maipasa para makapag proceed sa next module.\n4. Final Step (Branch Visit)\n   Kapag tapos na ang 3 modules, pumunta sa branch kung saan kayo nag-enroll para sa Final Assessment at TDC Certificate.\n\nReminder:\nTapusin within 30 days para maiwasan ang account deactivation.${isPdcScheduleLocked ? `\n\nPDC SCHEDULING NOTICE:\n${pdcLockReason}` : ''}` : (hasPrimarySchedule ? `${primaryScheduleLabel}\nDay 1: ${formattedDate}\nSession: ${displayScheduleSession}\nTime: ${scheduleTime || 'N/A'}${effectiveDate2 ? `\nDay 2: ${effectiveDate2}\nSession: ${effectiveSession2 || 'N/A'}\nTime: ${effectiveTime2 || 'N/A'}` : ''}` : ''), hasMultiPdc
         ? normalizedPdcSchedules.map((s, idx) => {
             const d1 = formatDisplayDate(s.scheduleDate);
             const d2 = formatDisplayDate(s.scheduleDate2);
