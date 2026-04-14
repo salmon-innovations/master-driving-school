@@ -25,6 +25,18 @@ const parseNotesJson = (rawNotes) => {
 };
 
 const normalizeCourseItems = (booking, notesJson) => {
+    const isPromoCourse = String(booking?.course_category || booking?.category || '').toLowerCase() === 'promo' 
+        || String(notesJson?.courseCategory || '').toLowerCase() === 'promo';
+
+    if (isPromoCourse) {
+        return [{
+            name: booking?.course_name || booking?.name || notesJson?.combinedCourseNames || 'Promo Course',
+            type: booking?.course_type || booking?.type || '',
+            category: 'promo',
+            price: Number(String(booking?.course_price || booking?.price || booking?.amount || booking?.total_amount || 0).replace(/[^0-9.]/g, '')),
+        }];
+    }
+
     const list = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
     if (list.length > 0) {
         const cleaned = list.map((item) => ({
@@ -320,6 +332,17 @@ const computeEstimatedBalanceDue = (booking = {}) => {
 
 const buildCoursePaymentLines = (booking) => {
     const notesJson = parseNotesJson(booking?.rawNotes || '');
+    
+    // If this represents a predefined promo course, do not fragment the price among sub-items
+    const isPromoCourse = String(booking?.typeCategory || booking?.course_category || '').toLowerCase() === 'promo' 
+        || String(notesJson?.courseCategory || '').toLowerCase() === 'promo';
+
+    if (isPromoCourse) {
+        return [{
+            label: booking?.fullCourseName || booking?.course_name || notesJson?.combinedCourseNames || 'Promo Course',
+            amount: Number(String(booking?.coursePrice || booking?.amount || 0).replace(/[^0-9.]/g, ''))
+        }];
+    }
     const sourceCourseItems = Array.isArray(booking?.courseItems) && booking.courseItems.length > 0
         ? booking.courseItems
         : normalizeCourseItems({
@@ -1268,8 +1291,9 @@ const Booking = () => {
                             legacyBaseName: 'TDC Face-to-Face',
                             legacyBasePrice: 700
                         };
-                    } else if (courseCategory === 'promo' || (fresh.course_name && fresh.course_name.includes('+'))) {
-                        // Fallback calculation for Promo bundles if not in JSON
+                    } else if (courseCategory !== 'promo' && (fresh.course_name && fresh.course_name.includes('+'))) {
+                        // Fallback calculation for Custom Promo bundles (Dynamic Combos) if not in JSON.
+                        // Predefined Promo courses from the DB (courseCategory === 'promo') should NOT get this dynamic 3% discount!
                         const basePrice = fresh.typeCategory === 'TDC + PDC' ? 2850 : Number(fresh.course_price || 0);
                         const disc = Math.round(basePrice * 0.03 * 100) / 100; // 3%
                         fin = {

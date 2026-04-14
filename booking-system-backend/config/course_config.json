@@ -35,16 +35,13 @@
   ],
   "bundleTypes": [
     {
-      "value": "F2F+PDC A1-Tricycle|PDC B1-Van/B2-L300|PDC Car Manual|PDC Motor Manual",
-      "key": "F2F+PDC A1-Tricycle|PDC B1-Van/B2-L300|PDC Car Manual|PDC Motor Manual",
+      "value": "F2F+PDC Motor Manual",
+      "key": "F2F+PDC Motor Manual",
       "tdcPart": "F2F",
       "pdcParts": [
-        "PDC A1-Tricycle",
-        "PDC B1-Van/B2-L300",
-        "PDC Car Manual",
         "PDC Motor Manual"
       ],
-      "label": "F2F TDC + 4 PDC"
+      "label": "F2F TDC + PDC Motorcycle Manual"
     },
     {
       "value": "Online+PDC A1-Tricycle|PDC B1-Van/B2-L300|PDC Car Automatic|PDC Motor Automatic",
