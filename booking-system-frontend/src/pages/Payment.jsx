@@ -172,13 +172,13 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       subtotal += totals.finalItemPrice * qty;
     });
     
-    const hasTDC = activeCart.some(item => (item.category === 'TDC' || (item.name || '').toLowerCase().includes('tdc') || (item.shortName || '').toLowerCase().includes('tdc')));
-    const hasPDC = activeCart.some(item => (item.category === 'PDC' || (item.name || '').toLowerCase().includes('pdc') || (item.shortName || '').toLowerCase().includes('pdc')));
+    const hasTDC = false;
+    const hasPDC = false;
     
-    const hasBundleDiscount = hasTDC && hasPDC;
-    const promoBundleDiscountPercent = Math.max(0, parseFloat(activeCart.find(item => item?.addonsConfig?.promoBundleDiscountPercent != null)?.addonsConfig?.promoBundleDiscountPercent ?? 3) || 0);
-    const bundleDiscountValue = hasBundleDiscount ? subtotal * (promoBundleDiscountPercent / 100) : 0;
-    const finalTotal = subtotal - bundleDiscountValue;
+    const hasBundleDiscount = false;
+    const promoBundleDiscountPercent = 0;
+    const bundleDiscountValue = 0;
+    const finalTotal = subtotal;
 
     return { 
       baseCoursePriceTotal, 

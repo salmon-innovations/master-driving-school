@@ -1393,21 +1393,10 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             const exists = prev.selectedCourses.find(c => c.id === pkg.id);
             let updated;
 
-            // Promo course mode is exclusive: one promo card OR regular TDC/PDC picks.
-            if (pkg.category === 'Promo') {
-                updated = exists ? [] : [pkg];
-            } else if (exists) {
-                updated = prev.selectedCourses.filter(c => c.id !== pkg.id);
-            } else if (pkg.category === 'TDC') {
-                updated = [
-                    ...prev.selectedCourses.filter(c => c.category !== 'TDC' && c.category !== 'Promo'),
-                    pkg
-                ];
-            } else if (pkg.category === 'PDC') {
-                // Allow multiple PDC selections (like Courses/Cart flow).
-                updated = [...prev.selectedCourses.filter(c => c.category !== 'Promo'), pkg];
+            if (exists) {
+                updated = [];
             } else {
-                updated = [...prev.selectedCourses.filter(c => c.category !== 'Promo'), pkg];
+                updated = [pkg];
             }
 
             return { ...prev, selectedCourses: updated, course: null, courseType: '',
@@ -1421,42 +1410,16 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const handleProceedToStep3 = () => {
         const sel = formData.selectedCourses;
         if (!sel || sel.length === 0) return;
-        const tdcCourse = sel.find(c => c.category === 'TDC');
-        const pdcCourses = sel.filter(c => c.category === 'PDC');
-        const pdcCourse = pdcCourses[0] || null;
-        const isBundle = !!(tdcCourse && pdcCourses.length > 0);
-        let course, courseType;
-        if (isBundle) {
-            const tdcPromoType = (tdcCourse.course_type || '').toLowerCase().includes('online') ? 'ONLINE' : 'F2F';
-            const pdcBundleTypes = pdcCourses.map(pdc => pdc.name).join('|');
-            
-            const totalPrice = (tdcCourse.price || 0) + pdcCourses.reduce((sum, item) => sum + (item.price || 0), 0);
-            course = {
-                id: `bundle-${tdcCourse.id}-${pdcCourses.map(c => c.id).join('-')}`,
-                name: `Promo Bundle: ${tdcCourse.shortName || tdcCourse.name} + ${pdcCourses.length} PDC course${pdcCourses.length > 1 ? 's' : ''}`,
-                shortName: 'Promo Bundle',
-                category: 'Promo',
-                course_type: `${tdcPromoType}+${pdcBundleTypes}`,
-                duration: `TDC ${tdcCourse.duration} + ${pdcCourses.length} PDC`,
-                hasTypeOption: true,
-                typeOptions: [{ value: 'promo-bundle', label: 'PROMO BUNDLE', price: totalPrice, originalPrice: totalPrice, discount: 0 }],
-                price: totalPrice, originalPrice: totalPrice,
-                _tdcCourse: tdcCourse,
-                _pdcCourse: pdcCourse,
-                _pdcCourses: pdcCourses,
-                _isManualBundle: true,
-            };
-            courseType = 'promo-bundle';
-        } else {
-            course = sel[0];
-            if (course?.category === 'Promo') {
-                course = enrichSinglePromoCourse(course);
-            }
-            courseType = '';
+        
+        let course = sel[0];
+        if (course?.category === 'Promo') {
+            course = enrichSinglePromoCourse(course);
         }
+        let courseType = '';
+
         setFormData(prev => ({
             ...prev, course, courseType,
-            promoTdcType: (isBundle || course?.category === 'Promo') ? (course.course_type?.split('+')[0] || 'F2F') : '',
+            promoTdcType: (course?.category === 'Promo') ? (course.course_type?.split('+')[0] || 'F2F') : '',
             scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
             scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '',
             promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: '',
@@ -1490,11 +1453,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
             const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
             const selectedPrice = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType)?.price || dynamicCourse?.price || 0;
-            const isRegularPromoBundle = String(formData.course?.category || '').toLowerCase() === 'promo' && !!formData.course?._isManualBundle;
             const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
             const subtotal = selectedPrice + addonsTotal;
-            const promoDiscount = isRegularPromoBundle ? Number((selectedPrice * 0.03).toFixed(2)) : 0;
-            const totalAmountDue = Math.max(0, Number((subtotal - promoDiscount).toFixed(2)));
+            const totalAmountDue = Math.max(0, Number(subtotal.toFixed(2)));
 
             const enteredAmount = Number(formData.amountPaid || 0);
             const changeAmount = Math.max(0, enteredAmount - totalAmountDue);

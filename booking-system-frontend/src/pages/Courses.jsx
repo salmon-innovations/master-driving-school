@@ -232,30 +232,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
       addonsConfig: addonsConfig,
       selectedAddons: selectedAddons,
     }
-    const cartKey = `${pkg.id}::${normalizedType}`
-    setCart((prevCart) => {
-      const existingIndex = prevCart.findIndex((item) => `${item.id}::${String(item.type || 'online')}` === cartKey)
-      if (existingIndex === -1) {
-        return [...prevCart, cartItem]
-      }
-
-      return prevCart.map((item, idx) => {
-        if (idx !== existingIndex) return item
-        const currentQty = Number(item.quantity) || 1
-        return { ...item, quantity: currentQty + normalizedQty }
-      })
-    })
-  }
-
-  const handleAddToCartFromDetail = () => {
-    if (selectedCourse) {
-      if (isSelectedOnlineTdc()) {
-        showNotification('Regular Online TDC cannot be added to cart. Please use Enroll Now to proceed.', 'error')
-        return
-      }
-      addToCart(selectedCourse, quantity, courseType)
-      showNotification(`${selectedCourse.shortName} added to cart!`, "success")
-    }
+    setCart([cartItem])
   }
 
   const isSelectedOnlineTdc = () => {
@@ -928,17 +905,6 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
 
               {/* Action Buttons */}
               <div className="space-y-3 mb-8 relative">
-                {(() => {
-                  const isOnlineTdc = isSelectedOnlineTdc()
-                  return (
-                <button
-                  onClick={handleAddToCartFromDetail}
-                  className="w-full py-3 border border-gray-800 text-gray-800 rounded-md font-medium hover:bg-gray-800 hover:text-white transition-all text-sm active:scale-95"
-                >
-                  Add to cart
-                </button>
-                  )
-                })()}
                 <button
                   onClick={handleEnrollNow}
                   disabled={availabilityLoading || (!hasAvailableSlots && !!preSelectedBranch && !isSelectedOnlineTdc())}
