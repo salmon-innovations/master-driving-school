@@ -153,14 +153,14 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
       subtotal += totals.finalItemPrice * qty;
     });
     
-    // Check if both TDC and PDC exist in the cart
-    const hasTDC = cart.some(item => (item.category === 'TDC' || (item.name || '').toLowerCase().includes('tdc') || (item.shortName || '').toLowerCase().includes('tdc')));
-    const hasPDC = cart.some(item => (item.category === 'PDC' || (item.name || '').toLowerCase().includes('pdc') || (item.shortName || '').toLowerCase().includes('pdc')));
+    // Discount logic for multiple selections is removed as per promo package implementation
+    const hasTDC = false;
+    const hasPDC = false;
     
-    const hasBundleDiscount = hasTDC && hasPDC;
-    const promoBundleDiscountPercent = Math.max(0, parseFloat(cart.find(item => item?.addonsConfig?.promoBundleDiscountPercent != null)?.addonsConfig?.promoBundleDiscountPercent ?? 3) || 0);
-    const bundleDiscountValue = hasBundleDiscount ? subtotal * (promoBundleDiscountPercent / 100) : 0;
-    const finalTotal = subtotal - bundleDiscountValue;
+    const hasBundleDiscount = false;
+    const promoBundleDiscountPercent = 0;
+    const bundleDiscountValue = 0;
+    const finalTotal = subtotal;
 
     return { 
       baseCoursePriceTotal, 
@@ -209,79 +209,41 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
         return
       }
 
-      // All courses now require a schedule selection before payment
-      const tdcItem = cart.find(item => (
-        item.category === 'TDC' ||
-        (item.name || '').toLowerCase().includes('tdc') ||
-        (item.shortName || '').toLowerCase().includes('tdc')
-      ))
-      const pdcItem = cart.find(item => (
-        item.category === 'PDC' ||
-        (item.name || '').toLowerCase().includes('pdc') ||
-        (item.shortName || '').toLowerCase().includes('pdc')
-      ))
+      // Default the calendar view to the first course in the cart.
+      const primaryCourse = cart[0]
+      const primaryType = String(primaryCourse.type || 'standard')
+      const isPrimaryTdc =
+        primaryCourse.category === 'TDC' ||
+        (primaryCourse.name || '').toLowerCase().includes('tdc') ||
+        (primaryCourse.shortName || '').toLowerCase().includes('tdc')
+      const isOnlineTdc = isPrimaryTdc && primaryType.toLowerCase() === 'online'
 
-      // Reuse promo two-step scheduling for a TDC+PDC cart bundle.
-      if (tdcItem && pdcItem) {
-        const tdcTypeRaw = (tdcItem.type || '').toLowerCase()
-        const tdcMode = (tdcTypeRaw.includes('face') || tdcTypeRaw.includes('f2f')) ? 'F2F' : 'Online'
+      setSelectedCourseForSchedule({
+        id: primaryCourse.id,
+        name: primaryCourse.name,
+        shortName: primaryCourse.shortName,
+        duration: primaryCourse.duration,
+        price: primaryCourse.price,
+        category: primaryCourse.category,
+        typeOptions: primaryCourse.typeOptions,
+        hasTypeOption: primaryCourse.hasTypeOption,
+        selectedType: primaryType,
+      })
 
-        const pdcText = `${(pdcItem.type || '')} ${(pdcItem.name || '')} ${(pdcItem.shortName || '')}`.toLowerCase()
-        let pdcMode = 'CarMT'
-        if (pdcText.includes('motor')) pdcMode = 'Motorcycle'
-        else if (pdcText.includes('automatic') || pdcText.includes(' at ') || pdcText.endsWith(' at') || pdcText.includes('carat')) pdcMode = 'CarAT'
-
-        setSelectedCourseForSchedule({
-          id: `bundle-${tdcItem.id}-${pdcItem.id}`,
-          name: `${tdcItem.shortName || 'TDC'} + ${pdcItem.shortName || 'PDC'} Bundle`,
-          shortName: 'TDC + PDC Bundle',
-          duration: `${tdcItem.duration || ''} + ${pdcItem.duration || ''}`.trim(),
-          price: 0,
-          category: 'Promo',
-          course_type: `${tdcMode}+${pdcMode}`,
-          fromCartBundle: true,
-          selectedType: tdcItem.type || 'online',
-          typeOptions: tdcItem.typeOptions,
-          hasTypeOption: true,
+      if (isOnlineTdc) {
+        setScheduleSelection({
+          noScheduleRequired: true,
+          isOnlineTdcNoSchedule: true,
+          providerName: 'drivetech.ph / OTDC.ph',
         })
-        setScheduleSelection(null)
-      } else {
-        // Default the calendar view to the first course in the cart.
-        const primaryCourse = cart[0]
-        const primaryType = String(primaryCourse.type || 'standard')
-        const isPrimaryTdc =
-          primaryCourse.category === 'TDC' ||
-          (primaryCourse.name || '').toLowerCase().includes('tdc') ||
-          (primaryCourse.shortName || '').toLowerCase().includes('tdc')
-        const isOnlineTdc = isPrimaryTdc && primaryType.toLowerCase() === 'online'
-
-        setSelectedCourseForSchedule({
-          id: primaryCourse.id,
-          name: primaryCourse.name,
-          shortName: primaryCourse.shortName,
-          duration: primaryCourse.duration,
-          price: primaryCourse.price,
-          category: primaryCourse.category,
-          typeOptions: primaryCourse.typeOptions,
-          hasTypeOption: primaryCourse.hasTypeOption,
-          selectedType: primaryType,
-        })
-
-        if (isOnlineTdc) {
-          setScheduleSelection({
-            noScheduleRequired: true,
-            isOnlineTdcNoSchedule: true,
-            providerName: 'drivetech.ph / OTDC.ph',
-          })
-          persistPostVerifyRedirect('payment', true)
-          setShowCart(false)
-          onNavigate('payment')
-          window.scrollTo({ top: 0, behavior: 'smooth' })
-          return
-        }
-
-        setScheduleSelection(null)
+        persistPostVerifyRedirect('payment', true)
+        setShowCart(false)
+        onNavigate('payment')
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+        return
       }
+
+      setScheduleSelection(null)
 
       setShowCart(false);
       onNavigate('schedule');
