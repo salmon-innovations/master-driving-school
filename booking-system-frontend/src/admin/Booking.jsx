@@ -24,14 +24,23 @@ const parseNotesJson = (rawNotes) => {
     }
 };
 
-const normalizeCourseItems = (booking, notesJson) => {
-    const isPromoCourse = String(booking?.course_category || booking?.category || '').toLowerCase() === 'promo' 
-        || String(notesJson?.courseCategory || '').toLowerCase() === 'promo';
+const isPromoBooking = (bookingObj, notesJson) => {
+    const list = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
+    if (list.some(c => String(c.category).toLowerCase() === 'promo')) return true;
+    if (String(bookingObj?.course_category || bookingObj?.category || bookingObj?.typeCategory || '').toLowerCase() === 'promo') return true;
+    if (String(notesJson?.courseCategory || '').toLowerCase() === 'promo') return true;
+    return false;
+};
 
-    if (isPromoCourse) {
+const normalizeCourseItems = (booking, notesJson) => {
+    if (isPromoBooking(booking, notesJson)) {
+        const noteList = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
+        const promoItem = noteList.find(c => String(c.category).toLowerCase() === 'promo');
+        const promoName = promoItem?.name || booking?.course_name || booking?.name || notesJson?.combinedCourseNames || 'Promo Course';
+        
         return [{
-            name: booking?.course_name || booking?.name || notesJson?.combinedCourseNames || 'Promo Course',
-            type: booking?.course_type || booking?.type || '',
+            name: promoName,
+            type: promoItem?.type || booking?.course_type || booking?.type || '',
             category: 'promo',
             price: Number(String(booking?.course_price || booking?.price || booking?.amount || booking?.total_amount || 0).replace(/[^0-9.]/g, '')),
         }];
@@ -270,8 +279,9 @@ const resolveAssessmentFigures = (booking = {}) => {
     const hasBundleInNotes = notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'TDC')
         && notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'PDC');
     const fallbackPromoBase = notesCourseTotal + notesAddonTotal + notesConvenience;
-    const fallbackPromoDiscount = hasBundleInNotes ? Number((fallbackPromoBase * 0.03).toFixed(2)) : 0;
-    const notesPromoDiscount = Math.max(
+    const isNativePromo = isPromoBooking(booking, notesJson);
+    const fallbackPromoDiscount = (!isNativePromo && hasBundleInNotes) ? Number((fallbackPromoBase * 0.03).toFixed(2)) : 0;
+    const notesPromoDiscount = isNativePromo ? 0 : Math.max(
         0,
         Number(notesJson?.promoDiscount || 0),
         Number(booking?.promoDiscount || 0),
@@ -334,12 +344,13 @@ const buildCoursePaymentLines = (booking) => {
     const notesJson = parseNotesJson(booking?.rawNotes || '');
     
     // If this represents a predefined promo course, do not fragment the price among sub-items
-    const isPromoCourse = String(booking?.typeCategory || booking?.course_category || '').toLowerCase() === 'promo' 
-        || String(notesJson?.courseCategory || '').toLowerCase() === 'promo';
+    if (isPromoBooking(booking, notesJson)) {
+        const noteList = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
+        const promoItem = noteList.find(c => String(c.category).toLowerCase() === 'promo');
+        const promoName = promoItem?.name || booking?.fullCourseName || booking?.course_name || notesJson?.combinedCourseNames || 'Promo Course';
 
-    if (isPromoCourse) {
         return [{
-            label: booking?.fullCourseName || booking?.course_name || notesJson?.combinedCourseNames || 'Promo Course',
+            label: promoName,
             amount: Number(String(booking?.coursePrice || booking?.amount || 0).replace(/[^0-9.]/g, ''))
         }];
     }
@@ -1291,9 +1302,9 @@ const Booking = () => {
                             legacyBaseName: 'TDC Face-to-Face',
                             legacyBasePrice: 700
                         };
-                    } else if (courseCategory !== 'promo' && (fresh.course_name && fresh.course_name.includes('+'))) {
+                    } else if (!isPromoBooking(fresh, notesJson) && (fresh.course_name && fresh.course_name.includes('+'))) {
                         // Fallback calculation for Custom Promo bundles (Dynamic Combos) if not in JSON.
-                        // Predefined Promo courses from the DB (courseCategory === 'promo') should NOT get this dynamic 3% discount!
+                        // Predefined Promo courses from the DB should NOT get this dynamic 3% discount!
                         const basePrice = fresh.typeCategory === 'TDC + PDC' ? 2850 : Number(fresh.course_price || 0);
                         const disc = Math.round(basePrice * 0.03 * 100) / 100; // 3%
                         fin = {
@@ -1411,9 +1422,11 @@ const Booking = () => {
                         : Number(fin.convenienceFee || 0) > 0
                         ? Number(fin.convenienceFee || 0)
                         : computedConvenienceFee;
-                    const normalizedPromoDiscount = Number(fin.promoDiscount || 0) > 0
-                        ? Number(fin.promoDiscount || 0)
-                        : computedPromoDiscount;
+                    const normalizedPromoDiscount = isPromoBooking(fresh, notesJson)
+                        ? 0
+                        : Number(fin.promoDiscount || 0) > 0
+                            ? Number(fin.promoDiscount || 0)
+                            : computedPromoDiscount;
 
                     const refreshedCourseItems = applyResolvedTdcType(
                         pricedCourseItems.length > 0 ? pricedCourseItems : baseCourseItems,
