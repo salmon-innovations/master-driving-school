@@ -642,19 +642,9 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   )
 
   let calcBasePrice = 0;
-  let calcDiscountRate = 0;
-  let calcDiscountValue = 0;
-  let hasDiscount = false;
-
   if (selectedCourse) {
     const activeType = selectedCourse.typeOptions?.find(opt => opt.value === courseType);
     calcBasePrice = activeType?.price || parseFloat(selectedCourse.price) || 0;
-    calcDiscountRate = activeType?.discount || parseFloat(selectedCourse.discount) || 0;
-    
-    if (calcDiscountRate > 0) {
-      hasDiscount = true;
-      calcDiscountValue = calcBasePrice * (calcDiscountRate / 100);
-    }
   }
 
   // If a course is selected, show detail view
@@ -746,11 +736,6 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                 <h1 className="text-2xl sm:text-3xl font-black text-[#2157da]">
                   {selectedCourse.name}
                 </h1>
-                {hasDiscount && (
-                  <span className="bg-[#2157da] text-white text-xs font-bold px-3 py-1 rounded-md">
-                    Student {calcDiscountRate}% OFF
-                  </span>
-                )}
               </div>
 
               {/* Top Breakdown List */}
@@ -774,18 +759,13 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                   <span className="font-bold text-gray-900">₱{(parseFloat(addonsConfig.convenienceFee || 25) * quantity).toLocaleString()}</span>
                 </div>
 
-                {hasDiscount && (
-                  <div className="flex justify-between items-center py-2 -mx-2 px-2 mt-2 bg-green-50/80 rounded-lg text-green-700 font-bold">
-                    <span>Bundle Discount ({calcDiscountRate}% OFF)</span>
-                    <span>- ₱{(calcDiscountValue * quantity).toLocaleString()}</span>
-                  </div>
-                )}
+
 
                 <div className="flex justify-between items-center pt-5 mt-4 border-t border-gray-100">
                   <span className="text-lg font-black text-[#1a2332]">Total Amount</span>
                   <span className="text-3xl font-black text-[#2157da]">
                     ₱{((
-                      calcBasePrice - (hasDiscount ? calcDiscountValue : 0) +
+                      calcBasePrice +
                       (selectedAddons.reviewer ? parseFloat(addonsConfig.reviewer || 30) : 0) +
                       (selectedAddons.vehicleTips ? parseFloat(addonsConfig.vehicleTips || 20) : 0) +
                       (addonsConfig.customAddons || []).reduce((sum, addon) => sum + (selectedAddons[addon.id] ? parseFloat(addon.price || 0) : 0), 0) +

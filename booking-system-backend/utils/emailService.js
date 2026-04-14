@@ -898,13 +898,6 @@ const computeEmailRemainingBalance = (enrollmentDetails = {}, amountPaid = 0, pa
   }
 
   let promoDiscount = Math.max(0, toAmount(enrollmentDetails?.promoDiscount || 0));
-  const isPromoBundleByType = String(enrollmentDetails?.courseType || '').toLowerCase().includes('promo-bundle');
-  const isPromoBundleByCategory = String(enrollmentDetails?.courseCategory || '').toUpperCase().includes('PROMO');
-  const hasBundleTdc = courseList.some((item) => String(item?.category || item?.name || '').toUpperCase().includes('TDC'));
-  const hasBundlePdc = courseList.some((item) => String(item?.category || item?.name || '').toUpperCase().includes('PDC'));
-  if (promoDiscount <= 0 && courseTotal > 0 && (isPromoBundleByType || isPromoBundleByCategory || (hasBundleTdc && hasBundlePdc))) {
-    promoDiscount = Number((courseTotal * 0.03).toFixed(2));
-  }
 
   const addonTotal = inferredAddonTotal;
   const computedTotal = Math.max(0, Number((courseTotal + addonTotal + convenienceFee - promoDiscount).toFixed(2)));

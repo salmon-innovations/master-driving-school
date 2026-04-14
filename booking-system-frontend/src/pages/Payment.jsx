@@ -136,13 +136,11 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
 
     const advFee = parseFloat(item.addonsConfig?.convenienceFee || 25);
 
-    const finalItemPrice = calcBasePrice - calcDiscountValue + reviewerPrice + vehicleTipsPrice + customAddonsPriceTotal + advFee;
+    const finalItemPrice = calcBasePrice + reviewerPrice + vehicleTipsPrice + customAddonsPriceTotal + advFee;
     
     return {
       calcBasePrice,
-      hasDiscount,
-      calcDiscountRate,
-      calcDiscountValue,
+
       reviewerPrice,
       vehicleTipsPrice,
       customAddonsPriceTotal,
@@ -168,7 +166,6 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       vehicleTipsTotal += totals.vehicleTipsPrice * qty;
       customAddonsTotal += totals.customAddonsPriceTotal * qty;
       convenienceTotal += totals.advFee * qty;
-      discountTotal += totals.calcDiscountValue * qty;
       subtotal += totals.finalItemPrice * qty;
     });
     
@@ -186,7 +183,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       vehicleTipsTotal, 
       customAddonsTotal,
       convenienceTotal, 
-      discountTotal, 
+
       subtotal, 
       hasBundleDiscount, 
       promoBundleDiscountPercent,
@@ -561,14 +558,8 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                       </div>
 
                       {/* Addons Breakdown (Per Item) */}
-                      {(totals.reviewerPrice > 0 || totals.vehicleTipsPrice > 0 || totals.customAddonsPriceTotal > 0 || totals.calcDiscountValue > 0) && (
+                      {(totals.reviewerPrice > 0 || totals.vehicleTipsPrice > 0 || totals.customAddonsPriceTotal > 0) && (
                         <div className="mt-2 ml-2 pl-3 border-l-2 border-slate-200 space-y-1">
-                          {totals.hasDiscount && totals.calcDiscountValue > 0 && (
-                            <div className="flex justify-between text-[11px] text-red-500">
-                              <span>Discount</span>
-                              <span>-₱{(totals.calcDiscountValue * (item.quantity || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                          )}
                           {totals.reviewerPrice > 0 && (
                             <div className="flex justify-between text-[11px] text-slate-600">
                               <span>+ LTO Exam Reviewer</span>
@@ -1217,12 +1208,6 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                           <span className="font-bold text-white/90">₱{totalsData.convenienceTotal.toLocaleString()}</span>
                         </div>
 
-                        {totalsData.discountTotal > 0 && (
-                          <div className="flex justify-between items-center text-green-400">
-                            <span>Discount</span>
-                            <span className="font-bold">- ₱{totalsData.discountTotal.toLocaleString()}</span>
-                          </div>
-                        )}
                       </div>
 
                       <div className="flex justify-between text-xs text-white/60 border-t border-white/10 pt-2">

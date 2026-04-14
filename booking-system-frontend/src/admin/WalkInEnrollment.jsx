@@ -1569,7 +1569,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 transactionNo: formData.transactionNo,
                 addons: formData.addons || [],
                 subtotal,
-                promoDiscount,
+                promoDiscount: 0,
                 totalAmount: totalAmountDue,
                 convenienceFee: 0,
 
