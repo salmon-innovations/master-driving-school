@@ -1956,7 +1956,10 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                                 </div>
                                             </td>
                                             <td style={{ fontSize: '0.82rem' }}>{row.contact_numbers || '—'}</td>
-                                            <td style={{ fontSize: '0.82rem' }}>{row.course_name || 'TDC'} {row.course_type ? `(${row.course_type})` : ''}</td>
+                                            <td style={{ fontSize: '0.82rem' }}>
+                                                {row.course_name || 'TDC'} 
+                                                {row.course_type && !String(row.course_name || '').toLowerCase().includes('bundle') ? ` (${row.course_type})` : ''}
+                                            </td>
                                             <td style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
                                                 {row.created_at ? new Date(row.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
                                             </td>
@@ -2070,7 +2073,10 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                                 <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-color)' }}>{row.student_name || '—'}</div>
                                                 <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)' }}>{row.student_email || '—'}</div>
                                             </td>
-                                            <td style={{ fontSize: '0.82rem' }}>{row.course_name || 'Promo Bundle'} {row.course_type ? `(${row.course_type})` : ''}</td>
+                                            <td style={{ fontSize: '0.82rem' }}>
+                                                {row.course_name || 'Promo Bundle'} 
+                                                {(row.course_type && row.course_type.toLowerCase() !== 'bundle' && !String(row.course_name || '').includes('(Bundle)')) ? ` (${row.course_type})` : ''}
+                                            </td>
                                             <td style={{ fontSize: '0.82rem' }}>{row.pdcCourses.map((c) => c.courseName).join(', ')}</td>
                                             <td style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}>{row.completedDate || '—'}</td>
                                             <td style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}>

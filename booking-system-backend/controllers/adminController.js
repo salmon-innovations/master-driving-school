@@ -955,7 +955,7 @@ const createUser = async (req, res) => {
     await ensureUserPermissionsColumn();
     const scope = await getUserBranchScope(req.user);
 
-    console.log('ðŸ“ CREATE USER REQUEST - Body:', req.body);
+    console.log('ðŸ“  CREATE USER REQUEST - Body:', req.body);
 
     const {
       firstName,
@@ -983,20 +983,20 @@ const createUser = async (req, res) => {
 
     // Only allow creating Admin accounts.
     if (role !== 'admin') {
-      console.log('âŒ Invalid role:', role);
+      console.log('â Œ Invalid role:', role);
       return res.status(403).json({ error: 'Can only create admin accounts' });
     }
 
     // Check if user already exists
-    console.log('ðŸ” Checking if user exists with email:', email);
+    console.log('ðŸ”  Checking if user exists with email:', email);
     const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existingUser.rows.length > 0) {
-      console.log('âŒ User already exists with email:', email);
+      console.log('â Œ User already exists with email:', email);
       return res.status(400).json({ error: 'User with this email already exists' });
     }
 
     // Generate random password
-    console.log('ðŸ” Generating random password...');
+    console.log('ðŸ”  Generating random password...');
     const generatedPassword = generateRandomPassword();
     console.log('âœ… Password generated successfully');
 
@@ -1019,7 +1019,7 @@ const createUser = async (req, res) => {
         return res.status(403).json({ error: 'Branch managers can only create users in their assigned branch' });
       }
     }
-    console.log('ðŸ¢ Branch ID:', branchId);
+    console.log('ðŸ ¢ Branch ID:', branchId);
 
     // Insert new user
     console.log('ðŸ’¾ Inserting user into database...');
@@ -1058,7 +1058,7 @@ const createUser = async (req, res) => {
       await sendPasswordEmail(email, generatedPassword, firstName, role);
       console.log('âœ… Password email sent successfully to:', email);
     } catch (emailError) {
-      console.error('âŒ Failed to send password email:', emailError);
+      console.error('â Œ Failed to send password email:', emailError);
       // Continue even if email fails - user is created
     }
 
@@ -1069,9 +1069,9 @@ const createUser = async (req, res) => {
       passwordSent: true,
     });
   } catch (error) {
-    console.error('âŒ CREATE USER ERROR - Full details:', error);
-    console.error('âŒ Error message:', error.message);
-    console.error('âŒ Error stack:', error.stack);
+    console.error('â Œ CREATE USER ERROR - Full details:', error);
+    console.error('â Œ Error message:', error.message);
+    console.error('â Œ Error stack:', error.stack);
     res.status(500).json({ error: 'Server error while creating user' });
   }
 };
@@ -1262,7 +1262,7 @@ const updateUser = async (req, res) => {
         console.log('âœ… New password email sent to updated email:', email);
         passwordSent = true;
       } catch (emailError) {
-        console.error('âŒ Failed to send new password email:', emailError);
+        console.error('â Œ Failed to send new password email:', emailError);
         // Continue even if email fails
       }
     }
@@ -1388,7 +1388,7 @@ const resetUserPassword = async (req, res) => {
 const walkInEnrollment = async (req, res) => {
   const client = await pool.connect();
   try {
-    console.log('ðŸ“ WALK-IN ENROLLMENT REQUEST:', req.body);
+    console.log('ðŸ“  WALK-IN ENROLLMENT REQUEST:', req.body);
 
     const {
       firstName, middleName, lastName, age, gender, birthday,
@@ -1416,7 +1416,7 @@ const walkInEnrollment = async (req, res) => {
     const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
     const isPromoPdcLocked = !!pdcScheduleLockedUntilCompletion;
 
-    console.log('ðŸ” Walk-in enrollment received - TDC:', courseType, 'PDC:', courseTypePdc);
+    console.log('ðŸ”  Walk-in enrollment received - TDC:', courseType, 'PDC:', courseTypePdc);
 
     // Parse branchId to integer (comes as string from frontend select)
     const parsedBranchId = parseInt(branchId, 10);
@@ -1590,10 +1590,11 @@ const walkInEnrollment = async (req, res) => {
         courseMetaResult.rows.map((row) => [Number(row.id), row])
       );
 
-      combinedCourseNames = idsToFetch
+      const rawCombined = idsToFetch
         .map((id) => courseMetaById.get(Number(id))?.name)
         .filter(Boolean)
         .join(' + ');
+      combinedCourseNames = rawCombined;
 
       notesCourseList = idsToFetch
         .map((id) => {
@@ -3412,6 +3413,79 @@ const getPdcSchedulingQueue = async (req, res) => {
       return true;
     };
 
+    /**
+     * Normalizes verbose PDC course names from the DB into short, consistent labels.
+     * Examples:
+     *  "Practical Driving Course(PDC) - (A1 - TRICYCLE) - V1-Tricycle"  → "PDC A1 Tricycle"
+     *  "Practical Driving Course(PDC) - (B1 - VAN/B2 - L300) - B1-Van/B2 - L300" → "PDC B1 Van B2 L300"
+     *  "Practical Driving Course(PDC) - (CAR) - Manual"                  → "PDC Car Manual"
+     *  "Practical Driving Course(PDC) - (MOTORCYCLE) - Automatic"        → "PDC Motor Automatic"
+     *  "PDC A1 Tricycle" (already clean)                                 → "PDC A1 Tricycle"
+     *  "pdc-car-automatic" (slug)                                         → "PDC Car Automatic"
+     */
+    const normalizePdcCourseName = (name = '', courseType = '') => {
+      const raw = String(name || '').trim();
+      if (!raw) return raw;
+
+      // Already a clean short name (no parens, no "Practical Driving Course")
+      const isVerbose = /practical\s*driving\s*course/i.test(raw) || /\([A-Z0-9 \-/]+\)/.test(raw);
+      const isSlug = !raw.includes(' ') && raw.toLowerCase().startsWith('pdc-');
+
+      if (!isVerbose && !isSlug) return raw; // Already clean, return as-is
+
+      // 1. Handle slug-style (pdc-car-automatic)
+      if (isSlug) {
+        const label = String(raw)
+          .replace(/^pdc[-_]?/i, '')
+          .replace(/[-_/]+/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase())
+          .replace(/\bB1\b/gi, 'B1').replace(/\bB2\b/gi, 'B2')
+          .replace(/\bA1\b/gi, 'A1').replace(/\bV1\b/gi, 'V1')
+          .replace(/\bL300\b/gi, 'L300')
+          .trim();
+        return `PDC ${label}`;
+      }
+
+      // 2. Handle verbose DB names: extract the meaningful part from parentheses
+      // e.g. "Practical Driving Course(PDC) - (A1 - TRICYCLE) - V1-Tricycle"
+      // Step 1: extract from parentheses → "A1 - TRICYCLE"
+      const parenMatch = raw.match(/\(([^)]+)\)\s*[-–]?\s*(.*)$/);
+      let core = parenMatch ? parenMatch[1] : raw;
+
+      // Also grab transmission/variant suffix after last paren group
+      const variantSuffix = parenMatch ? String(parenMatch[2] || '').trim() : '';
+
+      // Clean up core: remove "PDC", normalize separators
+      core = core
+        .replace(/^pdc\s*[-–]?\s*/i, '')
+        .replace(/[-–_/]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      // Map well-known keywords to clean names
+      const src = `${core} ${variantSuffix} ${courseType}`.toUpperCase();
+      
+      let vehicleType = '';
+      let transmission = '';
+
+      // Vehicle type detection
+      if (/MOTOR|MOTORCYCLE/.test(src)) vehicleType = 'Motor';
+      else if (/A1|TRICYCLE/.test(src)) vehicleType = 'A1 Tricycle';
+      else if (/B1|B2|VAN|L300/.test(src)) vehicleType = 'B1 Van B2 L300';
+      else if (/CAR/.test(src)) vehicleType = 'Car';
+      else {
+        // Fallback: title-case the extracted core
+        vehicleType = core.replace(/\b\w/g, (c) => c.toUpperCase());
+      }
+
+      // Transmission detection
+      if (/AUTOMATIC|AUTO|\bAT\b/.test(src)) transmission = 'Automatic';
+      else if (/MANUAL|\bMT\b/.test(src)) transmission = 'Manual';
+
+      const parts = ['PDC', vehicleType, transmission].filter(Boolean);
+      return parts.join(' ');
+    };
+
     const applyTransmissionToName = (name = '', courseType = '') => {
       const cleanName = String(name || '').trim();
       const cleanType = String(courseType || '').trim();
@@ -3476,11 +3550,12 @@ const getPdcSchedulingQueue = async (req, res) => {
 
     const pdcCourseNameById = new Map();
     if (allPdcCourseIds.length > 0) {
-      const pdcRes = await pool.query('SELECT id, name, course_type FROM courses WHERE id = ANY($1::int[])', [allPdcCourseIds]);
+      const pdcRes = await pool.query('SELECT id, name, course_type, category FROM courses WHERE id = ANY($1::int[])', [allPdcCourseIds]);
       pdcRes.rows.forEach((course) => {
         pdcCourseNameById.set(Number(course.id), {
           name: course.name,
           courseType: course.course_type || '',
+          category: course.category || '',
         });
       });
     }
@@ -3524,26 +3599,52 @@ const getPdcSchedulingQueue = async (req, res) => {
         courseType: value?.courseType || '',
       }));
 
+      // Helper: convert a type slug like "pdc-car-automatic" → "PDC Car Automatic"
+      const slugToLabel = (slug = '') => {
+        return String(slug)
+          .replace(/^pdc[-_]?/i, '')    // strip leading "pdc-"
+          .replace(/[-_/]+/g, ' ')       // dashes, underscores, slashes → spaces
+          .replace(/\b\w/g, (c) => c.toUpperCase()) // title case
+          .replace(/\bB1\b/gi, 'B1').replace(/\bB2\b/gi, 'B2')
+          .replace(/\bA1\b/gi, 'A1').replace(/\bV1\b/gi, 'V1')
+          .replace(/\bL300\b/gi, 'L300')
+          .trim();
+      };
+
       const fromCourseList = (Array.isArray(notesJson?.courseList) ? notesJson.courseList : [])
         .filter((item) => String(item?.category || '').toUpperCase() === 'PDC')
-        .map((item, idx) => ({
-          key: String(item?.id || `pdc_list_${idx + 1}`),
-          courseId: item?.id || null,
-          courseName: item?.name || '',
-          courseType: item?.type || '',
-        }));
-
-      const fromPdcIds = (Array.isArray(notesJson?.pdcCourseIds) ? notesJson.pdcCourseIds : [])
-        .map((id, idx) => {
-          const numId = Number(id);
-          const courseMeta = pdcCourseNameById.get(numId);
+        .map((item, idx) => {
+          // If the item name is just a raw slug (no spaces, starts with pdc-), humanize it
+          const rawName = String(item?.name || '').trim();
+          const isSlug = rawName && !rawName.includes(' ') && rawName.toLowerCase().startsWith('pdc-');
+          const resolvedName = isSlug ? `PDC ${slugToLabel(rawName)}` : rawName;
+          // If we humanized the name, clear courseType so applyTransmissionToName
+          // doesn't append the raw slug to the already-readable name.
+          const resolvedCourseType = isSlug ? '' : (item?.type || '');
           return {
-            key: `pdc_id_${numId || idx + 1}`,
-            courseId: Number.isFinite(numId) ? numId : null,
-            courseName: courseMeta?.name || '',
-            courseType: courseMeta?.courseType || '',
+            key: String(item?.id || `pdc_list_${idx + 1}`),
+            courseId: item?.id || null,
+            courseName: resolvedName,
+            courseType: resolvedCourseType,
           };
         });
+
+      const fromPdcIds = (Array.isArray(notesJson?.pdcCourseIds) ? notesJson.pdcCourseIds : [])
+        .map((id) => {
+          const numId = Number(id);
+          const courseMeta = pdcCourseNameById.get(numId);
+          if (!courseMeta) return null;
+          // IMPORTANT: Skip the Promo Bundle itself if it's in the list
+          if (String(courseMeta.category).toUpperCase() === 'PROMO') return null;
+          
+          return {
+            key: `pdc_id_${numId}`,
+            courseId: numId,
+            courseName: courseMeta.name || '',
+            courseType: courseMeta.courseType || '',
+          };
+        })
+        .filter(Boolean);
 
       const fromCombinedNames = String(notesJson?.combinedCourseNames || row?.course_name || '')
         .split('+')
@@ -3609,13 +3710,16 @@ const getPdcSchedulingQueue = async (req, res) => {
           seen.add(key);
           return true;
         })
-        .map((item, idx) => ({
-          key: item.key || `pdc_${idx + 1}`,
-          courseId: item.courseId || null,
-          courseName: applyTransmissionToName(item.courseName, item.courseType),
-          courseType: item.courseType || '',
-          requiresDay2: isTwoDayVariant(item.courseName, item.courseType),
-        }));
+        .map((item, idx) => {
+          const cleanName = normalizePdcCourseName(item.courseName, item.courseType);
+          return {
+            key: item.key || `pdc_${idx + 1}`,
+            courseId: item.courseId || null,
+            courseName: cleanName,
+            courseType: item.courseType || '',
+            requiresDay2: isTwoDayVariant(cleanName, item.courseType),
+          };
+        });
 
       const completedDate = toInputDate(row?.updated_at || row?.created_at || null);
 

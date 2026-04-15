@@ -19,6 +19,8 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   const [hasAvailableSlots, setHasAvailableSlots] = useState(true)
   const [slotAvailabilityDetail, setSlotAvailabilityDetail] = useState(null) // null | { hasTdc, hasPdc, tdcLabel, pdcLabel }
   const [isMobileScreen, setIsMobileScreen] = useState(window.innerWidth < 1024)
+  // Per-promo-package slot availability in the listing view: { [courseId]: { loading, hasTdc, hasPdc, tdcLabel, pdcLabel } }
+  const [promoListingAvailability, setPromoListingAvailability] = useState({})
 
   // Format branch name - remove company prefixes
   const formatBranchName = (name) => {
@@ -92,7 +94,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Transform database courses to match UI structure
+
   const packages = courses.map(course => {
     // Resolve the effective price for the currently selected branch.
     // If a branch is selected and the course has a custom price for that branch, use it.
@@ -214,6 +216,89 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
     pkg.popular = bestSellerIds.includes(pkg.id);
   });
 
+  // Check promo bundle slot availability for listing view whenever branch or courses change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!preSelectedBranch) {
+      setPromoListingAvailability({});
+      return;
+    }
+    const promoPackagesList = courses
+      .filter(c => String(c.category || '').toLowerCase() === 'promo')
+      .map(c => ({ id: c.id, typeOptions: (() => {
+        const opts = [];
+        if (c.course_type) opts.push({ value: c.course_type.toLowerCase().replace(/\s+/g, '-') });
+        if (c.pricing_data) c.pricing_data.forEach(v => opts.push({ value: v.type.toLowerCase().replace(/\s+/g, '-') }));
+        return opts;
+      })() }));
+    if (promoPackagesList.length === 0) return;
+
+    const checkPromoAvailability = async () => {
+      const loadingMap = {};
+      promoPackagesList.forEach(pkg => { loadingMap[pkg.id] = { loading: true }; });
+      setPromoListingAvailability(loadingMap);
+      try {
+        const allSlots = await schedulesAPI.getSlotsByDate(null, preSelectedBranch.id);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tdcMinDate = new Date(today); tdcMinDate.setDate(today.getDate() + 1);
+        const pdcMinDate = new Date(today); pdcMinDate.setDate(today.getDate() + 2);
+        const results = {};
+        for (const pkg of promoPackagesList) {
+          const defaultTypeValue = (pkg.typeOptions?.[0]?.value || '').toLowerCase();
+          const tdcPart = defaultTypeValue.includes('+') ? defaultTypeValue.split('+')[0].trim() : defaultTypeValue;
+          const pdcPart = defaultTypeValue.includes('+') ? defaultTypeValue.split('+').slice(1).join('+').trim() : '';
+
+          const isOnlineTdc = tdcPart.includes('online') || tdcPart.includes('otdc');
+          const hasTdc = isOnlineTdc ? true : (Array.isArray(allSlots) && allSlots.some(s => {
+            if (s.type?.toLowerCase() !== 'tdc') return false;
+            const sd = new Date((s.date || s.start_date) + 'T00:00:00');
+            if (sd < tdcMinDate) return false;
+            if (tdcPart && tdcPart !== 'f2f' && s.course_type && s.course_type.toLowerCase() !== tdcPart) return false;
+            return s.available_slots == null || s.available_slots > 0;
+          }));
+
+          // Multi-part PDC check for listing view
+          const pdcPartsRaw = pdcPart.split('|').map(p => p.trim()).filter(Boolean);
+          const pdcResults = pdcPartsRaw.map(p => {
+             const pLower = p.toLowerCase();
+             const isMoto = pLower.includes('motorcycle') || pLower.includes('motor') || pLower.includes('moto') || pLower.includes('bike');
+             const isAT = pLower.includes('automatic') || pLower.includes('auto') || pLower.includes('at');
+             const isMT = pLower.includes('manual') || pLower.includes('mt');
+             const isTricycle = pLower.includes('tricycle') || pLower.includes('v1');
+             const isB1B2 = pLower.includes('b1') || pLower.includes('b2') || pLower.includes('van') || pLower.includes('l300');
+             
+             return Array.isArray(allSlots) && allSlots.some(s => {
+                if (s.type?.toLowerCase() !== 'pdc') return false;
+                const sd = new Date((s.date || s.start_date) + 'T00:00:00');
+                if (sd < pdcMinDate) return false;
+                const ct = (s.course_type || '').toLowerCase();
+                const tr = (s.transmission || '').toLowerCase();
+                if (isAT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false;
+                if (isMT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false;
+                if (!ct || ct === 'both' || ct === 'any' || ct === 'all') return s.available_slots == null || s.available_slots > 0;
+                if (isTricycle) return ct.includes('tricycle');
+                if (isB1B2) return ct.includes('b1') || ct.includes('b2') || ct.includes('van') || ct.includes('l300');
+                if (isMoto) return ct.includes('motorcycle') || ct.includes('motor') || ct.includes('moto') || ct.includes('bike');
+                return !ct.includes('motorcycle') && !ct.includes('motor') && !ct.includes('tricycle') && !ct.includes('b1') && !ct.includes('b2');
+             });
+          });
+
+          const hasPdc = pdcResults.length === 0 || pdcResults.every(ok => ok);
+          const tdcLabel = isOnlineTdc ? 'TDC (Online)' : (tdcPart === 'f2f' ? 'TDC (Face-to-Face)' : 'TDC');
+          const pdcLabel = pdcPart.includes('|') ? `${pdcPartsRaw.length} PDC Tracks` : (pdcPart.includes('motor') ? 'PDC Motorcycle' : 'PDC Car');
+          results[pkg.id] = { loading: false, hasTdc, hasPdc, tdcLabel, pdcLabel };
+        }
+        setPromoListingAvailability(results);
+      } catch (e) {
+        const openMap = {};
+        promoPackagesList.forEach(pkg => { openMap[pkg.id] = { loading: false, hasTdc: true, hasPdc: true }; });
+        setPromoListingAvailability(openMap);
+      }
+    };
+    checkPromoAvailability();
+  }, [preSelectedBranch?.id, courses.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const addToCart = (pkg, qty = 1, type = 'online') => {
     const normalizedQty = Math.max(1, Number(qty) || 1)
     const normalizedType = String(type || 'online')
@@ -231,14 +316,27 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
       type: normalizedType,
       addonsConfig: addonsConfig,
       selectedAddons: selectedAddons,
+      // Fixed: Preserve PDC bundle metadata so it reaches Payment.jsx and Backend
+      pdcCourseIds: pkg.pdcCourseIds || pkg._pdcCourseIds || [],
+      _pdcCourses: pkg._pdcCourses || pkg._pdcCourse ? (pkg._pdcCourses || [pkg._pdcCourse]) : [],
+      pdcSelections: pkg.pdcSelections || {},
     }
-    setCart([cartItem])
+    
+    setCart(prevCart => {
+      const existingIdx = prevCart.findIndex(item => item.id === cartItem.id && item.type === cartItem.type)
+      if (existingIdx !== -1) {
+        const nextCart = [...prevCart]
+        nextCart[existingIdx].quantity += normalizedQty
+        return nextCart
+      }
+      return [...prevCart, cartItem]
+    })
   }
 
   const isSelectedOnlineTdc = () => {
     if (!selectedCourse) return false
     const isTdcCourse = selectedCourse?.type === 'tdc' || selectedCourse?.category === 'TDC' || (selectedCourse?.name || '').toLowerCase().includes('tdc') || (selectedCourse?.shortName || '').toLowerCase().includes('tdc')
-    return isTdcCourse && String(courseType || '').toLowerCase() === 'online'
+    return isTdcCourse && String(courseType || '').toLowerCase().includes('online')
   }
 
   const isSelectedPdcCourse = () => {
@@ -316,14 +414,22 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
         selectedType: courseType,
         addonsConfig: addonsConfig,
         selectedAddons: selectedAddons,
+        // Fixed: Preserve PDC bundle metadata
+        pdcCourseIds: selectedCourse.pdcCourseIds || selectedCourse._pdcCourseIds || [],
+        _pdcCourses: selectedCourse._pdcCourses || selectedCourse._pdcCourse ? (selectedCourse._pdcCourses || [selectedCourse._pdcCourse]) : [],
+        pdcSelections: selectedCourse.pdcSelections || {},
       })
 
       if (isOnlineTdc) {
         addToCart(selectedCourse, quantity, courseType)
+        const hasPdc = selectedCourse.pdcCourseIds?.length > 0 || selectedCourse._pdcCourseIds?.length > 0 || (courseType || '').includes('+');
         setScheduleSelection({
           noScheduleRequired: true,
           isOnlineTdcNoSchedule: true,
-          providerName: 'drivetech.ph / OTDC.ph'
+          providerName: 'drivetech.ph / OTDC.ph',
+          pdcScheduleLockedUntilCompletion: hasPdc,
+          pdcScheduleLockReason: hasPdc ? 'PDC schedule will be assigned by Admin after your online course is completed.' : null,
+          pdcCourseIds: selectedCourse.pdcCourseIds || selectedCourse._pdcCourseIds || [],
         })
         persistPostVerifyRedirect('payment', true)
       } else {
@@ -370,7 +476,8 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
       setHasAvailableSlots(true)
       setSlotAvailabilityDetail(null)
       try {
-        if (isSelectedOnlineTdc()) {
+        const isOnlineOnlyTdc = isSelectedOnlineTdc() && !(courseType || '').includes('+') && !selectedCourse.pdcCourseIds?.length;
+        if (isOnlineOnlyTdc) {
           setHasAvailableSlots(true)
           setSlotAvailabilityDetail(null)
           return
@@ -392,52 +499,55 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
           const tdcMinDate = new Date(today); tdcMinDate.setDate(today.getDate() + 1)
           const pdcMinDate = new Date(today); pdcMinDate.setDate(today.getDate() + 2)
 
-          const hasTdc = Array.isArray(allSlots) && allSlots.some(s => {
+          const hasTdc = (tdcPart === 'online' || tdcPart.includes('otdc')) ? true : (Array.isArray(allSlots) && allSlots.some(s => {
             if (s.type?.toLowerCase() !== 'tdc') return false
             const sd = new Date((s.date || s.start_date) + 'T00:00:00')
             if (sd < tdcMinDate) return false
             if (tdcPart && s.course_type && s.course_type.toLowerCase() !== tdcPart) return false
             return s.available_slots == null || s.available_slots > 0
+          }))
+
+          // Parse each PDC part separately (split by |)
+          const pdcPartsRaw = pdcPart.split('|').map(p => p.trim()).filter(Boolean)
+          const pdcResults = pdcPartsRaw.map(p => {
+             const label = p.toUpperCase()
+             const pLower = p.toLowerCase()
+             const isMoto = pLower.includes('motorcycle') || pLower.includes('motor') || pLower.includes('moto') || pLower.includes('bike')
+             const isAT = pLower.includes('automatic') || pLower.includes('auto') || pLower.includes('at')
+             const isMT = pLower.includes('manual') || pLower.includes('mt')
+             const isTricycle = pLower.includes('tricycle') || pLower.includes('v1')
+             const isB1B2 = pLower.includes('b1') || pLower.includes('b2') || pLower.includes('van') || pLower.includes('l300')
+             
+             const ok = Array.isArray(allSlots) && allSlots.some(s => {
+                if (s.type?.toLowerCase() !== 'pdc') return false
+                const sd = new Date((s.date || s.start_date) + 'T00:00:00')
+                if (sd < pdcMinDate) return false
+                const ct = (s.course_type || '').toLowerCase()
+                const tr = (s.transmission || '').toLowerCase()
+                
+                // Transmission check
+                if (isAT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false
+                if (isMT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false
+                
+                if (!ct || ct === 'both' || ct === 'any' || ct === 'all') return s.available_slots == null || s.available_slots > 0
+                
+                if (isTricycle) return ct.includes('tricycle')
+                if (isB1B2) return ct.includes('b1') || ct.includes('b2') || ct.includes('van') || ct.includes('l300')
+                if (isMoto) return ct.includes('motorcycle') || ct.includes('motor') || ct.includes('moto') || ct.includes('bike')
+                
+                // Generic Car
+                return !ct.includes('motorcycle') && !ct.includes('motor') && !ct.includes('tricycle') && !ct.includes('b1') && !ct.includes('b2')
+             })
+             return { label, ok }
           })
 
-          const isMotorPdc = pdcPart.includes('motorcycle') || pdcPart.includes('motor')
-          const isCarAT = pdcPart.includes('carat') || pdcPart.includes('car-at')
-          const isCarMT = pdcPart.includes('carmt') || pdcPart.includes('car-mt')
-
-          // FREE OTDC + PDC MOTOR policy: student picks only OTDC slot.
-          // PDC schedule is assigned later by admin after OTDC + CRM completion.
-          if (tdcPart === 'online' && isMotorPdc) {
-            const tdcLabel = 'TDC (Online)'
-            const pdcLabel = 'PDC Motorcycle (Admin Scheduled)'
-            setSlotAvailabilityDetail({ hasTdc, hasPdc: true, tdcLabel, pdcLabel })
-            setHasAvailableSlots(hasTdc)
-            return
-          }
-
-          const hasPdc = Array.isArray(allSlots) && allSlots.some(s => {
-            if (s.type?.toLowerCase() !== 'pdc') return false
-            const sd = new Date((s.date || s.start_date) + 'T00:00:00')
-            if (sd < pdcMinDate) return false
-            const ct = (s.course_type || '').toLowerCase()
-            const tr = (s.transmission || '').toLowerCase()
-            // Universal/untyped PDC slots match all promo types
-            if (!ct || ct === 'both' || ct === 'any' || ct === 'all') return s.available_slots == null || s.available_slots > 0
-            if (isMotorPdc) {
-              if (!ct.includes('motorcycle') && !ct.includes('motor') && !ct.includes('moto') && !ct.includes('bike')) return false
-            } else if (isCarAT) {
-              if (ct.includes('motorcycle') || ct.includes('motor') || ct.includes('tricycle') || ct.includes('van') || ct.includes('l300')) return false
-              if (tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false
-            } else if (isCarMT) {
-              if (ct.includes('motorcycle') || ct.includes('motor') || ct.includes('tricycle') || ct.includes('van') || ct.includes('l300')) return false
-              if (tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false
-            }
-            return s.available_slots == null || s.available_slots > 0
+          const tdcLabel = (tdcPart === 'online' || tdcPart.includes('otdc')) ? 'TDC (Online)' : (tdcPart === 'f2f' ? 'TDC (Face-to-Face)' : 'TDC')
+          setSlotAvailabilityDetail({ 
+            tdc: { label: tdcLabel, ok: hasTdc }, 
+            pdc: pdcResults.length > 0 ? pdcResults : [{ label: 'PDC', ok: true }] 
           })
-
-          const pdcLabel = isMotorPdc ? 'PDC Motorcycle' : isCarAT ? 'PDC Car (Automatic)' : isCarMT ? 'PDC Car (Manual)' : 'PDC'
-          const tdcLabel = tdcPart === 'f2f' ? 'TDC (Face-to-Face)' : tdcPart === 'online' ? 'TDC (Online)' : 'TDC'
-          setSlotAvailabilityDetail({ hasTdc, hasPdc, tdcLabel, pdcLabel })
-          setHasAvailableSlots(hasTdc && hasPdc)
+          
+          setHasAvailableSlots(hasTdc && (pdcResults.length === 0 || pdcResults.every(r => r.ok)))
           return
         }
 
@@ -539,12 +649,56 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
     return `₱${Number(pkg.price || 0).toLocaleString()}`
   }
 
+  const renderPromoSlotNote = (pkg) => {
+    if (!preSelectedBranch) return null;
+    const avail = promoListingAvailability[pkg.id];
+    if (!avail) return null;
+    if (avail.loading) return (
+      <div className="text-[10px] text-gray-400 italic mt-1">Checking slot availability...</div>
+    );
+    const allOk = avail.hasTdc && avail.hasPdc;
+    if (allOk) return null;
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-2.5 mt-1">
+        <div className="flex items-start gap-1.5">
+          <svg className="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          <div>
+            <p className="text-[10px] font-bold text-red-700 mb-0.5">No available slots at this branch:</p>
+            <ul className="space-y-0.5">
+              {avail.tdcLabel && (
+                <li className={`text-[10px] flex items-center gap-1 ${avail.hasTdc ? 'text-green-700' : 'text-red-600 font-semibold'}`}>
+                  <span>{avail.hasTdc ? '✓' : '✗'}</span>
+                  <span>{avail.tdcLabel}{avail.hasTdc ? ' — Slots available' : ' — No slots available'}</span>
+                </li>
+              )}
+              {avail.pdcLabel && (
+                <li className={`text-[10px] flex items-center gap-1 ${avail.hasPdc ? 'text-green-700' : 'text-red-600 font-semibold'}`}>
+                  <span>{avail.hasPdc ? '✓' : '✗'}</span>
+                  <span>{avail.pdcLabel}{avail.hasPdc ? ' — Slots available' : ' — No slots available'}</span>
+                </li>
+              )}
+              {!avail.tdcLabel && !avail.pdcLabel && (
+                <li className="text-[10px] text-red-600">No upcoming slots found. Please check back later or contact the branch.</li>
+              )}
+            </ul>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderMobileCourseCards = (items) => (
     <div className="flex flex-col gap-4">
-      {items.map((pkg) => (
+      {items.map((pkg) => {
+        const isPromo = String(pkg.category || '').toLowerCase() === 'promo';
+        const promoAvail = promoListingAvailability[pkg.id];
+        const hasNoSlots = isPromo && preSelectedBranch && promoAvail && !promoAvail.loading && (!promoAvail.hasTdc || !promoAvail.hasPdc);
+        return (
         <div
           key={pkg.id}
-          className={`bg-white rounded-2xl shadow-md border border-gray-100 p-4 flex flex-col gap-3 active:scale-[0.99] transition-all ${pkg.popular ? 'border-l-4 border-l-[#F3B74C]' : ''}`}
+          className={`bg-white rounded-2xl shadow-md border border-gray-100 p-4 flex flex-col gap-3 active:scale-[0.99] transition-all ${pkg.popular ? 'border-l-4 border-l-[#F3B74C]' : ''} ${hasNoSlots ? 'border border-red-200' : ''}`}
         >
           <div className="flex items-start justify-between gap-2">
             <button
@@ -573,7 +727,8 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
             Select Course
           </button>
         </div>
-      ))}
+        );
+      })}
     </div>
   )
 
@@ -590,7 +745,9 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {items.map((pkg) => (
+            {items.map((pkg) => {
+              const isPromo = String(pkg.category || '').toLowerCase() === 'promo';
+              return (
               <tr
                 key={pkg.id}
                 className={`hover:bg-blue-50 transition-colors ${pkg.popular ? 'bg-orange-50/30' : ''}`}
@@ -634,7 +791,8 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -883,15 +1041,41 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                 </div>
               </div>
 
+              {/* Online TDC Informational Note */}
+              {isSelectedOnlineTdc() && (
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-5 mb-8 shadow-sm" data-aos="zoom-in">
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md">
+                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    </div>
+                    <div>
+                      <p className="font-bold text-[#1e40af] text-sm mb-1 uppercase tracking-tight">Online TDC Selected</p>
+                      <p className="text-[#1e3a8a] text-[0.8rem] font-medium leading-relaxed">
+                        No branch slot selection is required for Online TDC. You can proceed directly to enrollment.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div className="space-y-3 mb-8 relative">
                 <button
+                  onClick={() => {
+                    addToCart(selectedCourse, quantity, courseType)
+                    showNotification('Added to cart successfully!', 'success')
+                  }}
+                  className="w-full py-3 rounded-md font-bold transition-all text-sm uppercase bg-white border-2 border-[#2157da] text-[#2157da] hover:bg-blue-50"
+                >
+                  ADD TO CART
+                </button>
+                <button
                   onClick={handleEnrollNow}
-                  disabled={availabilityLoading || (!hasAvailableSlots && !!preSelectedBranch && !isSelectedOnlineTdc())}
+                  disabled={availabilityLoading || (!hasAvailableSlots && !!preSelectedBranch)}
                   className={`w-full py-3 rounded-md font-bold transition-all text-sm uppercase ${
                     availabilityLoading
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : !hasAvailableSlots && preSelectedBranch && !isSelectedOnlineTdc()
+                      : !hasAvailableSlots && preSelectedBranch
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : preSelectedBranch
                           ? 'bg-[#F3B74C] text-gray-800 hover:bg-[#e1a63b]'
@@ -900,7 +1084,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                 >
                   {availabilityLoading
                     ? 'Checking availability...'
-                    : !hasAvailableSlots && preSelectedBranch && !isSelectedOnlineTdc()
+                    : !hasAvailableSlots && preSelectedBranch
                       ? 'No Available Slots'
                       : preSelectedBranch
                         ? (isSelectedOnlineTdc() ? 'PROCEED TO PAYMENT' : 'ENROLL NOW')
@@ -908,7 +1092,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                 </button>
 
                 {/* Slot availability detail note — shown when a course has no slots */}
-                {!availabilityLoading && !hasAvailableSlots && preSelectedBranch && !isSelectedOnlineTdc() && (
+                {!availabilityLoading && !hasAvailableSlots && preSelectedBranch && (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 mt-1">
                     <div className="flex items-start gap-2">
                       <svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
@@ -916,14 +1100,30 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                         <p className="text-xs font-bold text-red-700 mb-1">No available slots at this branch:</p>
                         {slotAvailabilityDetail ? (
                           <ul className="space-y-0.5">
-                            <li className={`text-xs flex items-center gap-1.5 ${slotAvailabilityDetail.hasTdc ? 'text-green-700' : 'text-red-600 font-semibold'}`}>
-                              <span>{slotAvailabilityDetail.hasTdc ? '✓' : '✗'}</span>
-                              <span>{slotAvailabilityDetail.tdcLabel}{slotAvailabilityDetail.hasTdc ? ' — Slots available' : ' — No slots available'}</span>
-                            </li>
-                            <li className={`text-xs flex items-center gap-1.5 ${slotAvailabilityDetail.hasPdc ? 'text-green-700' : 'text-red-600 font-semibold'}`}>
-                              <span>{slotAvailabilityDetail.hasPdc ? '✓' : '✗'}</span>
-                              <span>{slotAvailabilityDetail.pdcLabel}{slotAvailabilityDetail.hasPdc ? ' — Slots available' : ' — No slots available'}</span>
-                            </li>
+                            {/* Render TDC status */}
+                            {slotAvailabilityDetail.tdc && (
+                              <li className={`text-xs flex items-center gap-1.5 ${slotAvailabilityDetail.tdc.ok ? 'text-green-700' : 'text-red-600 font-semibold'}`}>
+                                <span>{slotAvailabilityDetail.tdc.ok ? '✓' : '✗'}</span>
+                                <span>{slotAvailabilityDetail.tdc.label}{slotAvailabilityDetail.tdc.ok ? ' — Slots available' : ' — No slots available'}</span>
+                              </li>
+                            )}
+                            
+                            {/* Render PDC statuses (could be multiple for bundles) */}
+                            {Array.isArray(slotAvailabilityDetail.pdc) ? (
+                              slotAvailabilityDetail.pdc.map((track, idx) => (
+                                <li key={idx} className={`text-xs flex items-center gap-1.5 ${track.ok ? 'text-green-700' : 'text-red-600 font-semibold'}`}>
+                                  <span>{track.ok ? '✓' : '✗'}</span>
+                                  <span>{track.label}{track.ok ? ' — Slots available' : ' — No slots available'}</span>
+                                </li>
+                              ))
+                            ) : (
+                              slotAvailabilityDetail.pdcLabel && (
+                                <li className={`text-xs flex items-center gap-1.5 ${slotAvailabilityDetail.hasPdc ? 'text-green-700' : 'text-red-600 font-semibold'}`}>
+                                  <span>{slotAvailabilityDetail.hasPdc ? '✓' : '✗'}</span>
+                                  <span>{slotAvailabilityDetail.pdcLabel}{slotAvailabilityDetail.hasPdc ? ' — Slots available' : ' — No slots available'}</span>
+                                </li>
+                              )
+                            )}
                           </ul>
                         ) : (
                           <p className="text-xs text-red-600">No upcoming slots found. Please check back later or contact the branch.</p>

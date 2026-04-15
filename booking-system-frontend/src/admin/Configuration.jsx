@@ -7,7 +7,7 @@ import RoleSection from './config/RoleSection';
 import SettingsSection from './config/SettingsSection';
 import CourseTypesSection from './config/CourseTypesSection';
 import EmailContentSection from './config/EmailContentSection';
-import { BranchModal, RoleModal, ConfirmModal } from './config/Modals';
+import { BranchModal, RoleModal, ConfirmModal, BranchQrModal } from './config/Modals';
 import { adminAPI } from '../services/api';
 
 const CONFIG_TAB_PERMISSION_MAP = {
@@ -406,6 +406,8 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
     const [showBranchModal, setShowBranchModal] = useState(false);
     const [editingBranch, setEditingBranch] = useState(null);
     const [branchFormData, setBranchFormData] = useState({ name: '', address: '', contact_number: '', email: '' });
+    const [showQrModal, setShowQrModal] = useState(false);
+    const [qrBranch, setQrBranch] = useState(null);
 
     // Role States
     const [roles, setRoles] = useState([]);
@@ -501,13 +503,18 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
         try {
             if (editingBranch) {
                 await branchesAPI.update(editingBranch.id, branchFormData);
+                // Update in-place immediately — no re-fetch
+                setBranches(prev => prev.map(b =>
+                    b.id === editingBranch.id ? { ...b, ...branchFormData } : b
+                ));
                 showNotification('Branch updated successfully', 'success');
             } else {
-                await branchesAPI.create(branchFormData);
+                const res = await branchesAPI.create(branchFormData);
+                // Need DB-assigned ID — fetch fresh
+                await fetchBranches();
                 showNotification('Branch created successfully', 'success');
             }
             setShowBranchModal(false);
-            fetchBranches();
         } catch (err) { showNotification(err.message || 'Failed to save branch', 'error'); }
     };
 
@@ -521,8 +528,9 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
             onConfirm: async () => {
                 try {
                     await branchesAPI.delete(id);
+                    // Remove instantly from local state — no re-fetch
+                    setBranches(prev => prev.filter(b => b.id !== id));
                     showNotification('Branch deleted successfully', 'success');
-                    fetchBranches();
                 } catch (err) {
                     showNotification(err.message || 'Failed to delete branch', 'error');
                 }
@@ -564,13 +572,18 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
         try {
             if (editingRole) {
                 await rolesAPI.update(editingRole.id, roleFormData);
+                // Update in-place immediately — no re-fetch
+                setRoles(prev => prev.map(r =>
+                    r.id === editingRole.id ? { ...r, ...roleFormData } : r
+                ));
                 showNotification('Role updated', 'success');
             } else {
                 await rolesAPI.create(roleFormData);
+                // Need DB-assigned ID — fetch fresh
+                await fetchRoles();
                 showNotification('Role created', 'success');
             }
             setShowRoleModal(false);
-            fetchRoles();
         } catch (err) { showNotification(err.message || 'Failed to save role', 'error'); }
     };
 
@@ -584,8 +597,9 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
             onConfirm: async () => {
                 try {
                     await rolesAPI.delete(id);
+                    // Remove instantly from local state — no re-fetch
+                    setRoles(prev => prev.filter(r => r.id !== id));
                     showNotification('Role deleted successfully', 'success');
-                    fetchRoles();
                 } catch (err) {
                     showNotification(err.message || 'Failed to delete role', 'error');
                 }
@@ -753,6 +767,10 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
                         onAdd={handleBranchAdd}
                         onEdit={handleBranchEdit}
                         onDelete={handleBranchDelete}
+                        onGenerateQr={(branch) => {
+                            setQrBranch(branch);
+                            setShowQrModal(true);
+                        }}
                     />
                 )}
                 {activeTab === 'roles' && (
@@ -811,6 +829,12 @@ const Configuration = ({ initialTab = 'branches', currentUserPermissions = [], c
                 message={confirmModal.message}
                 confirmText={confirmModal.confirmText}
                 isDestructive={confirmModal.isDestructive}
+            />
+
+            <BranchQrModal 
+                isOpen={showQrModal}
+                onClose={() => setShowQrModal(false)}
+                branch={qrBranch}
             />
         </div>
     );

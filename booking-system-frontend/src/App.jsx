@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react'
 import AOS from 'aos'
 import 'aos/dist/aos.css'
-import { authAPI } from './services/api'
+import { authAPI, branchesAPI } from './services/api'
 import Header from './components/Header'
 import Footer from './components/Footer'
 import Cart from './components/Cart'
@@ -252,6 +252,41 @@ function App() {
     if (scheduleSelection) localStorage.setItem('scheduleSelection', JSON.stringify(scheduleSelection))
     else localStorage.removeItem('scheduleSelection')
   }, [scheduleSelection])
+
+  // Handle branchId from URL (QR Code Scan)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const branchId = params.get('branchId');
+    if (branchId) {
+      const loadBranchFromUrl = async () => {
+        try {
+          const res = await branchesAPI.getAll();
+          if (res.success) {
+            const branch = res.branches.find(b => String(b.id) === String(branchId));
+            if (branch) {
+              setPreSelectedBranch(branch);
+              // Store it immediately
+              localStorage.setItem('preSelectedBranch', JSON.stringify(branch));
+              
+              // If we are on home or branches, move to courses
+              const currentP = getPageFromLocation() || 'home';
+              if (currentP === 'home' || currentP === 'branches') {
+                setCurrentPage('courses');
+                window.history.replaceState({}, '', '/courses');
+              } else {
+                // Just clean the URL
+                const cleanPath = window.location.pathname;
+                window.history.replaceState({}, '', cleanPath);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Failed to auto-load branch from URL:', err);
+        }
+      };
+      loadBranchFromUrl();
+    }
+  }, []);
 
   const handleNavigation = (page) => {
     if (currentPage && currentPage !== page) {

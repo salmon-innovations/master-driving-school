@@ -101,6 +101,9 @@ const toCompactCourseLabel = (item = {}) => {
     const hasTdc = source.includes('TDC') || source.includes('THEORETICAL');
     const hasPdc = source.includes('PDC') || source.includes('PRACTICAL');
 
+    const isPromo = category.toLowerCase() === 'promo';
+    const isBundle = source.includes('BUNDLE');
+
     if (hasTdc) {
         if (source.includes('ONLINE') || type.toUpperCase().includes('ONLINE')) return 'TDC Online';
         if (source.includes('F2F') || source.includes('FACE TO FACE')) return 'TDC F2F';
@@ -121,7 +124,6 @@ const toCompactCourseLabel = (item = {}) => {
         } else if (source.includes('CAR')) {
             vehicle = 'Car';
         } else if (hasManual || hasAutomatic) {
-            // Most single PDC AT/MT records are car variants even when course name is generic.
             vehicle = 'Car';
         } else if (source.includes('B1') || source.includes('VAN')) {
             vehicle = 'B1-Van';
@@ -136,7 +138,14 @@ const toCompactCourseLabel = (item = {}) => {
         return ['PDC', vehicle, transmission].filter(Boolean).join(' ');
     }
 
-    return toTitle(name) || 'Course';
+    // Default cleanup for bundles and titles
+    let label = toTitle(name);
+    if (isBundle) {
+        // Ensure only one "(Bundle)" and remove any redundant ones
+        label = label.replace(/\s*\(\s*Bundle\s*\)\s*/gi, '').trim() + ' (Bundle)';
+    }
+
+    return label || 'Course';
 };
 
 const toMoney = (value = 0) => `₱${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

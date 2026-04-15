@@ -426,6 +426,7 @@ const initiatePayment = async (req, res) => {
             scheduleTime: req.body.scheduleTime || null,
             scheduleTime2: req.body.scheduleTime2 || null,
             pdcSelections: req.body.pdcSelections || {},
+            pdcCourseIds: Array.isArray(req.body.pdcCourseIds) ? req.body.pdcCourseIds.map(Number).filter(Number.isFinite) : [],
             noScheduleRequired: !!req.body.noScheduleRequired,
             isOnlineTdcNoSchedule: !!req.body.isOnlineTdcNoSchedule,
             pdcScheduleLockedUntilCompletion: !!req.body.pdcScheduleLockedUntilCompletion,

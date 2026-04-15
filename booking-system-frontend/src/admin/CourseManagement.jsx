@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import './css/user.css';
+import './css/branch.css';
 import { coursesAPI, branchesAPI, adminAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import Pagination from './components/Pagination';
@@ -8,6 +9,7 @@ const COURSE_PAGE_SIZE = 10;
 
 const COURSE_TAB_PERMISSION_MAP = {
     courses: ['accounts.courses.view', 'accounts.courses.tab.courses'],
+    packages: ['accounts.courses.view', 'accounts.courses.tab.courses'],
     discounts: ['accounts.courses.view', 'accounts.courses.tab.discounts'],
     config: ['accounts.courses.view', 'accounts.courses.tab.config'],
 };
@@ -120,7 +122,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
         if (permissionSet.size === 0) return true;
         return requiredPermissions.some((permission) => permissionSet.has(permission));
     };
-    const allowedCourseTabs = ['courses', 'discounts', 'config'].filter((tabKey) => canAccessCourseTab(tabKey));
+    const allowedCourseTabs = ['courses', 'packages', 'discounts', 'config'].filter((tabKey) => canAccessCourseTab(tabKey));
 
     const normalizedPromoBundles = useMemo(() => {
         const source = Array.isArray(courseConfig?.bundleTypes) ? courseConfig.bundleTypes : [];
@@ -349,6 +351,23 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
         setCourseData({ ...courseData, images: newImages });
     };
 
+
+    // Clears the session-storage course cache so the next fetchCourses() always returns fresh data.
+    const clearCoursesCache = () => {
+        try { sessionStorage.removeItem(COURSES_CACHE_KEY); } catch (_) {}
+    };
+
+    // Helper: push a new courses array into both React state and session cache atomically.
+    const applyCoursesUpdate = (updater) => {
+        setCourses(prev => {
+            const next = typeof updater === 'function' ? updater(prev) : updater;
+            try {
+                sessionStorage.setItem(COURSES_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: next }));
+            } catch (_) {}
+            return next;
+        });
+    };
+
     const handleAddCourse = async (e) => {
         e.preventDefault();
         if (submitLoading) return;
@@ -413,20 +432,28 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                 ...(branchPricesPayload !== undefined && { branch_prices: branchPricesPayload })
             };
 
-            console.log('Sending course payload:', coursePayload);
-
             if (editingCourse) {
-                // Update existing course
+                // Update existing course — apply change immediately without waiting for a re-fetch
                 await coursesAPI.update(editingCourse.id, coursePayload);
+                const optimistic = {
+                    ...editingCourse,
+                    ...coursePayload,
+                    price: coursePayload.price,
+                    discount: coursePayload.discount,
+                    images: coursePayload.images || [],
+                    pricing_data: processedPricingData || editingCourse.pricing_data || [],
+                    branch_prices: branchPricesPayload ?? editingCourse.branch_prices,
+                };
+                applyCoursesUpdate(prev => prev.map(c => c.id === editingCourse.id ? optimistic : c));
                 showNotification('Course updated successfully!', 'success');
             } else {
-                // Add new course
+                // Add new course — we need the DB-assigned ID so fetch fresh, but skip the stale cache first
                 await coursesAPI.create(coursePayload);
+                clearCoursesCache();
+                await fetchCourses();
                 showNotification('Course added successfully!', 'success');
             }
 
-            // Refresh courses list
-            await fetchCourses();
             handleCloseModal();
         } catch (error) {
             console.error('Error saving course:', error);
@@ -470,9 +497,9 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
         if (window.confirm('Are you sure you want to delete this course?')) {
             try {
                 await coursesAPI.delete(courseId);
+                // Remove instantly from local state — no re-fetch needed
+                applyCoursesUpdate(prev => prev.filter(c => c.id !== courseId));
                 showNotification('Course deleted successfully!', 'success');
-                // Refresh courses list
-                await fetchCourses();
             } catch (error) {
                 console.error('Error deleting course:', error);
                 showNotification('Failed to delete course. Please try again.', 'error');
@@ -515,9 +542,23 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
         return base;
     };
 
+    // Separate regular courses from promo bundle packages
     const filteredCourses = courses.filter(course =>
+        course.category !== 'Promo' &&
         course.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
+    const filteredPackages = courses.filter(course =>
+        course.category === 'Promo' &&
+        course.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    // Active-tab-aware list used by pagination and the discount table
+    const allFilteredCourses = courses.filter(course =>
+        course.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    const activeFilteredList = activeTab === 'packages' ? filteredPackages
+        : activeTab === 'discounts' ? allFilteredCourses
+        : filteredCourses;
 
     // Shorten long branch names for display: strip school prefix, remove "Main", capitalise after hyphens
     const shortBranchName = (name) => {
@@ -552,8 +593,8 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
         }
     }, [isBranchScopedUser, currentUserBranchId, branches, viewingBranchId]);
 
-    const courseTotalPages = Math.ceil(filteredCourses.length / COURSE_PAGE_SIZE);
-    const pagedCourses = filteredCourses.slice((coursePage - 1) * COURSE_PAGE_SIZE, coursePage * COURSE_PAGE_SIZE);
+    const courseTotalPages = Math.ceil(activeFilteredList.length / COURSE_PAGE_SIZE);
+    const pagedCourses = activeFilteredList.slice((coursePage - 1) * COURSE_PAGE_SIZE, coursePage * COURSE_PAGE_SIZE);
     const viewingBranch = branches.find(b => String(b.id) === String(viewingBranchId)) || null;
 
     const handleAddCustomAddon = () => {
@@ -645,8 +686,12 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                 branch_prices: courseToUpdate.branch_prices
             };
             await coursesAPI.update(courseId, coursePayload);
+            // Update discount immediately in local state — no re-fetch needed
+            applyCoursesUpdate(prev => prev.map(c => {
+                if (c.id !== courseId) return c;
+                return { ...c, discount: parseFloat(discountValue) || 0, pricing_data: updatedPricingData || c.pricing_data };
+            }));
             showNotification('Discount updated successfully!', 'success');
-            await fetchCourses();
         } catch (error) {
             console.error('Error updating discount:', error);
             showNotification(error.message || 'Failed to update discount.', 'error');
@@ -660,7 +705,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                 {canAccessCourseTab('courses') && (
                     <button
                         className={`cfg-tab-btn${activeTab === 'courses' ? ' active' : ''}`}
-                        onClick={() => setActiveTab('courses')}
+                        onClick={() => { setActiveTab('courses'); setCoursePage(1); }}
                         style={{ marginBottom: '-2px' }}
                     >
                         <span className="cfg-tab-icon">
@@ -669,11 +714,24 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                         <span className="tab-label">Courses</span>
                     </button>
                 )}
+                {canAccessCourseTab('packages') && (
+                    <button
+                        className={`cfg-tab-btn${activeTab === 'packages' ? ' active' : ''}`}
+                        onClick={() => { setActiveTab('packages'); setCoursePage(1); }}
+                        style={{ marginBottom: '-2px' }}
+                    >
+                        <span className="cfg-tab-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                        </span>
+                        <span className="tab-label">Packages</span>
+                    </button>
+                )}
                 {canAccessCourseTab('discounts') && (
                     <button
                         className={`cfg-tab-btn${activeTab === 'discounts' ? ' active' : ''}`}
                         onClick={() => {
                             setActiveTab('discounts');
+                            setCoursePage(1);
                             const initForm = {};
                             courses.forEach(c => {
                                 initForm[c.id] = c.discount || 0;
@@ -807,15 +865,19 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                         }}
                     />
                 </div>
-                {activeTab === 'courses' && (
+                {(activeTab === 'courses' || activeTab === 'packages') && (
                     <button
-                        onClick={() => setShowModal(true)}
+                        onClick={() => {
+                            // Pre-set category based on active tab
+                            setCourseData(prev => ({ ...prev, category: activeTab === 'packages' ? 'Promo' : 'Basic' }));
+                            setShowModal(true);
+                        }}
                         style={{
                             display: 'flex',
                             alignItems: 'center',
                             gap: '8px',
                             padding: '12px 24px',
-                            background: 'var(--primary-color)',
+                            background: activeTab === 'packages' ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'var(--primary-color)',
                             color: 'white',
                             border: 'none',
                             borderRadius: '12px',
@@ -830,26 +892,28 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                             <line x1="12" y1="5" x2="12" y2="19"></line>
                             <line x1="5" y1="12" x2="19" y2="12"></line>
                         </svg>
-                        Add Course
+                        {activeTab === 'packages' ? '+ Add Package' : '+ Add Course'}
                     </button>
                 )}
             </div>
 
-            {activeTab === 'courses' && (
+            {/* ── Helper: course-card renderer shared by Courses & Packages tabs ── */}
+            {(activeTab === 'courses' || activeTab === 'packages') && (
                 <>
-                {/* Courses Grid */}
+                {/* Courses / Packages Grid */}
                 {loading ? (
                 <div style={{ textAlign: 'center', padding: '60px', color: 'var(--secondary-text)' }}>
-                    <div style={{ fontSize: '1.1rem' }}>Loading courses...</div>
+                    <div style={{ fontSize: '1.1rem' }}>Loading {activeTab === 'packages' ? 'packages' : 'courses'}...</div>
                 </div>
-            ) : filteredCourses.length === 0 ? (
+            ) : pagedCourses.length === 0 && !loading ? (
                 <div style={{ textAlign: 'center', padding: '60px', color: 'var(--secondary-text)' }}>
                     <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ margin: '0 auto 20px', opacity: 0.5 }}>
-                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-                        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                        {activeTab === 'packages'
+                            ? <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                            : <><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></>}
                     </svg>
-                    <div style={{ fontSize: '1.1rem', marginBottom: '8px' }}>No courses found</div>
-                    <p style={{ fontSize: '0.9rem' }}>Try adjusting your search or add a new course</p>
+                    <div style={{ fontSize: '1.1rem', marginBottom: '8px' }}>No {activeTab === 'packages' ? 'promo packages' : 'courses'} found</div>
+                    <p style={{ fontSize: '0.9rem' }}>Try adjusting your search or add a {activeTab === 'packages' ? 'new package' : 'new course'}</p>
                 </div>
             ) : (
                 <>
@@ -1091,13 +1155,14 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                     currentPage={coursePage}
                     totalPages={courseTotalPages}
                     onPageChange={setCoursePage}
-                    totalItems={filteredCourses.length}
+                    totalItems={activeFilteredList.length}
                     pageSize={COURSE_PAGE_SIZE}
                 />
                 </>
             )}
             </>
             )}
+
 
             {activeTab === 'discounts' && (
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
@@ -1106,7 +1171,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                     </div>
                     {loading ? (
                         <div className="text-center p-10 text-gray-500">Loading courses...</div>
-                    ) : filteredCourses.length === 0 ? (
+                    ) : allFilteredCourses.length === 0 ? (
                         <div className="text-center p-10 text-gray-500">No courses match your search.</div>
                     ) : (
                         <>
@@ -1213,7 +1278,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                 currentPage={coursePage}
                                 totalPages={courseTotalPages}
                                 onPageChange={setCoursePage}
-                                totalItems={filteredCourses.length}
+                                totalItems={allFilteredCourses.length}
                                 pageSize={COURSE_PAGE_SIZE}
                             />
                         </div>
@@ -1265,20 +1330,6 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                     min="0"
                                     value={addonsConfig.convenienceFee}
                                     onChange={(e) => setAddonsConfig({...addonsConfig, convenienceFee: e.target.value})}
-                                    className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:border-[#2157da] focus:ring-2 focus:ring-blue-100 outline-none transition-all text-gray-800 font-semibold"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-2">
-                                    TDC + PDC Promo Discount (%)
-                                </label>
-                                <input
-                                    type="number"
-                                    min="0"
-                                    max="100"
-                                    step="0.1"
-                                    value={addonsConfig.promoBundleDiscountPercent ?? 3}
-                                    onChange={(e) => setAddonsConfig({ ...addonsConfig, promoBundleDiscountPercent: e.target.value })}
                                     className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:border-[#2157da] focus:ring-2 focus:ring-blue-100 outline-none transition-all text-gray-800 font-semibold"
                                 />
                             </div>
@@ -1706,7 +1757,13 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                                 color: 'var(--text-color)'
                                             }}
                                         >
-                                            {(courseConfig?.categories || ['Basic', 'TDC', 'PDC', 'Promo']).map(cat => (
+                                            {(courseConfig?.categories || ['Basic', 'TDC', 'PDC', 'Promo'])
+                                                .filter(cat => {
+                                                    if (activeTab === 'packages') return cat === 'Promo';
+                                                    if (activeTab === 'courses') return cat !== 'Promo';
+                                                    return true; // Discounts/Config can see all if needed
+                                                })
+                                                .map(cat => (
                                                 <option key={cat} value={cat}>
                                                     {cat === 'TDC' ? 'TDC (Theoretical Driving Course)'
                                                         : cat === 'PDC' ? 'PDC (Practical Driving Course)'

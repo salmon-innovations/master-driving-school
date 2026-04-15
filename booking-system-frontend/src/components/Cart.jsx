@@ -29,9 +29,10 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
         const name = (primaryCourse.name || '').toLowerCase()
         const shortName = (primaryCourse.shortName || '').toLowerCase()
         const category = primaryCourse.category || ''
-        const selectedType = primaryCourse.type || ''
+        const selectedType = String(primaryCourse.type || '').toLowerCase()
         const isTDC = category === 'TDC' || name.includes('tdc') || shortName.includes('tdc')
-        const isOnlineTdc = isTDC && String(selectedType).toLowerCase() === 'online'
+        const isOnlineTdc = isTDC && (selectedType.includes('online') || selectedType.includes('otdc') || name.includes('otdc'))
+        
         if (isOnlineTdc) {
           setHasAvailableSlots(true)
           setAvailabilityLoading(false)
@@ -44,6 +45,7 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
         today.setHours(0, 0, 0, 0)
         const minDate = new Date(today)
         minDate.setDate(today.getDate() + (isTDC ? 1 : 2))
+        
         // Token-based course_type matcher
         const stopWords = new Set(['practical', 'driving', 'course', 'pdc', 'tdc', 'theoretical', 'dc', 'a', 'an', 'the', 'and', 'or', 'for', 'of', 'in', 'to'])
         const extractTokens = (str) => (str || '').toLowerCase().replace(/[()\[\]{}'"]/g, ' ').split(/[\s\-\/,;|&+]+/).filter(t => t.length >= 2 && !stopWords.has(t))
@@ -56,11 +58,23 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
           if (slotTokens.length === 0) return true
           return slotTokens.some(t => courseTokens.has(t))
         }
+
+        const isAT = selectedType.includes('automatic') || selectedType === 'at' || selectedType.includes('auto') || name.includes('automatic') || name.includes('(at)')
+        const isMT = selectedType.includes('manual') || selectedType === 'mt' || name.includes('manual') || name.includes('(mt)')
+
         const available = Array.isArray(slots) ? slots.filter(s => {
           const slotDate = new Date((s.date || s.start_date) + 'T00:00:00')
           if (slotDate < minDate) return false
+          
           if (isTDC && selectedType && s.course_type && s.course_type.toLowerCase() !== selectedType.toLowerCase()) return false
           if (!isTDC && !courseTypeMatches(s.course_type)) return false
+
+          if (!isTDC) {
+            const tr = (s.transmission || '').toLowerCase()
+            if (isAT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false
+            if (isMT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false
+          }
+
           return s.available_slots == null || s.available_slots > 0
         }) : []
         setHasAvailableSlots(available.length > 0)
@@ -134,121 +148,76 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
     };
   };
 
-  const getOrderTotals = () => {
-    let baseCoursePriceTotal = 0;
-    let reviewerTotal = 0;
-    let vehicleTipsTotal = 0;
-    let convenienceTotal = 0;
-    let discountTotal = 0;
-    let subtotal = 0;
-
-    cart.forEach(item => {
-      const totals = calculateItemTotals(item);
-      const qty = Number(item.quantity) || 1;
-      baseCoursePriceTotal += totals.calcBasePrice * qty;
-      reviewerTotal += totals.reviewerPrice * qty;
-      vehicleTipsTotal += totals.vehicleTipsPrice * qty;
-      convenienceTotal += totals.advFee * qty;
-      discountTotal += totals.calcDiscountValue * qty;
-      subtotal += totals.finalItemPrice * qty;
-    });
-    
-    // Discount logic for multiple selections is removed as per promo package implementation
-    const hasTDC = false;
-    const hasPDC = false;
-    
-    const hasBundleDiscount = false;
-    const promoBundleDiscountPercent = 0;
-    const bundleDiscountValue = 0;
-    const finalTotal = subtotal;
-
-    return { 
-      baseCoursePriceTotal, 
-      reviewerTotal, 
-      vehicleTipsTotal, 
-      convenienceTotal, 
-      discountTotal, 
-      subtotal, 
-      hasBundleDiscount, 
-      promoBundleDiscountPercent,
-      bundleDiscountValue, 
-      finalTotal 
-    };
-  }
-
-  const orderTotals = getOrderTotals();
 
   const getTotalItems = () => {
     return cart.reduce((total, item) => total + (Number(item.quantity) || 1), 0)
   }
 
-  const handleCheckout = () => {
+  const handleItemCheckout = (item) => {
     if (!preSelectedBranch) {
       showNotification("Please select a branch first from the Branches page", "error")
       setShowCart(false)
       onNavigate('branches')
       return
     }
-    if (cart.length > 0) {
-      const persistPostVerifyRedirect = (target, isOnlineTdc = false) => {
-        const payload = {
-          next: target,
-          source: 'cart',
-          isOnlineTdcNoSchedule: Boolean(isOnlineTdc),
-          createdAt: Date.now(),
-        }
-        sessionStorage.setItem('postVerifyRedirect', JSON.stringify(payload))
-        localStorage.setItem('postVerifyRedirect', JSON.stringify(payload))
+
+    const persistPostVerifyRedirect = (target, isOnlineTdc = false) => {
+      const payload = {
+        next: target,
+        source: 'cart',
+        isOnlineTdcNoSchedule: Boolean(isOnlineTdc),
+        createdAt: Date.now(),
       }
-
-      if (!isLoggedIn) {
-        persistPostVerifyRedirect('schedule')
-        setShowCart(false)
-        onNavigate('signup')
-        window.scrollTo({ top: 0, behavior: 'smooth' })
-        return
-      }
-
-      // Default the calendar view to the first course in the cart.
-      const primaryCourse = cart[0]
-      const primaryType = String(primaryCourse.type || 'standard')
-      const isPrimaryTdc =
-        primaryCourse.category === 'TDC' ||
-        (primaryCourse.name || '').toLowerCase().includes('tdc') ||
-        (primaryCourse.shortName || '').toLowerCase().includes('tdc')
-      const isOnlineTdc = isPrimaryTdc && primaryType.toLowerCase() === 'online'
-
-      setSelectedCourseForSchedule({
-        id: primaryCourse.id,
-        name: primaryCourse.name,
-        shortName: primaryCourse.shortName,
-        duration: primaryCourse.duration,
-        price: primaryCourse.price,
-        category: primaryCourse.category,
-        typeOptions: primaryCourse.typeOptions,
-        hasTypeOption: primaryCourse.hasTypeOption,
-        selectedType: primaryType,
-      })
-
-      if (isOnlineTdc) {
-        setScheduleSelection({
-          noScheduleRequired: true,
-          isOnlineTdcNoSchedule: true,
-          providerName: 'drivetech.ph / OTDC.ph',
-        })
-        persistPostVerifyRedirect('payment', true)
-        setShowCart(false)
-        onNavigate('payment')
-        window.scrollTo({ top: 0, behavior: 'smooth' })
-        return
-      }
-
-      setScheduleSelection(null)
-
-      setShowCart(false);
-      onNavigate('schedule');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      sessionStorage.setItem('postVerifyRedirect', JSON.stringify(payload))
+      localStorage.setItem('postVerifyRedirect', JSON.stringify(payload))
     }
+
+    const itemType = String(item.type || 'standard')
+    const isItemTdc =
+      item.category === 'TDC' ||
+      (item.name || '').toLowerCase().includes('tdc') ||
+      (item.shortName || '').toLowerCase().includes('tdc')
+    const isOnlineTdc = isItemTdc && itemType.toLowerCase() === 'online'
+
+    setSelectedCourseForSchedule({
+      id: item.id,
+      name: item.name,
+      shortName: item.shortName,
+      duration: item.duration,
+      price: item.price,
+      category: item.category,
+      typeOptions: item.typeOptions,
+      hasTypeOption: item.hasTypeOption,
+      selectedType: itemType,
+      addonsConfig: item.addonsConfig,
+      selectedAddons: item.selectedAddons,
+    })
+
+    if (!isLoggedIn) {
+      persistPostVerifyRedirect('schedule')
+      setShowCart(false)
+      onNavigate('signup')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+
+    if (isOnlineTdc) {
+      setScheduleSelection({
+        noScheduleRequired: true,
+        isOnlineTdcNoSchedule: true,
+        providerName: 'drivetech.ph / OTDC.ph',
+      })
+      persistPostVerifyRedirect('payment', true)
+      setShowCart(false)
+      onNavigate('payment')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+
+    setScheduleSelection(null)
+    setShowCart(false);
+    onNavigate('schedule');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   return (
@@ -278,6 +247,9 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                   <div className="space-y-4 mb-6">
                     {cart.map((item, index) => {
                       const totals = calculateItemTotals(item);
+                      const isItemTdc = item.category === 'TDC' || (item.name || '').toLowerCase().includes('tdc') || (item.shortName || '').toLowerCase().includes('tdc');
+                      const isItemOnlineTdc = isItemTdc && String(item.type || '').toLowerCase() === 'online';
+                      const qty = Number(item.quantity) || 1;
                       
                       return (
                       <div key={`${item.id}-${item.type}-${index}`} className="bg-gray-50 p-4 rounded-lg">
@@ -290,8 +262,8 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                             )}
                             {/* Online TDC uses external provider and does not require local schedule selection */}
                             <div className="flex items-center gap-1 mt-2">
-                              <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md font-semibold">
-                                {primaryIsOnlineTdc ? '♾ Online Provider (No Schedule)' : '📅 Schedule Required'}
+                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md font-semibold mt-1 inline-block">
+                                {isItemOnlineTdc ? '♾ Online Provider (No Schedule)' : '📅 Schedule Required'}
                               </span>
                             </div>
                           </div>
@@ -303,14 +275,55 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                           </button>
                         </div>
 
-                        <div className="flex justify-between items-center mt-3">
-                          <span className="text-[#2157da] font-bold text-base">₱{(totals.finalItemPrice * (Number(item.quantity) || 1)).toLocaleString()}</span>
-                          <div className="flex items-center gap-2 bg-gray-50 rounded-md border border-gray-200 px-3 py-1 opacity-70 cursor-not-allowed">
-                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Qty: 1</span>
+                          <div className="border-t border-gray-200 mt-3 pt-3 space-y-2 text-sm text-gray-600 font-medium pb-4">
+                            <div className="flex justify-between items-center gap-2">
+                              <span className="text-xs sm:text-sm">Course Price</span>
+                              <span className="font-bold text-gray-900 shrink-0">₱{totals.calcBasePrice.toLocaleString()}</span>
+                            </div>
+                            
+                            {(totals.reviewerPrice > 0 || totals.vehicleTipsPrice > 0) && (
+                              <div className="flex justify-between items-start gap-2">
+                                <div className="flex flex-col">
+                                  <span className="text-xs sm:text-sm">Add-ons</span>
+                                  {totals.reviewerPrice > 0 && <span className="text-[10px] sm:text-xs text-gray-400 ml-2">• Reviewer</span>}
+                                  {totals.vehicleTipsPrice > 0 && <span className="text-[10px] sm:text-xs text-gray-400 ml-2">• Vehicle Tips</span>}
+                                </div>
+                                <div className="flex flex-col items-end shrink-0">
+                                  <span className="font-bold text-gray-900">₱{(totals.reviewerPrice + totals.vehicleTipsPrice).toLocaleString()}</span>
+                                  {totals.reviewerPrice > 0 && <span className="text-[10px] sm:text-xs text-gray-400">₱{totals.reviewerPrice.toLocaleString()}</span>}
+                                  {totals.vehicleTipsPrice > 0 && <span className="text-[10px] sm:text-xs text-gray-400">₱{totals.vehicleTipsPrice.toLocaleString()}</span>}
+                                </div>
+                              </div>
+                            )}
+                            
+                            <div className="flex justify-between items-center gap-2">
+                              <span className="text-xs sm:text-sm">Convenience Fee</span>
+                              <span className="font-bold text-gray-900 shrink-0">₱{totals.advFee.toLocaleString()}</span>
+                            </div>
+
+                            <div className="flex justify-between items-center gap-2 bg-gray-100 rounded p-2 mt-2">
+                              <span className="text-sm font-bold text-gray-800">Total</span>
+                              <span className="text-lg font-black text-[#2157da]">₱{(totals.finalItemPrice * qty).toLocaleString()}</span>
+                            </div>
                           </div>
+
+                          <button
+                            onClick={() => handleItemCheckout(item)}
+                            disabled={!preSelectedBranch}
+                            className={`w-full py-2.5 rounded-full font-bold transition-all text-sm ${
+                              !preSelectedBranch
+                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                : 'bg-[#2157da] text-white hover:bg-[#1a3a8a] cursor-pointer shadow-sm'
+                            }`}
+                          >
+                            {!preSelectedBranch
+                              ? 'Select Branch First'
+                              : (isItemOnlineTdc ? 'Proceed to Payment' : '📅 Select Schedule')
+                            }
+                          </button>
                         </div>
-                      </div>
-                    )})}
+                      )
+                    })}
                   </div>
 
                   {/* Branch Indicator */}
@@ -329,82 +342,6 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                       <p className="text-xs text-amber-700">Please select a branch before checkout</p>
                     </div>
                   )}
-
-                  <div className="border-t pt-4 mb-4">
-                    <div className="space-y-2 text-sm text-gray-600 font-medium mb-4">
-                      <div className="flex justify-between items-center gap-2">
-                        <span className="text-xs sm:text-sm">Course Price</span>
-                        <span className="font-bold text-gray-900 shrink-0">₱{orderTotals.baseCoursePriceTotal.toLocaleString()}</span>
-                      </div>
-                      
-                      {(orderTotals.reviewerTotal > 0 || orderTotals.vehicleTipsTotal > 0) && (
-                        <div className="flex justify-between items-start gap-2">
-                          <div className="flex flex-col">
-                            <span className="text-xs sm:text-sm">Add-ons</span>
-                            {orderTotals.reviewerTotal > 0 && <span className="text-[10px] sm:text-xs text-gray-400 ml-2">• Reviewer</span>}
-                            {orderTotals.vehicleTipsTotal > 0 && <span className="text-[10px] sm:text-xs text-gray-400 ml-2">• Vehicle Tips</span>}
-                          </div>
-                          <div className="flex flex-col items-end shrink-0">
-                            <span className="font-bold text-gray-900">₱{(orderTotals.reviewerTotal + orderTotals.vehicleTipsTotal).toLocaleString()}</span>
-                            {orderTotals.reviewerTotal > 0 && <span className="text-[10px] sm:text-xs text-gray-400">₱{orderTotals.reviewerTotal.toLocaleString()}</span>}
-                            {orderTotals.vehicleTipsTotal > 0 && <span className="text-[10px] sm:text-xs text-gray-400">₱{orderTotals.vehicleTipsTotal.toLocaleString()}</span>}
-                          </div>
-                        </div>
-                      )}
-                      
-                      <div className="flex justify-between items-center gap-2">
-                        <span className="text-xs sm:text-sm">Convenience Fee</span>
-                        <span className="font-bold text-gray-900 shrink-0">₱{orderTotals.convenienceTotal.toLocaleString()}</span>
-                      </div>
-
-                      {orderTotals.discountTotal > 0 && (
-                        <div className="flex justify-between items-center bg-green-50 px-2 py-1 -mx-1 rounded text-green-700 font-bold mt-1 gap-2">
-                          <span className="text-xs sm:text-sm">Discount</span>
-                          <span className="shrink-0">- ₱{orderTotals.discountTotal.toLocaleString()}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="border-t border-gray-100 pt-3 flex justify-between items-center mb-2 gap-2">
-                      <span className="text-gray-600 font-semibold text-xs sm:text-sm">Subtotal:</span>
-                      <span className="font-semibold text-gray-900 shrink-0">₱{orderTotals.subtotal.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
-                    </div>
-
-                    {orderTotals.hasBundleDiscount && (
-                      <div className="flex justify-between items-center bg-green-50 px-2 py-1.5 -mx-1 rounded text-green-700 font-bold mb-2 gap-2">
-                        <span className="text-[10px] sm:text-[11px]">Bundle Discount ({orderTotals.promoBundleDiscountPercent}% OFF)</span>
-                        <span className="shrink-0">- ₱{orderTotals.bundleDiscountValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
-                      </div>
-                    )}
-
-                    <div className="flex justify-between items-center text-lg sm:text-xl font-black text-[#2157da] mt-2 gap-2">
-                      <span>Total:</span>
-                      <span className="shrink-0">₱{orderTotals.finalTotal.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={handleCheckout}
-                    disabled={!preSelectedBranch || availabilityLoading || (!hasAvailableSlots && !primaryIsOnlineTdc)}
-                    className={`w-full py-3 rounded-full font-bold transition-all ${
-                      !preSelectedBranch
-                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                        : availabilityLoading
-                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          : !hasAvailableSlots && !primaryIsOnlineTdc
-                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                            : 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b] cursor-pointer'
-                    }`}
-                  >
-                    {!preSelectedBranch
-                      ? 'Select Branch First'
-                      : availabilityLoading
-                        ? 'Checking slots...'
-                        : !hasAvailableSlots && !primaryIsOnlineTdc
-                          ? 'No Available Slots'
-                          : (primaryIsOnlineTdc ? 'Proceed to Payment' : '📅 Select Schedule')
-                    }
-                  </button>
                 </>
               )}
             </div>

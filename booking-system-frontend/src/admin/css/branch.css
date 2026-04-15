@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    CONFIGURATION PAGE  PREMIUM v4  (light-mode first)
    ============================================================ */
 
@@ -359,9 +359,60 @@
 .cfg-custom-badge { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; padding: 3px 10px; border-radius: 99px; font-size: .68rem; font-weight: 600; background: var(--cfg-slate-100); color: var(--cfg-slate-500); border: 1px solid var(--cfg-slate-200); }
 
 .cfg-card-actions { display: flex; gap: 6px; flex-shrink: 0; }
-.cfg-icon-btn { width: 32px; height: 32px; border: 1.5px solid var(--cfg-slate-200); border-radius: 9px; background: white; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all var(--cfg-transition); color: var(--cfg-slate-500); }
-.cfg-icon-btn:hover { background: var(--cfg-slate-100); color: var(--cfg-slate-800); border-color: var(--cfg-slate-300); }
-.cfg-icon-btn.danger:hover { background: #fff1f2; color: var(--cfg-rose); border-color: #fecdd3; }
+.cfg-icon-btn { 
+    width: 32px; 
+    height: 32px; 
+    border: 1.5px solid var(--cfg-slate-200); 
+    border-radius: 9px; 
+    background: white; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    cursor: pointer; 
+    transition: all var(--cfg-transition); 
+    color: var(--cfg-slate-500); 
+}
+
+.cfg-icon-btn:hover { 
+    background: var(--cfg-slate-100); 
+    color: var(--cfg-slate-800); 
+    border-color: var(--cfg-slate-300); 
+    transform: translateY(-1px);
+}
+
+.cfg-icon-btn.danger:hover { 
+    background: #fff1f2; 
+    color: var(--cfg-rose); 
+    border-color: #fecdd3; 
+}
+
+.cfg-icon-btn.qr:hover { 
+    background: #eef2ff; 
+    color: var(--cfg-indigo); 
+    border-color: #c7d2fe; 
+}
+
+/* Enhanced Branch cards */
+.branch-card {
+    border: 1.5px solid #eef2f7;
+    background: linear-gradient(to bottom, #ffffff, #fcfdff);
+}
+
+.branch-card .cfg-card-avatar {
+    background: linear-gradient(135deg, #4f46e5, #3b82f6);
+    box-shadow: 0 8px 20px -5px rgba(59, 130, 246, 0.4);
+}
+
+.branch-card:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 20px 40px -12px rgba(99, 102, 241, 0.12), 0 8px 20px -8px rgba(0, 0, 0, 0.05);
+}
+
+.cfg-badge.active {
+    background: #ecfdf5;
+    color: #059669;
+    border: 1px solid #d1fae5;
+}
 
 .cfg-card-info { display: flex; flex-direction: column; gap: .55rem; padding: 0 1.5rem; }
 .cfg-info-row  { display: flex; align-items: flex-start; gap: 10px; }
@@ -376,7 +427,18 @@
 .cfg-dot-pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--cfg-emerald); animation: dotPulse 2s infinite; }
 @keyframes dotPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(1.35)} }
 
-.cfg-role-code { display: inline-block; font-family: 'Courier New',monospace; font-size: .74rem; background: var(--cfg-slate-100); border: 1px solid var(--cfg-slate-200); color: var(--cfg-indigo-dark); padding: 3px 8px; border-radius: 6px; margin-top: 8px; }
+.cfg-role-code { 
+    display: inline-block; 
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: .74rem; 
+    font-weight: 600;
+    background: #f1f5f9; 
+    border: 1px solid #e2e8f0; 
+    color: #475569; 
+    padding: 3px 8px; 
+    border-radius: 6px; 
+    margin-top: 8px; 
+}
 .cfg-role-desc { font-size: .82rem; color: var(--cfg-slate-500); line-height: 1.6; }
 .cfg-perm-count { font-size: .72rem; font-weight: 600; color: var(--cfg-slate-400); }
 

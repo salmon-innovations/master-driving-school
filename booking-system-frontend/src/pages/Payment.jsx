@@ -160,7 +160,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
 
     activeCart.forEach(item => {
       const totals = calculateItemTotals(item);
-      const qty = item.quantity;
+      const qty = item.quantity || 1;
       baseCoursePriceTotal += totals.calcBasePrice * qty;
       reviewerTotal += totals.reviewerPrice * qty;
       vehicleTipsTotal += totals.vehicleTipsPrice * qty;
@@ -349,11 +349,91 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         return
       }
 
-      const courseList = activeCart.map((item) => ({
-        name: item?.name || 'N/A',
-        type: item?.type || 'standard',
-        category: item?.category || null,
-      }))
+      const expandedCourseList = [];
+      activeCart.forEach(item => {
+        // Add the main item (e.g., the Promo Bundle itself)
+        expandedCourseList.push({
+          id: item?.id || null,
+          name: item?.name || 'N/A',
+          type: item?.type || 'standard',
+          category: item?.category || null,
+          shortName: item?.shortName || null,
+        });
+
+        // If it's a promo bundle, also add the individual PDC courses it contains
+        // so the backend/admin can see the specific course names (e.g. "PDC Motor Automatic").
+        if (String(item?.category || '').toLowerCase() === 'promo') {
+          // Priority 1: Use pre-resolved _pdcCourses if available
+          const nested = item._pdcCourses || (item._pdcCourse ? [item._pdcCourse] : []);
+          if (Array.isArray(nested) && nested.length > 0) {
+            nested.forEach(c => {
+              expandedCourseList.push({
+                id: c.id || null,
+                name: c.name || (c.shortName ? `PDC - ${c.shortName}` : 'PDC Course'),
+                type: c.course_type || c.type || 'PDC',
+                category: 'PDC',
+              });
+            });
+          } else {
+            // Priority 2: Fallback to parsing from the type string (e.g. "online+pdc-a1-tricycle|pdc-b1-van/b2-l300|...")
+            const slugToLabel = (slug = '') => String(slug)
+              .replace(/^pdc[-_]?/i, '')
+              .replace(/[-_\/]+/g, ' ')
+              .replace(/\b\w/g, c => c.toUpperCase())
+              .replace(/\bB1\b/gi, 'B1').replace(/\bB2\b/gi, 'B2')
+              .replace(/\bA1\b/gi, 'A1').replace(/\bV1\b/gi, 'V1')
+              .replace(/\bL300\b/gi, 'L300')
+              .trim();
+            const typeVal = String(item.type || '');
+            if (typeVal.includes('+')) {
+              const pdcRaw = typeVal.split('+')[1];
+              const parts = pdcRaw.split('|').map(p => p.trim()).filter(Boolean);
+              parts.forEach(part => {
+                const isSlug = part && !part.includes(' ') && part.toLowerCase().startsWith('pdc-');
+                const displayName = isSlug ? `PDC ${slugToLabel(part)}` : part;
+                expandedCourseList.push({
+                  id: null,
+                  name: displayName,
+                  type: part,
+                  category: 'PDC',
+                });
+              });
+            }
+          }
+        }
+      });
+
+      const courseList = expandedCourseList;
+
+      // Collect all PDC course IDs from the cart for the admin PDC scheduling queue.
+      // The backend uses `pdcCourseIds` to look up specific course names from the DB,
+      // which fixes the generic "PDC Course" label in the admin Assign PDC modal.
+      // Collect all PDC course IDs from the cart for the admin PDC scheduling queue.
+      // We look at both top-level PDC items and PDC courses nested inside Promo Bundles.
+      const pdcCourseIds = [];
+      activeCart.forEach(item => {
+        const cat = String(item?.category || '').toLowerCase();
+        const nm = String(item?.name || '').toLowerCase();
+        
+        // 1. Direct PDC items
+        if (cat === 'pdc' || cat.includes('practical') || nm.includes('pdc')) {
+          if (item.id) pdcCourseIds.push(item.id);
+        }
+        
+        // 2. PDC courses nested in Bundles
+        const bundleIds = item.pdcCourseIds || item._pdcCourseIds || [];
+        if (Array.isArray(bundleIds)) {
+          bundleIds.forEach(id => { if (id) pdcCourseIds.push(id); });
+        }
+        
+        // 3. Fallback to _pdcCourses objects
+        const bundleCourses = item._pdcCourses || (item._pdcCourse ? [item._pdcCourse] : []);
+        if (Array.isArray(bundleCourses)) {
+          bundleCourses.forEach(c => { if (c?.id) pdcCourseIds.push(c.id); });
+        }
+      });
+      
+      const uniquePdcCourseIds = [...new Set(pdcCourseIds.filter(Boolean))];
       const addonsDetailedPayload = [];
       if (totalsData.reviewerTotal > 0) {
         addonsDetailedPayload.push({ name: 'LTO Exam Reviewer', price: totalsData.reviewerTotal });
@@ -398,6 +478,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         scheduleSession2: scheduleSelection.slotDetails2?.session || null,
         scheduleTime2: scheduleSelection.slotDetails2?.time_range || scheduleSelection.slotDetails2?.time || null,
         pdcSelections: scheduleSelection.pdcSelections || {},
+        pdcCourseIds: uniquePdcCourseIds,
         noScheduleRequired: !!scheduleSelection.noScheduleRequired,
         isOnlineTdcNoSchedule: !!scheduleSelection.isOnlineTdcNoSchedule,
         pdcScheduleLockedUntilCompletion: !!scheduleSelection.pdcScheduleLockedUntilCompletion,
@@ -410,7 +491,14 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         subtotal: totalsData.subtotal,
         promoDiscount: totalsData.bundleDiscountValue,
         totalAmount: totalsData.finalTotal,
+        localDbTest: true, // TEST MODE BYPASS
       })
+
+      if (paymentResponse?.localDbTest) {
+        setQrStatus('success');
+        handlePaymentSuccess();
+        return;
+      }
 
       const msgId = paymentResponse?.msgId
       const codeUrl = paymentResponse?.codeUrl
@@ -1149,6 +1237,19 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                             <p className="text-[10px] font-black text-green-400 uppercase tracking-widest">Online TDC Provider</p>
                             <p className="text-[11px] text-white/85 mt-1">
                               No branch schedule selection is required. Please expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {scheduleSelection?.pdcScheduleLockedUntilCompletion && (
+                      <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                        <div className="flex items-start gap-2">
+                          <span className="text-base">🚘</span>
+                          <div>
+                            <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Practical Courses Included</p>
+                            <p className="text-[11px] text-white/85 mt-1">
+                              {scheduleSelection.pdcScheduleLockReason || 'PDC schedule will be assigned by Admin after your online course is completed.'}
                             </p>
                           </div>
                         </div>

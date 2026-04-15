@@ -76,6 +76,18 @@ const getAdminTabFromPath = (pathname = '/admin') => {
 
 const getAdminPathForTab = (tab) => ADMIN_TAB_TO_PATH[tab] || '/admin/dashboard';
 const ADMIN_SETTINGS_KEY = 'mds_admin_settings';
+const DASH_CACHE_KEY = 'admin_dash_snapshot_v1';
+const DASH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+const readDashCache = () => {
+    try {
+        const raw = sessionStorage.getItem(DASH_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (parsed?.ts && Date.now() - parsed.ts < DASH_CACHE_TTL_MS) return parsed;
+    } catch {}
+    return null;
+};
 
 const readAdminSettings = () => {
     try {
@@ -179,7 +191,10 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     const lastOnlineTdcReminderAtRef = useRef(0);
     const [tdcOnlineAlertsEnabled, setTdcOnlineAlertsEnabled] = useState(() => readAdminSettings().tdcOnlineAlerts !== false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
-    const [loading, setLoading] = useState(true);
+
+    // Hydrate dashboard cache before any state — used by loading + data states below
+    const _dashCache = readDashCache();
+    const [loading, setLoading] = useState(!_dashCache);
     const [userPermissions, setUserPermissions] = useState([]);
 
     // Admin Profile State
@@ -193,23 +208,23 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         avatar: null
     });
 
-    // Dashboard stats state
-    const [stats, setStats] = useState({
+    // Dashboard stats state — hydrate from cache for instant display on reload
+    const [stats, setStats] = useState(_dashCache?.stats ?? {
         totalStudents: 0,
         monthlyRevenue: 0,
         pendingBookings: 0,
         todayEnrollments: 0,
     });
 
-    const [pendingCollectibles, setPendingCollectibles] = useState([]);
-    const [pendingCollectiblesTotal, setPendingCollectiblesTotal] = useState(0);
-    const [todayScheduleGroups, setTodayScheduleGroups] = useState([]);
+    const [pendingCollectibles, setPendingCollectibles] = useState(_dashCache?.collectibles ?? []);
+    const [pendingCollectiblesTotal, setPendingCollectiblesTotal] = useState(_dashCache?.collectiblesTotal ?? 0);
+    const [todayScheduleGroups, setTodayScheduleGroups] = useState(_dashCache?.todaySchedule ?? []);
     const [bestSellingCourses, setBestSellingCourses] = useState([]);
     const [bestSellingLoading, setBestSellingLoading] = useState(false);
     const [bestSellingBranchId, setBestSellingBranchId] = useState('');
     const [bestSellingFilter, setBestSellingFilter] = useState('all_time');
     const [adminBranches, setAdminBranches] = useState([]);
-    const [enrollees, setEnrollees] = useState([]);
+    const [enrollees, setEnrollees] = useState(_dashCache?.enrollees ?? []);
 
     const formatCurrency = (amount) => `₱ ${Number(amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -532,8 +547,9 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
 
                     if (statsRes.success) setStats(statsRes.stats);
 
+                    let formattedEnrollees = [];
                     if (bookingsRes.success) {
-                        const formattedEnrollees = bookingsRes.bookings.map(booking => ({
+                        formattedEnrollees = bookingsRes.bookings.map(booking => ({
                             name: booking.student_name || 'Unknown',
                             course: booking.course_name || 'N/A',
                             branch: booking.branch_name || 'N/A',
@@ -552,22 +568,37 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         setEnrollees(formattedEnrollees);
                     }
 
+                    let collectibles = [];
+                    let collectiblesTotal = 0;
                     if (unpaidRes.success) {
-                        const collectibles = unpaidRes.bookings || [];
+                        collectibles = unpaidRes.bookings || [];
+                        collectiblesTotal = collectibles.reduce((sum, booking) => sum + getEffectiveBalanceDue(booking), 0);
                         setPendingCollectibles(collectibles);
-                        setPendingCollectiblesTotal(
-                            collectibles.reduce((sum, booking) => sum + getEffectiveBalanceDue(booking), 0)
-                        );
+                        setPendingCollectiblesTotal(collectiblesTotal);
                     } else {
                         setPendingCollectibles([]);
                         setPendingCollectiblesTotal(0);
                     }
 
+                    let todaySchedule = [];
                     if (todayScheduleRes.success) {
-                        setTodayScheduleGroups(todayScheduleRes.data || []);
+                        todaySchedule = todayScheduleRes.data || [];
+                        setTodayScheduleGroups(todaySchedule);
                     } else {
                         setTodayScheduleGroups([]);
                     }
+
+                    // Save snapshot to sessionStorage for instant reload
+                    try {
+                        sessionStorage.setItem(DASH_CACHE_KEY, JSON.stringify({
+                            ts: Date.now(),
+                            stats: statsRes.success ? statsRes.stats : stats,
+                            enrollees: formattedEnrollees,
+                            collectibles,
+                            collectiblesTotal,
+                            todaySchedule,
+                        }));
+                    } catch (_) {}
 
                     setLoading(false); // Show the dashboard cards and table
 

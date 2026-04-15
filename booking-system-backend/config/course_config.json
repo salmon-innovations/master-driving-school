@@ -35,10 +35,11 @@
   ],
   "bundleTypes": [
     {
-      "value": "F2F+PDC Motor Manual",
-      "key": "F2F+PDC Motor Manual",
+      "value": "F2F+PDC Car Automatic|PDC Motor Manual",
+      "key": "F2F+PDC Car Automatic|PDC Motor Manual",
       "tdcPart": "F2F",
       "pdcParts": [
+        "PDC Car Automatic",
         "PDC Motor Manual"
       ],
       "label": "F2F TDC + PDC Motorcycle Manual"
