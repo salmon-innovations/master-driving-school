@@ -373,10 +373,10 @@ const getDashboardStats = async (req, res) => {
           currentRevConv += convenienceFee; 
           currentRevCourse += courseRevenue; 
         }
-        if (isLast) lastMonthRevenue += isSuperAdmin ? amount : courseRevenue;
+        if (isLast) lastMonthRevenue += courseRevenue; // Net for growth analysis
       });
 
-      const currentRevenue = isSuperAdmin ? (currentRevCourse + currentRevAddons + currentRevConv) : currentRevCourse;
+      const currentRevenue = currentRevCourse; // Net Revenue (Profit) after addons and convenience fees for everyone
       let growthRate = 0;
       if (lastMonthRevenue > 0) growthRate = ((currentRevenue - lastMonthRevenue) / lastMonthRevenue) * 100;
       else if (currentRevenue > 0) growthRate = 100;
@@ -750,7 +750,7 @@ const getRevenueData = async (req, res) => {
       totalAddonsYear += addonRevenue;
       totalConvYear += convenienceFee;
 
-      monthData[name] += isSuperAdmin ? amount : courseRevenue;
+      monthData[name] += courseRevenue; // Show Net Revenue (Course Profit) for all charts
     });
 
     const finalData = [];
@@ -1402,7 +1402,8 @@ const walkInEnrollment = async (req, res) => {
       pdcScheduleLockedUntilCompletion,
       pdcScheduleLockReason,
       paymentMethod, amountPaid, paymentStatus,
-      enrolledBy, addons = []
+      enrolledBy, addons = [],
+      promoPct = 0
     } = req.body;
 
     const normalizePaymentMethod = (method) => {
@@ -1724,14 +1725,31 @@ const walkInEnrollment = async (req, res) => {
 
     const normalizedCourseTotal = normalizedCourseListForPricing.reduce((sum, item) => sum + Math.max(0, toAmount(item?.price)), 0);
     const isPromoBundleRequest = String(courseType || '').toLowerCase().includes('promo-bundle') || String(courseCategory || '').toUpperCase().includes('PROMO');
-    if (normalizedPromoDiscount <= 0 && isPromoBundleRequest && normalizedCourseTotal > 0) {
-      normalizedPromoDiscount = Number((normalizedCourseTotal * 0.03).toFixed(2));
+    
+    const normalizedAddonsTotal = normalizedAddonsDetailed.reduce((s, a) => s + toAmount(a?.price), 0);
+    const discountBasis = (normalizedSubtotal > 0) ? normalizedSubtotal : (normalizedCourseTotal + normalizedAddonsTotal);
+
+    // Convenience fee: Default to 0 for Cash, otherwise use 25 for StarPay/Online unless specified
+    let finalConvenienceFee = normalizedConvenienceFee;
+    if (finalConvenienceFee === 0) {
+      const isCash = String(paymentMethod || '').toLowerCase().includes('cash');
+      finalConvenienceFee = isCash ? 0 : 25;
+    }
+
+    // Use promoPct from request if provided
+    let effectivePromoPct = toAmount(promoPct);
+    if (normalizedPromoDiscount <= 0 && isPromoBundleRequest && discountBasis > 0) {
+      if (effectivePromoPct > 0) {
+        // Percentage applies only to the subtotal (discountBasis), NOT the fee
+        normalizedPromoDiscount = Number((discountBasis * (effectivePromoPct / 100)).toFixed(2));
+      } else {
+        // Fallback for bundles
+        normalizedPromoDiscount = Number((discountBasis * 0.03).toFixed(2));
+      }
     }
 
     const normalizedBreakdownTotal = Math.max(0, Number((
-      (normalizedSubtotal > 0 ? normalizedSubtotal : normalizedCourseTotal + normalizedAddonsDetailed.reduce((s, a) => s + toAmount(a?.price), 0))
-      + normalizedConvenienceFee
-      - normalizedPromoDiscount
+      discountBasis + finalConvenienceFee - normalizedPromoDiscount
     ).toFixed(2)));
 
     const normalizedTotalAssessment = [
@@ -1789,6 +1807,7 @@ const walkInEnrollment = async (req, res) => {
             : null,
           subtotal: normalizedSubtotal,
           promoDiscount: normalizedPromoDiscount,
+          promoPct: effectivePromoPct,
           convenienceFee: normalizedConvenienceFee,
           totalAmount: normalizedTotalAssessment,
           initialAmountPaid: Math.max(0, toAmount(amountPaid))
@@ -2052,17 +2071,16 @@ const getAllTransactions = async (req, res) => {
       }
 
       const courseRev = Math.max(0, tAmt - addrev - conv);
-      let finalAmt = isSuperAdmin ? tAmt : courseRev;
-
-      // Full Payment bookings, confirmed (StarPay) and directly-paid bookings are Success
       const isPaid = row.status === 'paid' || row.status === 'confirmed' || row.status === 'completed' || row.payment_type === 'Full Payment';
+
       transactions.push({
         transaction_id: `TXN-${new Date(row.created_at).getFullYear()}-${String(row.id).padStart(3, '0')}`,
         booking_id: row.id,
         student_name: row.student_name || 'Unknown',
         transaction_date: row.created_at,
-        amount: finalAmt,
-        payment_method: row.payment_method || 'Cash',
+        amount: tAmt,
+        net_revenue: courseRev,
+        payment_method: row.payment_method || (row.notes?.toLowerCase().includes('cash') ? 'Cash' : 'N/A'),
         payment_type: row.payment_type || 'Full Payment',
         status: isPaid ? 'Success' : 'Partial Payment',
         course_name: row.course_name || 'N/A',
@@ -2079,6 +2097,7 @@ const getAllTransactions = async (req, res) => {
           student_name: row.student_name || 'Unknown',
           transaction_date: row.updated_at || row.created_at,
           amount: 1000,
+          net_revenue: 1000,
           payment_method: 'Cash',
           payment_type: 'Rescheduling Fee',
           status: 'Success',
@@ -2528,6 +2547,8 @@ const markBookingAsPaid = async (req, res) => {
             courseName: u.course_name || 'N/A',
             amountPaid: receiptPaymentAmount,
             coursePrice: targetAssessment,
+            promoDiscount: toAmount(notesJson?.promoDiscount || 0),
+            promoPct: toAmount(notesJson?.promoPct || 0),
             paymentMethod: payment_method || 'Cash',
             paymentDate: new Date(),
             isFullPayment: true,

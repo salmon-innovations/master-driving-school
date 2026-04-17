@@ -595,7 +595,17 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
 
         setTdcOnlineStudents(prev => ({ ...prev, loading: true }));
         fetchTdcOnlineStudents({ branchId: selectedBranch || undefined })
-            .then(res => { setTdcOnlineStudents({ data: res?.data || [], loading: false }); })
+            .then(res => {
+                const rawData = Array.isArray(res?.data) ? res.data : [];
+                // Include all students who need onboarding, regardless of payment method.
+                // We only filter for TDC Online or Promo Bundle course types.
+                const filtered = rawData.filter(row => {
+                    const isTdcOnlineOrBundle = /online|otdc|bundle|\+/i.test(row.course_name || '') || 
+                                              /online|otdc/i.test(row.course_type || '');
+                    return isTdcOnlineOrBundle;
+                });
+                setTdcOnlineStudents({ data: filtered, loading: false });
+            })
             .catch(() => {
                 setTdcOnlineStudents({ data: [], loading: false });
                 showNotification('Failed to load TDC Online queue.', 'error');
@@ -622,7 +632,15 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         if (scheduleView === 'tdc_online') {
             setTdcOnlineStudents(prev => ({ ...prev, loading: true }));
             fetchTdcOnlineStudents({ branchId: selectedBranch || undefined })
-                .then(res => { setTdcOnlineStudents({ data: res?.data || [], loading: false }); })
+                .then(res => {
+                    const rawData = Array.isArray(res?.data) ? res.data : [];
+                    const filtered = rawData.filter(row => {
+                        const isTdcOnlineOrBundle = /online|otdc|bundle|\+/i.test(row.course_name || '') || 
+                                                  /online|otdc/i.test(row.course_type || '');
+                        return isTdcOnlineOrBundle;
+                    });
+                    setTdcOnlineStudents({ data: filtered, loading: false });
+                })
                 .catch(() => {
                     setTdcOnlineStudents({ data: [], loading: false });
                     showNotification('Failed to load TDC Online queue.', 'error');
@@ -1508,7 +1526,19 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
 
             await Promise.all([
                 fetchTdcOnlineStudents({ branchId: selectedBranch || undefined })
-                    .then(res => setTdcOnlineStudents({ data: res?.data || [], loading: false }))
+                    .then(res => {
+                        const rawData = Array.isArray(res?.data) ? res.data : [];
+                        const filtered = rawData.filter(row => {
+                            const isPaidOnline = String(row.payment_method || '').toLowerCase() === 'starpay' || 
+                                               String(row.payment_type || '').toLowerCase() === 'online';
+                            const isTdcOnlineOrBundle = /online|otdc|bundle|\+/i.test(row.course_name || '') || 
+                                                      /online|otdc/i.test(row.course_type || '');
+                            
+                            if (isPaidOnline && isTdcOnlineOrBundle) return false;
+                            return true;
+                        });
+                        setTdcOnlineStudents({ data: filtered, loading: false });
+                    })
                     .catch(() => setTdcOnlineStudents({ data: [], loading: false })),
                 fetchPdcSchedulingQueue({ branchId: selectedBranch || undefined }),
             ]);
@@ -1884,7 +1914,19 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                             onClick={() => {
                                 setTdcOnlineStudents(prev => ({ ...prev, loading: true }));
                                 fetchTdcOnlineStudents({ branchId: selectedBranch || undefined })
-                                    .then(res => setTdcOnlineStudents({ data: res?.data || [], loading: false }))
+                                    .then(res => {
+                                        const rawData = Array.isArray(res?.data) ? res.data : [];
+                                        const filtered = rawData.filter(row => {
+                                            const isPaidOnline = String(row.payment_method || '').toLowerCase() === 'starpay' || 
+                                                               String(row.payment_type || '').toLowerCase() === 'online';
+                                            const isTdcOnlineOrBundle = /online|otdc|bundle|\+/i.test(row.course_name || '') || 
+                                                                      /online|otdc/i.test(row.course_type || '');
+                                            
+                                            if (isPaidOnline && isTdcOnlineOrBundle) return false;
+                                            return true;
+                                        });
+                                        setTdcOnlineStudents({ data: filtered, loading: false });
+                                    })
                                     .catch(() => {
                                         setTdcOnlineStudents({ data: [], loading: false });
                                         showNotification('Failed to load TDC Online queue.', 'error');

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { coursesAPI } from '../../services/api';
 import { useNotification } from '../../context/NotificationContext';
 
@@ -51,8 +51,9 @@ const normalizePromoPdcName = (value) => {
 
 const buildBundleKey = (tdcPart, pdcParts) => {
     const normalizedPdcParts = [...new Set((pdcParts || []).map(v => normalizePromoPdcName(v)).filter(Boolean))].sort();
-    if (!tdcPart || normalizedPdcParts.length === 0) return '';
-    return `${String(tdcPart).trim()}+${normalizedPdcParts.join('|')}`;
+    if (normalizedPdcParts.length === 0) return '';
+    const tdc = String(tdcPart || 'None').trim();
+    return `${tdc}+${normalizedPdcParts.join('|')}`;
 };
 
 const normalizeBundleEntry = (entry) => {
@@ -63,12 +64,16 @@ const normalizeBundleEntry = (entry) => {
         const pdcParts = pdcRaw.split('|').map(v => normalizePromoPdcName(v)).filter(Boolean);
         const key = buildBundleKey(tdcPart, pdcParts);
         if (!key) return null;
+        const tdc = String(tdcPart || '').trim();
+        const label = (!tdc || tdc.toLowerCase() === 'none')
+            ? pdcParts.join(' + ')
+            : `${tdc} TDC + ${pdcParts.join(' + ')}`;
         return {
             key,
             value: key,
-            tdcPart: String(tdcPart || '').trim(),
+            tdcPart: tdc || 'None',
             pdcParts: [...new Set(pdcParts)].sort(),
-            label: `${String(tdcPart || '').trim()} TDC + ${[...new Set(pdcParts)].sort().join(', ')} PDC`,
+            label,
         };
     }
 
@@ -81,12 +86,16 @@ const normalizeBundleEntry = (entry) => {
         const pdcParts = [...new Set(rawPdcParts.map(v => normalizePromoPdcName(v)).filter(Boolean))].sort();
         const key = buildBundleKey(tdcPart, pdcParts);
         if (!key) return null;
+        const tdc = String(tdcPart || '').trim();
+        const label = String(entry.label || '').trim() || ((!tdc || tdc.toLowerCase() === 'none')
+            ? pdcParts.join(' + ')
+            : `${tdc} TDC + ${pdcParts.join(' + ')}`);
         return {
             key,
             value: key,
-            tdcPart,
+            tdcPart: tdc || 'None',
             pdcParts,
-            label: String(entry.label || '').trim() || `${tdcPart} TDC + ${pdcParts.join(', ')} PDC`,
+            label,
         };
     }
 
@@ -212,8 +221,12 @@ const BundleRow = ({ item, onEdit, onDelete }) => (
 
         {/* Top: Badges - padded on right to avoid buttons */}
         <div className="ct-bundle-badges" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', paddingRight: '56px' }}>
-            <span className="ct-tdc-badge">{item.tdcPart}</span>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: '#94a3b8', flexShrink: 0 }}><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            {item.tdcPart && item.tdcPart.toLowerCase() !== 'none' && (
+                <>
+                    <span className="ct-tdc-badge">{item.tdcPart}</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: '#94a3b8', flexShrink: 0 }}><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                </>
+            )}
             {item.pdcParts.map((pdc) => (
                 <span key={`${item.key}_${pdc}`} className="ct-pdc-badge">{pdc}</span>
             ))}
@@ -359,7 +372,7 @@ const CourseTypesSection = () => {
         setEditingItem(null);
     };
 
-    const tdcOptions = config.tdcTypes.map(t => t.value);
+    const tdcOptions = ['None', ...config.tdcTypes.map(t => t.value)];
     const promoPdcOptions = useMemo(() => {
         const fromFormAdd = Array.isArray(bundleForm.pdcParts) ? bundleForm.pdcParts : [];
         const fromFormEdit = Array.isArray(editBundleForm.pdcParts) ? editBundleForm.pdcParts : [];
@@ -430,12 +443,16 @@ const CourseTypesSection = () => {
             return;
         }
 
+        const finalLabel = bundleForm.label.trim() || ((!effectiveTdc || effectiveTdc.toLowerCase() === 'none')
+            ? effectivePdcParts.join(' + ')
+            : `${effectiveTdc} TDC + ${effectivePdcParts.join(' + ')}`);
+
         const nextBundle = {
             key: effectiveBundleKey,
             value: effectiveBundleKey,
-            tdcPart: effectiveTdc,
+            tdcPart: effectiveTdc || 'None',
             pdcParts: effectivePdcParts,
-            label: bundleForm.label.trim() || `${effectiveTdc} TDC + ${effectivePdcParts.join(', ')} PDC`,
+            label: finalLabel,
         };
 
         save({ ...config, bundleTypes: [...config.bundleTypes, nextBundle] });
@@ -455,12 +472,16 @@ const CourseTypesSection = () => {
             return;
         }
 
+        const finalLabel = editBundleForm.label.trim() || ((!effectiveEditTdc || effectiveEditTdc.toLowerCase() === 'none')
+            ? effectiveEditPdcParts.join(' + ')
+            : `${effectiveEditTdc} TDC + ${effectiveEditPdcParts.join(' + ')}`);
+
         const nextBundle = {
             key: effectiveEditBundleKey,
             value: effectiveEditBundleKey,
-            tdcPart: effectiveEditTdc,
+            tdcPart: effectiveEditTdc || 'None',
             pdcParts: effectiveEditPdcParts,
-            label: editBundleForm.label.trim() || `${effectiveEditTdc} TDC + ${effectiveEditPdcParts.join(', ')} PDC`,
+            label: finalLabel,
         };
 
         const bundleTypes = [...config.bundleTypes];
@@ -523,7 +544,7 @@ const CourseTypesSection = () => {
                 <TypeCard title="Promo Bundle Types" iconClass="amber" badge={`${config.bundleTypes.length} bundles`} fullWidth
                     icon={<><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></>}
                 >
-                    <p className="ct-desc">Each bundle combines one TDC type + one or more PDC types for promo courses.</p>
+                    <p className="ct-desc">Combine one TDC type + one or more PDC types, or multiple PDC types alone, to create promo packages.</p>
 
                     {/* Bundle list */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>

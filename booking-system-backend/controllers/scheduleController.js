@@ -1330,6 +1330,8 @@ const payRemainingBalance = async (req, res) => {
         courseName: booking.course_name || 'N/A',
         amountPaid: nextStatus === 'paid' ? collectedNow : amountPaid,
         coursePrice: assessedTotal,
+        promoDiscount: toAmount(notesJson?.promoDiscount || 0),
+        promoPct: toAmount(notesJson?.promoPct || 0),
         paymentMethod: payment_method || 'Online',
         paymentDate: new Date(),
         isFullPayment: nextStatus === 'paid',

@@ -1260,6 +1260,16 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
                   <span class="detail-label">Payment Method:&nbsp;&nbsp;</span>
                   <span class="detail-value">${paymentMethod}</span>
                 </div>
+                ${enrollmentDetails.promoDiscount > 0 ? `
+                <div class="detail-row">
+                  <span class="detail-label">Subtotal:&nbsp;&nbsp;</span>
+                  <span class="detail-value">₱${Number(enrollmentDetails.subtotal || (amountPaid + enrollmentDetails.promoDiscount)).toLocaleString()}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Discount (${enrollmentDetails.promoPct || 0}%):&nbsp;&nbsp;</span>
+                  <span class="detail-value" style="color: #16a34a;">- ₱${Number(enrollmentDetails.promoDiscount).toLocaleString()}</span>
+                </div>
+                ` : ''}
                 <div class="detail-row">
                   <span class="detail-label">Amount Paid:&nbsp;&nbsp;</span>
                   <span class="detail-value">₱${Number(amountPaid).toLocaleString()}</span>
@@ -1377,6 +1387,9 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
       plainText += schedules.map(s => `${compactScheduleLabelForDisplay(s.label, s?.courseType || '', s?.transmission || '')}: ${s.date}\nSession: ${s.session} (${s.time})`).join('\n\n');
     }
     plainText += `\n\nCourse: ${courseName} (${courseType})\nBranch: ${branchName}\n`;
+    if (enrollmentDetails.promoDiscount > 0) {
+      plainText += `Discount (${enrollmentDetails.promoPct || 0}%): - PHP ${Number(enrollmentDetails.promoDiscount).toLocaleString()}\n`;
+    }
     
     if (enrollmentDetails.isNewUser) {
       plainText += `\nLogin Credentials:\nEmail: ${email}\nPassword: ${password}\n\nVerification Code: ${verificationCode}\n`;
@@ -1698,6 +1711,16 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
                   <span class="detail-label">Payment Method:&nbsp;&nbsp;</span>
                   <span class="detail-value">${paymentMethod}</span>
                 </div>
+                ${enrollmentDetails.promoDiscount > 0 ? `
+                <div class="detail-row">
+                  <span class="detail-label">Subtotal:&nbsp;&nbsp;</span>
+                  <span class="detail-value">₱${Number(enrollmentDetails.subtotal || (amountPaid + enrollmentDetails.promoDiscount)).toLocaleString()}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Discount (${enrollmentDetails.promoPct || 0}%):&nbsp;&nbsp;</span>
+                  <span class="detail-value" style="color: #16a34a;">- ₱${Number(enrollmentDetails.promoDiscount).toLocaleString()}</span>
+                </div>
+                ` : ''}
                 <div class="detail-row">
                   <span class="detail-label">Amount Paid:&nbsp;&nbsp;</span>
                   <span class="detail-value">₱${Number(amountPaid).toLocaleString()}</span>
@@ -2004,6 +2027,9 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
                   <tr><td class="lbl">Booking ID</td><td class="val">BK-${String(bookingId).padStart(3, '0')}</td></tr>
                   <tr><td class="lbl">Course</td><td class="val">${courseName}</td></tr>
                   <tr><td class="lbl">Course Price</td><td class="val">₱${Number(coursePrice).toLocaleString()}</td></tr>
+                  ${receiptData.promoDiscount > 0 ? `
+                  <tr><td class="lbl">Discount (${receiptData.promoPct || 0}%)</td><td class="val" style="color:#16a34a;">- ₱${Number(receiptData.promoDiscount).toLocaleString()}</td></tr>
+                  ` : ''}
                   <tr><td class="lbl">Date</td><td class="val">${formattedDate}</td></tr>
                   <tr><td class="lbl">Payment Method</td><td class="val">${paymentMethod}</td></tr>
                   <tr><td class="lbl">Amount Paid</td><td class="val" style="color:#16a34a;">₱${Number(amountPaid).toLocaleString()}</td></tr>

@@ -529,8 +529,10 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
     const checkDate = new Date(monthRef.getFullYear(), monthRef.getMonth(), day)
     const minAllowedDate = new Date(today)
 
-    // TDC uses 1 day advance, PDC uses 2 days advance
-    minAllowedDate.setDate(today.getDate() + (isTDCCourse ? 1 : 2))
+    // Regular courses (online/TDC or regular PDC) use 1 day advance. 
+    // Promo bundles keep 2 days advance for PDC components.
+    const advanceDays = isPromoCourse ? (isTDCCourse ? 1 : 2) : 1;
+    minAllowedDate.setDate(today.getDate() + advanceDays)
 
     return checkDate >= minAllowedDate && checkDate.getDay() !== 0 // no Sundays
   }
@@ -557,6 +559,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
       setSelectedSlot2(null)
       setDbSlots2([])
     }
+    fetchSlotsForDate()
   }
 
   const handlePrevMonth = () => {
@@ -2157,6 +2160,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
                                 } else {
                                   setPromoPdcDate(new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth(), day));
                                 }
+                                fetchPromoPdcAllSlots();
                               }}
                               className={`min-h-[52px] sm:min-h-[140px] rounded-lg sm:rounded-xl border flex flex-col overflow-hidden transition-all relative ${(!avail && !isSel) ? 'cursor-not-allowed opacity-45' : 'cursor-pointer hover:shadow-md'
                                 } ${slotCellBorder}`}

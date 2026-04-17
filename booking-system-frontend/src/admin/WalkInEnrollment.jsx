@@ -140,6 +140,17 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     });
 
     // Transform database courses to match UI structure
+    const getCourseOrder = (pkg) => {
+        const name = (pkg.name || '').toLowerCase();
+        const category = (pkg.category || '').toLowerCase();
+        if (category === 'tdc' || name.includes('theoretical')) return 1;
+        if (name.includes('motorcycle')) return 2;
+        if (name.includes('pdc') && name.includes('car')) return 3;
+        if (name.includes('tricycle') || name.includes('a1')) return 4;
+        if (name.includes('van') || name.includes('b1') || name.includes('b2') || name.includes('l300')) return 5;
+        return 6;
+    };
+
     const packages = courses.map(course => {
         // Resolve the effective price for the currently selected branch.
         // If a branch is selected and the course has a custom price for that branch, use it.
@@ -161,7 +172,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             typeOptions.push({
                 value: course.course_type.toLowerCase().replace(/\s+/g, '-'),
                 label: course.course_type.toUpperCase(),
-                price: branchEffectivePrice - discount,
+                price: branchEffectivePrice,
                 original_price: branchEffectivePrice,
                 discount: discount
             });
@@ -174,7 +185,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 typeOptions.push({
                     value: variation.type.toLowerCase().replace(/\s+/g, '-'),
                     label: variation.type.toUpperCase(),
-                    price: varPrice - discount,
+                    price: varPrice,
                     original_price: varPrice,
                     discount: discount
                 });
@@ -186,7 +197,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             typeOptions.push({
                 value: 'standard',
                 label: 'STANDARD',
-                price: branchEffectivePrice - discount,
+                price: branchEffectivePrice,
                 original_price: branchEffectivePrice,
                 discount: discount
             });
@@ -981,10 +992,10 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             // Transmission match — strictly applied to ALL vehicle types when a type is chosen
             const slotTx = (s.transmission || '').toLowerCase();
             const isUniversalTx = slotTx === 'both' || slotTx === 'any' || slotTx === 'all' || !slotTx;
-            
+
             if (wantsAT) return isUniversalTx || slotTx.includes('automatic') || slotTx === 'at';
             if (wantsMT) return isUniversalTx || slotTx.includes('manual') || slotTx === 'mt';
-            
+
             // No specific transmission preference or type not explicitly AT/MT (e.g. car generic)
             return true;
         });
@@ -1014,7 +1025,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             const hasPdcSlot = (courseType, courseName = '') => {
                 const t = (courseType || '').toLowerCase();
                 const n = (courseName || '').toLowerCase();
-                
+
                 // Categorize the course based on name and type
                 const isMoto = t.includes('motorcycle') || t.includes('moto') || n.includes('motorcycle');
                 const isTricycle = t.includes('tricycle') || t.includes('v1') || n.includes('tricycle');
@@ -1202,7 +1213,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        
+
         if (name === 'birthday') {
             const birthDate = new Date(value);
             const today = new Date();
@@ -1211,27 +1222,27 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
                 age--;
             }
-            
+
             const ageStr = age >= 0 ? age.toString() : '';
-            
-            setFormData(prev => ({ 
-                ...prev, 
+
+            setFormData(prev => ({
+                ...prev,
                 [name]: value,
                 age: ageStr
             }));
 
             // Validate age
             if (ageStr && (parseInt(ageStr) < 16 || parseInt(ageStr) > 100)) {
-                setFormErrors(prev => ({ 
-                    ...prev, 
-                    [name]: '', 
-                    age: 'Age must be between 16 and 100' 
+                setFormErrors(prev => ({
+                    ...prev,
+                    [name]: '',
+                    age: 'Age must be between 16 and 100'
                 }));
             } else {
-                setFormErrors(prev => ({ 
-                    ...prev, 
-                    [name]: '', 
-                    age: '' 
+                setFormErrors(prev => ({
+                    ...prev,
+                    [name]: '',
+                    age: ''
                 }));
             }
             return;
@@ -1273,14 +1284,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const handleAge = (e) => {
         const digits = e.target.value.replace(/\D/g, '').slice(0, 3);
         const ageVal = digits ? parseInt(digits) : null;
-        
+
         setFormData(prev => {
             const updates = { age: digits };
-            
+
             if (ageVal !== null && ageVal >= 1 && ageVal <= 100) {
                 const currentYear = new Date().getFullYear();
                 const birthYear = currentYear - ageVal;
-                
+
                 if (prev.birthday) {
                     const parts = prev.birthday.split('-');
                     if (parts.length === 3) {
@@ -1292,7 +1303,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     updates.birthday = `${birthYear}-01-01`;
                 }
             }
-            
+
             return { ...prev, ...updates };
         });
 
@@ -1488,10 +1499,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 updated = [pkg];
             }
 
-            return { ...prev, selectedCourses: updated, course: null, courseType: '',
+            return {
+                ...prev, selectedCourses: updated, course: null, courseType: '',
                 scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
                 scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '',
-                promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: '' };
+                promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: ''
+            };
         });
         resetScheduleState();
     };
@@ -1499,7 +1512,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const handleProceedToStep3 = () => {
         const sel = formData.selectedCourses;
         if (!sel || sel.length === 0) return;
-        
+
         let course = sel[0];
         if (course?.category === 'Promo') {
             course = enrichSinglePromoCourse(course);
@@ -1548,10 +1561,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             setLoading(true);
 
             const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
-            const selectedPrice = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType)?.price || dynamicCourse?.price || 0;
+            const selectedTypeOpt = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType);
+            const selectedPrice = selectedTypeOpt?.price || dynamicCourse?.price || 0;
             const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
             const subtotal = selectedPrice + addonsTotal;
-            const totalAmountDue = Math.max(0, Number(subtotal.toFixed(2)));
+            
+            const discountPct = selectedTypeOpt?.discount || dynamicCourse?.discount || 0;
+            const promoDiscount = discountPct > 0 ? Number((subtotal * (discountPct / 100)).toFixed(2)) : 0;
+            const totalAmountDue = Math.max(0, Number((subtotal - promoDiscount).toFixed(2)));
 
             const enteredAmount = Number(formData.amountPaid || 0);
             const changeAmount = Math.max(0, enteredAmount - totalAmountDue);
@@ -1601,6 +1618,41 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 courseCategory: formData.course?.category,
                 courseType: formData.courseType,
                 branchId: formData.branchId,
+                courseList: (() => {
+                    const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
+                    const items = [];
+                    // Add primary course (bundle or single)
+                    items.push({
+                        id: dynamicCourse?.id,
+                        name: dynamicCourse?.name,
+                        category: dynamicCourse?.category,
+                        type: formData.courseType,
+                        price: selectedPrice
+                    });
+                    // Add secondary courses if bundle
+                    if (formData.course?._isManualBundle) {
+                        (formData.course._pdcCourses || []).forEach(c => {
+                            items.push({
+                                id: c.id,
+                                name: c.name,
+                                category: c.category,
+                                type: c.course_type || '',
+                                price: 0 // Components are usually included in the main price
+                            });
+                        });
+                    } else if (hasPromoPdcCourses) {
+                        submitPdcCourses.forEach(c => {
+                            items.push({
+                                id: c.id,
+                                name: c.name,
+                                category: c.category,
+                                type: c.course_type || '',
+                                price: 0
+                            });
+                        });
+                    }
+                    return items;
+                })(),
                 ...((formData.course?._isManualBundle || hasPromoPdcCourses) ? {
                     pdcCourseId: formData.course._pdcCourse?.id || submitPdcCourses?.[0]?.id,
                     pdcCourseIds: submitPdcCourses.map(c => c.id).filter(Boolean),
@@ -1667,7 +1719,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 transactionNo: formData.transactionNo,
                 addons: formData.addons || [],
                 subtotal,
-                promoDiscount: 0,
+                promoDiscount,
+                promoPct: discountPct,
                 totalAmount: totalAmountDue,
                 convenienceFee: 0,
 
@@ -1691,7 +1744,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     ? 'Online TDC - No local branch schedule required'
                     : isPromoPdcLocked
                         ? 'OTDC selected. PDC schedules are admin-assigned after OTDC is marked complete.'
-                    : `${formData.scheduleDate} - ${formData.scheduleSession}`
+                        : `${formData.scheduleDate} - ${formData.scheduleSession}`
             };
 
             if (onEnroll) {
@@ -1741,7 +1794,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-3xl p-6 border-2 border-blue-100 shadow-sm">
                 <div className="flex items-center gap-3 mb-4">
                     <div className="w-9 h-9 bg-[#2157da] text-white rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
-                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" stroke="white" strokeWidth="2"/><path d="M20 20l-3-3" stroke="white" strokeWidth="2" strokeLinecap="round"/></svg>
+                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" stroke="white" strokeWidth="2" /><path d="M20 20l-3-3" stroke="white" strokeWidth="2" strokeLinecap="round" /></svg>
                     </div>
                     <div>
                         <h3 className="text-base font-black text-gray-900 leading-tight">Returning Student?</h3>
@@ -1749,7 +1802,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     </div>
                     {selectedStudentId && (
                         <span className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-100 text-green-700 border border-green-200 rounded-full text-xs font-bold">
-                            <svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+                            <svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
                             Auto-filled
                         </span>
                     )}
@@ -1759,8 +1812,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         <div style={{ position: 'relative', flex: 1 }}>
                             <div style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
                                 {studentSearchLoading
-                                    ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#3b82f6" strokeWidth="2" strokeDasharray="40" strokeDashoffset="20" style={{ animation: 'spin 1s linear infinite', transformOrigin: 'center' }}/></svg>
-                                    : <svg width="18" height="18" fill="none" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" stroke="#6b7280" strokeWidth="1.8"/><path d="M20 20l-3-3" stroke="#6b7280" strokeWidth="1.8" strokeLinecap="round"/></svg>
+                                    ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#3b82f6" strokeWidth="2" strokeDasharray="40" strokeDashoffset="20" style={{ animation: 'spin 1s linear infinite', transformOrigin: 'center' }} /></svg>
+                                    : <svg width="18" height="18" fill="none" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" stroke="#6b7280" strokeWidth="1.8" /><path d="M20 20l-3-3" stroke="#6b7280" strokeWidth="1.8" strokeLinecap="round" /></svg>
                                 }
                             </div>
                             <input
@@ -1780,7 +1833,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                     style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)' }}
                                     className="text-gray-400 hover:text-gray-600 transition-colors"
                                 >
-                                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
                                 </button>
                             )}
                         </div>
@@ -1804,7 +1857,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             {studentSearchLoading && (
                                 <div style={{ padding: '20px', textAlign: 'center', color: '#6b7280', fontSize: '0.875rem' }}>
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', marginRight: '8px', animation: 'spin 1s linear infinite', transformOrigin: 'center', verticalAlign: 'middle' }}>
-                                        <circle cx="12" cy="12" r="10" stroke="#3b82f6" strokeWidth="2" strokeDasharray="40" strokeDashoffset="20"/>
+                                        <circle cx="12" cy="12" r="10" stroke="#3b82f6" strokeWidth="2" strokeDasharray="40" strokeDashoffset="20" />
                                     </svg>
                                     Searching students…
                                 </div>
@@ -1880,14 +1933,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         <label className="text-sm font-bold text-gray-700 flex items-center gap-1">
                             First Name <span className="text-red-500">*</span>
                         </label>
-                        <input 
-                            type="text" 
-                            name="firstName" 
-                            value={formData.firstName} 
-                            onChange={handleLettersOnly} 
-                            required 
+                        <input
+                            type="text"
+                            name="firstName"
+                            value={formData.firstName}
+                            onChange={handleLettersOnly}
+                            required
                             placeholder="e.g. Juan"
-                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.firstName ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`} 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.firstName ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`}
                         />
                         {formErrors.firstName && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.firstName}</span>}
                     </div>
@@ -1895,38 +1948,38 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     {/* Middle Initial */}
                     <div className="md:col-span-4 flex flex-col justify-end gap-2">
                         <div className="flex flex-wrap justify-between items-center gap-2">
-                           <label className="text-sm font-bold text-gray-700 leading-none">Middle Initial</label>
-                           <div className="flex items-center gap-2">
-                             <label className="flex items-center gap-1 cursor-pointer text-xs font-medium text-gray-500 hover:text-[#2157da] transition-colors">
-                               <input 
-                                 type="radio" 
-                                 name="middleNameType" 
-                                 checked={formData.middleName !== 'N/A'} 
-                                 onChange={() => setFormData(prev => ({ ...prev, middleName: '' }))}
-                                 className="w-3 h-3 text-[#2157da]"
-                               />
-                               Has
-                             </label>
-                             <label className="flex items-center gap-1 cursor-pointer text-xs font-medium text-gray-500 hover:text-[#2157da] transition-colors">
-                               <input 
-                                 type="radio" 
-                                 name="middleNameType" 
-                                 checked={formData.middleName === 'N/A'} 
-                                 onChange={() => setFormData(prev => ({ ...prev, middleName: 'N/A' }))}
-                                 className="w-3 h-3 text-[#2157da]"
-                               />
-                               None
-                             </label>
-                           </div>
+                            <label className="text-sm font-bold text-gray-700 leading-none">Middle Initial</label>
+                            <div className="flex items-center gap-2">
+                                <label className="flex items-center gap-1 cursor-pointer text-xs font-medium text-gray-500 hover:text-[#2157da] transition-colors">
+                                    <input
+                                        type="radio"
+                                        name="middleNameType"
+                                        checked={formData.middleName !== 'N/A'}
+                                        onChange={() => setFormData(prev => ({ ...prev, middleName: '' }))}
+                                        className="w-3 h-3 text-[#2157da]"
+                                    />
+                                    Has
+                                </label>
+                                <label className="flex items-center gap-1 cursor-pointer text-xs font-medium text-gray-500 hover:text-[#2157da] transition-colors">
+                                    <input
+                                        type="radio"
+                                        name="middleNameType"
+                                        checked={formData.middleName === 'N/A'}
+                                        onChange={() => setFormData(prev => ({ ...prev, middleName: 'N/A' }))}
+                                        className="w-3 h-3 text-[#2157da]"
+                                    />
+                                    None
+                                </label>
+                            </div>
                         </div>
-                        <input 
-                            type="text" 
-                            name="middleName" 
-                            value={formData.middleName === 'N/A' ? '' : formData.middleName} 
-                            onChange={handleLettersOnly} 
+                        <input
+                            type="text"
+                            name="middleName"
+                            value={formData.middleName === 'N/A' ? '' : formData.middleName}
+                            onChange={handleLettersOnly}
                             disabled={formData.middleName === 'N/A'}
                             placeholder={formData.middleName === 'N/A' ? 'N/A' : 'Initial'}
-                            className={`w-full px-3 py-3.5 bg-gray-50 border-2 rounded-2xl text-center outline-none transition-all ${formData.middleName === 'N/A' ? 'bg-gray-100 border-gray-200 opacity-50 cursor-not-allowed' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`} 
+                            className={`w-full px-3 py-3.5 bg-gray-50 border-2 rounded-2xl text-center outline-none transition-all ${formData.middleName === 'N/A' ? 'bg-gray-100 border-gray-200 opacity-50 cursor-not-allowed' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`}
                         />
                     </div>
 
@@ -1935,14 +1988,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         <label className="text-sm font-bold text-gray-700 flex items-center gap-1">
                             Last Name <span className="text-red-500">*</span>
                         </label>
-                        <input 
-                            type="text" 
-                            name="lastName" 
-                            value={formData.lastName} 
-                            onChange={handleLettersOnly} 
-                            required 
+                        <input
+                            type="text"
+                            name="lastName"
+                            value={formData.lastName}
+                            onChange={handleLettersOnly}
+                            required
                             placeholder="e.g. Dela Cruz"
-                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.lastName ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`} 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.lastName ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`}
                         />
                         {formErrors.lastName && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.lastName}</span>}
                     </div>
@@ -1950,37 +2003,37 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     {/* Row 2: Birthday, Age, Gender */}
                     <div className="md:col-span-5 flex flex-col gap-2">
                         <label className="text-sm font-bold text-gray-700">Birthday <span className="text-red-500">*</span></label>
-                        <input 
-                            type="date" 
-                            name="birthday" 
-                            value={formData.birthday} 
-                            onChange={handleChange} 
-                            required 
-                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.birthday ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`} 
+                        <input
+                            type="date"
+                            name="birthday"
+                            value={formData.birthday}
+                            onChange={handleChange}
+                            required
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.birthday ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`}
                         />
                         {formErrors.birthday && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.birthday}</span>}
                     </div>
 
                     <div className="md:col-span-3 flex flex-col gap-2">
                         <label className="text-sm font-bold text-gray-700">Age (16-100) <span className="text-red-500">*</span></label>
-                        <input 
-                            type="text" 
-                            name="age" 
-                            value={formData.age} 
-                            onChange={handleAge} 
-                            required 
-                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.age ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`} 
+                        <input
+                            type="text"
+                            name="age"
+                            value={formData.age}
+                            onChange={handleAge}
+                            required
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.age ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`}
                         />
                         {formErrors.age && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.age}</span>}
                     </div>
 
                     <div className="md:col-span-4 flex flex-col gap-2">
                         <label className="text-sm font-bold text-gray-700">Gender <span className="text-red-500">*</span></label>
-                        <select 
-                            name="gender" 
-                            value={formData.gender} 
-                            onChange={handleChange} 
-                            required 
+                        <select
+                            name="gender"
+                            value={formData.gender}
+                            onChange={handleChange}
+                            required
                             className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl outline-none transition-all ${formErrors.gender ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100 focus:border-[#2157da] focus:ring-4 focus:ring-blue-50'}`}
                         >
                             <option value="">Select Gender</option>
@@ -2004,11 +2057,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
                     <div className="md:col-span-6 flex flex-col gap-2 text-left">
                         <label className="text-sm font-bold text-gray-700">Marital Status <span className="text-red-500">*</span></label>
-                        <select 
-                            name="maritalStatus" 
-                            value={formData.maritalStatus} 
-                            onChange={handleChange} 
-                            required 
+                        <select
+                            name="maritalStatus"
+                            value={formData.maritalStatus}
+                            onChange={handleChange}
+                            required
                             className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.maritalStatus ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`}
                         >
                             <option value="">Select Status</option>
@@ -2035,70 +2088,70 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
                     <div className="md:col-span-12 flex flex-col gap-2">
                         <label className="text-sm font-bold text-gray-700">Complete Address <span className="text-red-500">*</span></label>
-                        <input 
-                            type="text" 
-                            name="address" 
-                            value={formData.address} 
-                            onChange={handleChange} 
-                            required 
+                        <input
+                            type="text"
+                            name="address"
+                            value={formData.address}
+                            onChange={handleChange}
+                            required
                             placeholder="Street, Barangay, City, Province"
-                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.address ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.address ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`}
                         />
                         {formErrors.address && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.address}</span>}
                     </div>
 
                     <div className="md:col-span-3 flex flex-col gap-2">
                         <label className="text-sm font-bold text-gray-700">Zip Code <span className="text-sm font-normal text-gray-400">(4 digits)</span> <span className="text-red-500">*</span></label>
-                        <input 
-                            type="text" 
-                            name="zipCode" 
-                            value={formData.zipCode} 
-                            onChange={handleZipCode} 
+                        <input
+                            type="text"
+                            name="zipCode"
+                            value={formData.zipCode}
+                            onChange={handleZipCode}
                             maxLength={4}
-                            required 
-                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all font-mono font-bold ${formErrors.zipCode ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
+                            required
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all font-mono font-bold ${formErrors.zipCode ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`}
                         />
                         {formErrors.zipCode && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.zipCode}</span>}
                     </div>
 
                     <div className="md:col-span-3 flex flex-col gap-2">
                         <label className="text-sm font-bold text-gray-700">Birth Place <span className="text-red-500">*</span></label>
-                        <input 
-                            type="text" 
-                            name="birthPlace" 
-                            value={formData.birthPlace} 
-                            onChange={handleChange} 
-                            required 
-                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.birthPlace ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
+                        <input
+                            type="text"
+                            name="birthPlace"
+                            value={formData.birthPlace}
+                            onChange={handleChange}
+                            required
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.birthPlace ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`}
                         />
                         {formErrors.birthPlace && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.birthPlace}</span>}
                     </div>
 
                     <div className="md:col-span-3 flex flex-col gap-2">
                         <label className="text-sm font-bold text-gray-700">Contact Number <span className="text-red-500">*</span></label>
-                        <input 
-                            type="tel" 
-                            name="contactNumbers" 
-                            value={formData.contactNumbers} 
-                            onChange={(e) => handlePhoneChange('contactNumbers', e.target.value)} 
+                        <input
+                            type="tel"
+                            name="contactNumbers"
+                            value={formData.contactNumbers}
+                            onChange={(e) => handlePhoneChange('contactNumbers', e.target.value)}
                             maxLength={13}
-                            required 
+                            required
                             placeholder="09XX XXX XXXX"
-                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.contactNumbers ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.contactNumbers ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`}
                         />
                         {formErrors.contactNumbers && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.contactNumbers}</span>}
                     </div>
 
                     <div className="md:col-span-3 flex flex-col gap-2">
                         <label className="text-sm font-bold text-gray-700">Email Address <span className="text-red-500">*</span></label>
-                        <input 
-                            type="email" 
-                            name="email" 
-                            value={formData.email} 
-                            onChange={(e) => handleEmailChange(e.target.value)} 
-                            required 
+                        <input
+                            type="email"
+                            name="email"
+                            value={formData.email}
+                            onChange={(e) => handleEmailChange(e.target.value)}
+                            required
                             placeholder="example@domain.com"
-                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.email ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.email ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`}
                         />
                         {formErrors.email && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.email}</span>}
                     </div>
@@ -2118,14 +2171,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="flex flex-col gap-2">
                         <label className="text-sm font-bold text-gray-700">Contact Person Name <span className="text-red-500">*</span></label>
-                        <input 
-                            type="text" 
-                            name="emergencyContactPerson" 
-                            value={formData.emergencyContactPerson} 
-                            onChange={handleLettersOnly} 
-                            placeholder="Full name of emergency contact" 
-                            required 
-                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.emergencyContactPerson ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
+                        <input
+                            type="text"
+                            name="emergencyContactPerson"
+                            value={formData.emergencyContactPerson}
+                            onChange={handleLettersOnly}
+                            placeholder="Full name of emergency contact"
+                            required
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all ${formErrors.emergencyContactPerson ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`}
                         />
                         {formErrors.emergencyContactPerson && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.emergencyContactPerson}</span>}
                     </div>
@@ -2139,7 +2192,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             placeholder="09XX XXX XXXX"
                             maxLength={13}
                             required
-                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all font-mono font-bold ${formErrors.emergencyContactNumber ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`} 
+                            className={`w-full px-4 py-3.5 bg-gray-50 border-2 rounded-2xl focus:border-[#2157da] focus:ring-4 focus:ring-blue-50 outline-none transition-all font-mono font-bold ${formErrors.emergencyContactNumber ? 'border-red-500 ring-4 ring-red-50' : 'border-gray-100'}`}
                         />
                         {formErrors.emergencyContactNumber && <span className="text-xs font-bold text-red-500 mt-1">{formErrors.emergencyContactNumber}</span>}
                     </div>
@@ -2147,9 +2200,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             </div>
 
             <div className="flex justify-end pt-4">
-                <button 
-                    type="button" 
-                    onClick={() => { if (validateStep1()) nextStep(); }} 
+                <button
+                    type="button"
+                    onClick={() => { if (validateStep1()) nextStep(); }}
                     className="flex items-center justify-center gap-3 px-10 py-4 bg-[#2157da] text-white rounded-2xl font-black text-lg hover:bg-[#1a3a8a] transform hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-blue-500/30"
                 >
                     Next: Select Course
@@ -2165,7 +2218,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         <div className="step-content animate-fadeIn">
             <div className="section-header center mb-8">
                 <h2>Select Course</h2>
-                <p>Choose one or more courses — pick TDC + PDC together for a Promo Bundle</p>
+                <p>Choose one or promo bundle courses</p>
             </div>
 
             {loading ? (
@@ -2185,59 +2238,77 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 const isPromoBundle = !!(selectedTDC && selectedPDCs.length > 0);
                 const isPromoCourseMode = !!selectedPromoCourse;
                 const bundleRaw = selectedCourses.reduce((s, c) => s + (c.price || 0), 0);
-                const bundleDiscount = isPromoBundle ? bundleRaw * 0.03 : 0;
-                const regularPackages = packages.filter(pkg => pkg.category !== 'Promo');
-                const promoPackages = packages.filter(pkg => pkg.category === 'Promo');
+                const bundleDiscount = 0;
+                const regularPackages = packages
+                    .filter(pkg => pkg.category !== 'Promo')
+                    .sort((a, b) => getCourseOrder(a) - getCourseOrder(b));
+                const promoPackages = packages
+                    .filter(pkg => pkg.category === 'Promo')
+                    .sort((a, b) => getCourseOrder(a) - getCourseOrder(b));
                 const hasRegularSelection = selectedCourses.some(c => c.category !== 'Promo');
 
-                const renderCourseCard = (pkg) => {
+                const renderCourseRow = (pkg) => {
                     const minPrice = Math.min(...pkg.typeOptions.map(opt => opt.price));
                     const maxPrice = Math.max(...pkg.typeOptions.map(opt => opt.price));
                     const priceDisplay = minPrice === maxPrice ? `₱${minPrice.toLocaleString()}` : `₱${minPrice.toLocaleString()} - ₱${maxPrice.toLocaleString()}`;
                     const isAvailable = courseAvailability[pkg.id] !== false;
                     const availChecked = pkg.id in courseAvailability;
-                    const isSelected = selectedCourses.some(c => c.id === pkg.id);
+                    const isSelected = formData.selectedCourses?.some(c => c.id === pkg.id);
                     const blockedByPromoMode = !!selectedPromoCourse && !isSelected && pkg.category !== 'Promo';
                     const blockedByRegularMode = hasRegularSelection && !isSelected && pkg.category === 'Promo';
                     const blockedByMode = blockedByPromoMode || blockedByRegularMode;
-                    const canSelect = availChecked && isAvailable && !blockedByMode;
+                    const hasNoSlots = availChecked && !isAvailable;
+                    const isTdcSelection = pkg.category === 'TDC' || (pkg.category === 'Promo' && (pkg.name.toLowerCase().includes('otdc') || pkg.name.toLowerCase().includes('online')));
                     const wouldReplace = pkg.category === 'TDC' && selectedTDC && selectedTDC.id !== pkg.id;
 
+                    // TDC is always selectable because online slots are always available
+                    const canSelect = availChecked && (isAvailable || isTdcSelection) && !blockedByMode;
+
                     return (
-                        <div key={pkg.id} className={`course-card ${isSelected ? 'selected' : ''} ${availChecked && !isAvailable ? 'no-slots-card' : ''}`}
-                            style={availChecked && !isAvailable ? { opacity: 0.55, filter: 'grayscale(40%)', pointerEvents: 'none' } : undefined}>
-                            {isSelected && (
-                                <div className="course-card-check">✓</div>
-                            )}
-                            <div className="course-img">
+                        <div key={pkg.id} className={`course-row ${isSelected ? 'selected' : ''}`}
+                            onClick={() => canSelect && handleCourseToggle(pkg)}
+                            style={hasNoSlots && !isTdcSelection ? { opacity: 0.8, cursor: 'not-allowed' } : undefined}>
+
+                            <div className="course-thumbnail">
                                 <img src={pkg.image} alt={pkg.name} onError={(e) => e.target.style.display = 'none'} />
-                                <div className="course-overlay"><span>{priceDisplay}</span></div>
-                                {availChecked && !isAvailable && (
-                                    <div style={{ position: 'absolute', top: '8px', right: '8px', background: '#dc2626', color: '#fff', fontSize: '0.65rem', fontWeight: '800', padding: '3px 8px', borderRadius: '20px', textTransform: 'uppercase' }}>No Slots</div>
-                                )}
                             </div>
-                            <div className="course-info">
-                                <h4>{pkg.category}</h4>
-                                <h3>{pkg.name}</h3>
-                                <p className="duration">⏱ {pkg.duration}</p>
-                                <ul className="features">
-                                    {pkg.features.slice(0, 3).map((f, i) => <li key={i}>✓ {f}</li>)}
-                                </ul>
+
+                            <div className="course-main-content">
+                                <div className="course-category-row">
+                                    <span className="course-category-tag">{pkg.category}</span>
+                                    {hasNoSlots && <span className="no-slots-chip">No Slots</span>}
+                                </div>
+                                <h3 className="course-row-title">{pkg.name}</h3>
+                                <div className="course-sub-meta">
+                                    <span>⏱ {pkg.duration}</span>
+                                    <span>• {pkg.features?.length || 0} features included</span>
+                                </div>
+                            </div>
+
+                            <div className="course-pill-area">
+                                {pkg.features?.slice(0, 2).map((f, i) => (
+                                    <span key={i} className="feature-pill">✓ {f}</span>
+                                ))}
+                            </div>
+
+                            <div className="course-price-area">
+                                <div className="price-box">
+                                    <span className="price-value">{priceDisplay}</span>
+                                    <span className="price-label">COURSE FEE</span>
+                                </div>
                                 <button
                                     type="button"
-                                    onClick={() => canSelect && handleCourseToggle(pkg)}
-                                    className={`select-pkg-btn${isSelected ? ' select-pkg-btn--selected' : ''}`}
-                                    disabled={!canSelect}
-                                    style={!canSelect ? { background: '#9ca3af', cursor: 'not-allowed', opacity: 0.8 } :
-                                           isSelected ? { background: 'linear-gradient(135deg,#16a34a,#15803d)' } : undefined}
+                                    onClick={(e) => { e.stopPropagation(); canSelect && handleCourseToggle(pkg); }}
+                                    className={`row-action-btn ${isSelected ? 'selected' : ''} ${hasNoSlots && !isTdcSelection ? 'no-slots-btn' : ''}`}
+                                    disabled={!canSelect || (hasNoSlots && !isTdcSelection)}
                                 >
-                                    {availChecked && !isAvailable ? 'No Available Slots'
+                                    {hasNoSlots && !isTdcSelection ? 'No Slots'
                                         : !availChecked ? 'Checking...'
-                                        : isSelected ? '✓ Selected — Click to Remove'
-                                        : blockedByPromoMode ? 'Promo Mode Active'
-                                        : blockedByRegularMode ? 'Regular Bundle Mode Active'
-                                        : wouldReplace ? `↩ Replace ${pkg.category}`
-                                        : 'Select Course'}
+                                            : isSelected ? '✓ Selected'
+                                                : blockedByPromoMode ? 'Locked'
+                                                    : blockedByRegularMode ? 'Locked'
+                                                        : wouldReplace ? 'Replace'
+                                                            : 'Select Course'}
                                 </button>
                             </div>
                         </div>
@@ -2246,12 +2317,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
                 return (<>
                     {/* Promo tip */}
-                    {!isPromoBundle && !isPromoCourseMode && (
-                        <div className="promo-tip-bar">
-                            <span>🎁</span>
-                            <span>Select <strong>1 TDC</strong> + <strong>1 PDC</strong> to unlock a <strong style={{color:'#16a34a'}}>3% Promo Bundle discount</strong></span>
-                        </div>
-                    )}
+
 
                     {isPromoCourseMode && (
                         <div className="promo-tip-bar" style={{ background: '#eff6ff', borderColor: '#93c5fd' }}>
@@ -2266,47 +2332,26 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         </div>
                     )}
 
-                    <div style={{
-                        marginBottom: '22px',
-                        border: '2px solid #bfdbfe',
-                        borderRadius: '18px',
-                        background: 'linear-gradient(135deg, #eff6ff 0%, #f8fbff 70%)',
-                        padding: '14px'
-                    }}>
-                        <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
-                            <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{ fontSize: '1.1rem' }}>🧩</span>
-                                Regular Courses
-                            </h4>
-                            <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1d4ed8', background: '#dbeafe', border: '1px solid #93c5fd', borderRadius: '999px', padding: '4px 10px', letterSpacing: '0.02em' }}>
-                                Standard Courses
-                            </span>
+                    <div className="course-section-container">
+                        <div className="course-section-header regular">
+                            <div className="section-indicator"></div>
+                            <h2>Regular Packages</h2>
+                            <span className="section-pill">Standard Courses</span>
                         </div>
-                        <div className="courses-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 350px))', justifyContent: 'start' }}>
-                            {regularPackages.map(renderCourseCard)}
+                        <div className="courses-list">
+                            {regularPackages.map(renderCourseRow)}
                         </div>
                     </div>
 
                     {promoPackages.length > 0 && (
-                        <div style={{
-                            marginTop: '4px',
-                            marginBottom: '8px',
-                            border: '2px solid #fdba74',
-                            borderRadius: '18px',
-                            background: 'linear-gradient(135deg, #fff7ed 0%, #fffbeb 70%)',
-                            padding: '14px'
-                        }}>
-                            <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
-                                <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#7c2d12', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <span style={{ fontSize: '1.1rem' }}>🎫</span>
-                                    Promo Bundle Course Selection
-                                </h4>
-                                <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#9a3412', background: '#fed7aa', border: '1px solid #fdba74', borderRadius: '999px', padding: '4px 10px', letterSpacing: '0.02em' }}>
-                                    Single Promo Card Mode
-                                </span>
+                        <div className="course-section-container promo">
+                            <div className="course-section-header promo">
+                                <div className="section-indicator"></div>
+                                <h2>Promo Bundle Packages</h2>
+                                <span className="section-pill">Bundle Mode</span>
                             </div>
-                            <div className="courses-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 350px))', justifyContent: 'start' }}>
-                                {promoPackages.map(renderCourseCard)}
+                            <div className="courses-list">
+                                {promoPackages.map(renderCourseRow)}
                             </div>
                         </div>
                     )}
@@ -2480,7 +2525,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 if (!activePromoPdcType) return true;
                 const slotTx = (slot.transmission || '').toLowerCase().trim();
                 const slotCT = (slot.course_type || '').toLowerCase().trim();
-                
+
                 const isManual = slotTx.includes('manual') || slotTx === 'mt';
                 const isAuto = slotTx.includes('automatic') || slotTx === 'at';
                 // Promo transmission selection should be strict: AT shows AT only, MT shows MT only.
@@ -2489,7 +2534,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     if (effectivePromoPdcTransmission === 'MT') return isManual;
                     return true;
                 };
-                
+
                 const isMotoSlot = slotCT.includes('motorcycle') || slotCT.includes('moto') || slotCT.includes('bike');
                 const isTricycleSlot = slotCT.includes('tricycle') || slotCT.includes('a1');
                 const isB1B2Slot = slotCT.includes('b1') || slotCT.includes('b2') || slotCT.includes('van') || slotCT.includes('l300');
@@ -2505,7 +2550,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     if (effectivePromoPdcTransmission === 'AT' || effectivePromoPdcTransmission === 'MT') return matchesStrictPromoTx();
                     return true;
                 }
-                
+
                 if (activePromoPdcType === 'Motorcycle') {
                     if (isCarSlot) return false;
                     if (effectivePromoPdcTransmission === 'AT' || effectivePromoPdcTransmission === 'MT') return matchesStrictPromoTx();
@@ -2518,8 +2563,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     // For CarAT/CarMT, default to their implied transmission only when no selection is set.
                     const desiredTx = effectivePromoPdcTransmission || (
                         activePromoPdcType === 'CarAT' ? 'AT' :
-                        activePromoPdcType === 'CarMT' ? 'MT' :
-                        null
+                            activePromoPdcType === 'CarMT' ? 'MT' :
+                                null
                     );
 
                     if (desiredTx === 'AT') return isAuto;
@@ -2644,7 +2689,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 const cy = calMonth.getFullYear(), cm = calMonth.getMonth();
                 const firstDay = new Date(cy, cm, 1).getDay();
                 const daysInMon = new Date(cy, cm + 1, 0).getDate();
-                
+
                 return (
                     <div className="schedule-calendar-wrap">
                         {/* Session filter removed as requested */}
@@ -2687,7 +2732,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 const isSelected = selDateStr === dateStr;
 
                                 let daySlots = isDisabled ? [] : slotsData.filter(s => dateStr >= s.date && dateStr <= (s.end_date || s.date));
-                                
+
                                 // Apply Session Filter for Promo PDC
                                 // Show all sessions without filter
                                 if (false) { // Condition disabled
@@ -2697,7 +2742,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 let cls = 'cal-day' + slotStatus;
                                 if (isDisabled) cls += ' cal-day--disabled';
                                 if (isToday) cls += ' cal-day--today';
-                                
+
                                 return (
                                     <div key={d} className={cls} title={isLockedDay1 ? 'Day 1 date' : undefined} onClick={() => !isDisabled && onDateClick(new Date(cy, cm, d))}>
                                         <div className="cal-day-header-mini">
@@ -2849,7 +2894,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
                     {isPromo && isOnlineTdcNoSchedule && (
                         <div className="schedule-banner schedule-banner--info" style={{ marginBottom: '16px' }}>
-                            <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 16V12M12 8H12.01" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                            <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 16V12M12 8H12.01" strokeLinecap="round" strokeLinejoin="round" /></svg>
                             <div className="schedule-banner__body">
                                 <div className="schedule-banner__title">Online TDC Selected</div>
                                 <div className="schedule-banner__desc">No branch slot selection is required for Online TDC. You can proceed directly to enrollment.</div>
@@ -2959,7 +3004,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                         </div>
                                     ) : (
                                         <div className="slots-grid">
-                                            {promoTdcSlotsForMonth.map(slot => 
+                                            {promoTdcSlotsForMonth.map(slot =>
                                                 renderPromoSlotCard(slot, formData.scheduleSlotId === slot.id, () => handlePromoTdcSelect(slot), slot.course_type || 'F2F')
                                             )}
                                         </div>
@@ -2972,177 +3017,177 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     {promoStep === 2 && !isPromoOnlineTdcLockedBundle && (
                         <>
                             <>
-                            {formData.scheduleSlotId2 && (
-                                <div className="schedule-banner schedule-banner--success" style={{ marginTop: '16px' }}>
-                                    <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
-                                    <div className="schedule-banner__body">
-                                        <div className="schedule-banner__title">{activePromoPdcCourse?.shortName || activePromoPdcCourse?.name || 'PDC'} Schedule Selected</div>
-                                        <div className="schedule-banner__desc">
-                                            Day 1: <strong>{new Date(formData.scheduleDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>
-                                            {pdcIsHalfDay && formData.promoPdcSlotId2 && (
-                                                <> · Day 2: <strong>{new Date(formData.promoPdcDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong></>
-                                            )}
-                                             — {formData.scheduleSession2}
-                                        </div>
-                                    </div>
-                                    <div className="schedule-banner__actions">
-                                        <button className="change-btn change-btn--green" onClick={() => {
-                                            setFormData(prev => ({ ...prev, scheduleSlotId2: null, scheduleDate2: '', scheduleSession2: '', scheduleTime2: '', promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: '' }));
-                                            setPromoPdcDate(null); setPromoPdcRawSlots([]); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]);
-                                        }}>
-                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
-                                            Change PDC
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {promoPdcCourses.length > 1 && (
-                                <div className="type-selector-card" style={{ marginTop: '12px' }}>
-                                    <div className="type-selector-title">Select PDC Course To Schedule</div>
-                                    <div className="type-selector-sub">Each selected PDC course needs its own schedule.</div>
-                                    <div className="type-btn-group" style={{ flexWrap: 'wrap' }}>
-                                        {promoPdcCourses.map((course, idx) => {
-                                            const done = getIsPromoPdcComplete(course._pdcKey);
-                                            const active = course._pdcKey === activePromoPdcCourseId;
-                                            return (
-                                                <button
-                                                    key={course._pdcKey}
-                                                    type="button"
-                                                    className={`type-btn${active ? ' active' : ''}`}
-                                                    onClick={() => {
-                                                        setActivePromoPdcCourseId(course._pdcKey);
-                                                        setPromoPdcDate(null);
-                                                        setPromoPdcDate2(null);
-                                                    }}
-                                                >
-                                                    {done ? '✓ ' : ''}{course.shortName || course.name} - {course._pdcLabel} {promoPdcCourses.length > 1 ? `(#${idx + 1})` : ''}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Active PDC course info — shown whenever in PDC scheduling (promoStep === 2) */}
-                            {activePromoPdcCourse && (() => {
-                                const trackIdx = promoPdcCourses.findIndex(c => c._pdcKey === activePromoPdcCourse._pdcKey);
-                                const courseName = activePromoPdcCourse.name || activePromoPdcCourse.shortName || 'PDC';
-                                const vehicleLabel = activePromoPdcCourse._pdcLabel || activePromoPdcCourse._pdcKind || '';
-                                const trackLabel = promoPdcCourses.length > 1 ? `Track #${trackIdx + 1} of ${promoPdcCourses.length}` : '';
-                                const isDone = getIsPromoPdcComplete(activePromoPdcCourse._pdcKey);
-                                return (
-                                    <div style={{
-                                        marginTop: '12px', marginBottom: '4px',
-                                        background: isDone ? 'linear-gradient(135deg,#f0fdf4,#dcfce7)' : 'linear-gradient(135deg,#eff6ff,#dbeafe)',
-                                        border: `1.5px solid ${isDone ? '#86efac' : '#93c5fd'}`,
-                                        borderRadius: '10px', padding: '10px 14px',
-                                        display: 'flex', alignItems: 'center', gap: '10px',
-                                    }}>
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isDone ? '#16a34a' : '#2563eb'} strokeWidth="2">
-                                            <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-                                        </svg>
-                                        <div>
-                                            <div style={{ fontWeight: 700, fontSize: '12px', color: isDone ? '#15803d' : '#1d4ed8', letterSpacing: '0.02em' }}>
-                                                {isDone ? '✓ Scheduled' : 'Now Scheduling'}{trackLabel ? ` — ${trackLabel}` : ''}
-                                            </div>
-                                            <div style={{ fontSize: '13px', color: '#1e293b', marginTop: '2px' }}>
-                                                <strong>{courseName}</strong>{vehicleLabel ? <span style={{ color: '#6b7280', fontWeight: 400 }}> · {vehicleLabel}</span> : null}
+                                {formData.scheduleSlotId2 && (
+                                    <div className="schedule-banner schedule-banner--success" style={{ marginTop: '16px' }}>
+                                        <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
+                                        <div className="schedule-banner__body">
+                                            <div className="schedule-banner__title">{activePromoPdcCourse?.shortName || activePromoPdcCourse?.name || 'PDC'} Schedule Selected</div>
+                                            <div className="schedule-banner__desc">
+                                                Day 1: <strong>{new Date(formData.scheduleDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>
+                                                {pdcIsHalfDay && formData.promoPdcSlotId2 && (
+                                                    <> · Day 2: <strong>{new Date(formData.promoPdcDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong></>
+                                                )}
+                                                — {formData.scheduleSession2}
                                             </div>
                                         </div>
+                                        <div className="schedule-banner__actions">
+                                            <button className="change-btn change-btn--green" onClick={() => {
+                                                setFormData(prev => ({ ...prev, scheduleSlotId2: null, scheduleDate2: '', scheduleSession2: '', scheduleTime2: '', promoPdcSlotId2: null, promoPdcDate2: '', promoPdcSession2: '', promoPdcTime2: '' }));
+                                                setPromoPdcDate(null); setPromoPdcRawSlots([]); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]);
+                                            }}>
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
+                                                Change PDC
+                                            </button>
+                                        </div>
                                     </div>
-                                );
-                            })()}
+                                )}
 
-                            {!promoPdcSelectingDay2 && !formData.scheduleSlotId2 && (
-                                <>
-                                    {showsTransmissionSelector && (
-                                        <div className="type-selector-card" style={{ marginTop: '16px' }}>
-                                            <div className="type-selector-title">
-                                                {fixedPromoPdcTransmission ? (formData.course?._isManualBundle ? 'Selected Transmission' : 'Transmission (Fixed by Course)') : 'Select Transmission'}
-                                            </div>
-                                            {fixedPromoPdcTransmission ? (
-                                                <div className="type-btn-group">
-                                                    <button type="button" className="type-btn active" disabled>
-                                                        {fixedPromoPdcTransmission === 'MT' ? 'Manual (MT)' : 'Automatic (AT)'}
+                                {promoPdcCourses.length > 1 && (
+                                    <div className="type-selector-card" style={{ marginTop: '12px' }}>
+                                        <div className="type-selector-title">Select PDC Course To Schedule</div>
+                                        <div className="type-selector-sub">Each selected PDC course needs its own schedule.</div>
+                                        <div className="type-btn-group" style={{ flexWrap: 'wrap' }}>
+                                            {promoPdcCourses.map((course, idx) => {
+                                                const done = getIsPromoPdcComplete(course._pdcKey);
+                                                const active = course._pdcKey === activePromoPdcCourseId;
+                                                return (
+                                                    <button
+                                                        key={course._pdcKey}
+                                                        type="button"
+                                                        className={`type-btn${active ? ' active' : ''}`}
+                                                        onClick={() => {
+                                                            setActivePromoPdcCourseId(course._pdcKey);
+                                                            setPromoPdcDate(null);
+                                                            setPromoPdcDate2(null);
+                                                        }}
+                                                    >
+                                                        {done ? '✓ ' : ''}{course.shortName || course.name} - {course._pdcLabel} {promoPdcCourses.length > 1 ? `(#${idx + 1})` : ''}
                                                     </button>
-                                                </div>
-                                            ) : (
-                                                <div className="type-btn-group">
-                                                    {allowedPromoPdcTransmissions.includes('MT') && (
-                                                        <button type="button" className={`type-btn${effectivePromoPdcTransmission === 'MT' ? ' active' : ''}`} onClick={() => { setPromoPdcMotorType('MT'); setPromoPdcDate(null); }}>Manual (MT)</button>
-                                                    )}
-                                                    {allowedPromoPdcTransmissions.includes('AT') && (
-                                                        <button type="button" className={`type-btn${effectivePromoPdcTransmission === 'AT' ? ' active' : ''}`} onClick={() => { setPromoPdcMotorType('AT'); setPromoPdcDate(null); }}>Automatic (AT)</button>
-                                                    )}
-                                                </div>
-                                            )}
+                                                );
+                                            })}
                                         </div>
-                                    )}
-
-                                    {(!requiresTransmissionChoice || !!effectivePromoPdcTransmission) && (
-                                        <>
-                                            <div style={{ marginTop: '16px' }}>
-                                                {renderPromoCalendar(promoPdcCalMonth, setPromoPdcCalMonth, (d) => setPromoPdcDate(d), promoPdcDate, null, promoPdcCalendarSlots)}
-                                            </div>
-                                            {promoPdcDate && (
-                                                <div className="slots-section">
-                                                    <h4 className="slots-header">PDC Slots — {promoPdcDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</h4>
-                                                    {loadingPromoPdc ? (
-                                                        <div className="slots-loading">Loading slots...</div>
-                                                    ) : promoPdcFilteredSlots.length === 0 ? (
-                                                        <div className="slots-empty">
-                                                            <p className="slots-empty__title">No slots available</p>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="slots-grid">
-                                                            {promoPdcFilteredSlots.map(slot => 
-                                                                renderPromoSlotCard(slot, formData.scheduleSlotId2 === slot.id, () => handlePromoPdcDay1Select(slot), slot.transmission)
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </>
-                                    )}
-                                </>
-                            )}
-
-                            {(promoPdcSelectingDay2 || !!formData.promoPdcSlotId2) && (
-                                <>
-                                    {!formData.promoPdcSlotId2 && (
-                                        <div className="schedule-banner schedule-banner--info" style={{ marginTop: '16px' }}>
-                                            <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                                            <div className="schedule-banner__body">
-                                                <div className="schedule-banner__title">Day 2 Selection Required</div>
-                                                <div className="schedule-banner__desc">Now pick a date for <strong>Day 2</strong>.</div>
-                                            </div>
-                                        </div>
-                                    )}
-                                    <div style={{ marginTop: '16px' }}>
-                                        {renderPromoCalendar(promoPdcDay2CalMonth, setPromoPdcDay2CalMonth, (d) => setPromoPdcDate2(d), promoPdcDate2, formData.scheduleDate2, promoPdcCalendarSlots)}
                                     </div>
-                                    {promoPdcDate2 && !formData.promoPdcSlotId2 && (
-                                        <div className="slots-section">
-                                            <h4 className="slots-header">Day 2 Slots — {promoPdcDate2.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</h4>
-                                            {loadingPromoPdc2 ? (
-                                                <div className="slots-loading">Loading slots...</div>
-                                            ) : promoPdcFiltered2Slots.length === 0 ? (
-                                                <div className="slots-empty">
-                                                    <p className="slots-empty__title">No valid slots available</p>
-                                                    <p className="slots-empty__sub">Find a slot for '{promoPdcDay1Session}'</p>
+                                )}
+
+                                {/* Active PDC course info — shown whenever in PDC scheduling (promoStep === 2) */}
+                                {activePromoPdcCourse && (() => {
+                                    const trackIdx = promoPdcCourses.findIndex(c => c._pdcKey === activePromoPdcCourse._pdcKey);
+                                    const courseName = activePromoPdcCourse.name || activePromoPdcCourse.shortName || 'PDC';
+                                    const vehicleLabel = activePromoPdcCourse._pdcLabel || activePromoPdcCourse._pdcKind || '';
+                                    const trackLabel = promoPdcCourses.length > 1 ? `Track #${trackIdx + 1} of ${promoPdcCourses.length}` : '';
+                                    const isDone = getIsPromoPdcComplete(activePromoPdcCourse._pdcKey);
+                                    return (
+                                        <div style={{
+                                            marginTop: '12px', marginBottom: '4px',
+                                            background: isDone ? 'linear-gradient(135deg,#f0fdf4,#dcfce7)' : 'linear-gradient(135deg,#eff6ff,#dbeafe)',
+                                            border: `1.5px solid ${isDone ? '#86efac' : '#93c5fd'}`,
+                                            borderRadius: '10px', padding: '10px 14px',
+                                            display: 'flex', alignItems: 'center', gap: '10px',
+                                        }}>
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isDone ? '#16a34a' : '#2563eb'} strokeWidth="2">
+                                                <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+                                            </svg>
+                                            <div>
+                                                <div style={{ fontWeight: 700, fontSize: '12px', color: isDone ? '#15803d' : '#1d4ed8', letterSpacing: '0.02em' }}>
+                                                    {isDone ? '✓ Scheduled' : 'Now Scheduling'}{trackLabel ? ` — ${trackLabel}` : ''}
                                                 </div>
-                                            ) : (
-                                                <div className="slots-grid">
-                                                    {promoPdcFiltered2Slots.map(slot => 
-                                                        renderPromoSlotCard(slot, formData.promoPdcSlotId2 === slot.id, () => handlePromoPdcDay2Select(slot), slot.transmission)
-                                                    )}
+                                                <div style={{ fontSize: '13px', color: '#1e293b', marginTop: '2px' }}>
+                                                    <strong>{courseName}</strong>{vehicleLabel ? <span style={{ color: '#6b7280', fontWeight: 400 }}> · {vehicleLabel}</span> : null}
                                                 </div>
-                                            )}
+                                            </div>
                                         </div>
-                                    )}
-                                </>
-                            )}
+                                    );
+                                })()}
+
+                                {!promoPdcSelectingDay2 && !formData.scheduleSlotId2 && (
+                                    <>
+                                        {showsTransmissionSelector && (
+                                            <div className="type-selector-card" style={{ marginTop: '16px' }}>
+                                                <div className="type-selector-title">
+                                                    {fixedPromoPdcTransmission ? (formData.course?._isManualBundle ? 'Selected Transmission' : 'Transmission (Fixed by Course)') : 'Select Transmission'}
+                                                </div>
+                                                {fixedPromoPdcTransmission ? (
+                                                    <div className="type-btn-group">
+                                                        <button type="button" className="type-btn active" disabled>
+                                                            {fixedPromoPdcTransmission === 'MT' ? 'Manual (MT)' : 'Automatic (AT)'}
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="type-btn-group">
+                                                        {allowedPromoPdcTransmissions.includes('MT') && (
+                                                            <button type="button" className={`type-btn${effectivePromoPdcTransmission === 'MT' ? ' active' : ''}`} onClick={() => { setPromoPdcMotorType('MT'); setPromoPdcDate(null); }}>Manual (MT)</button>
+                                                        )}
+                                                        {allowedPromoPdcTransmissions.includes('AT') && (
+                                                            <button type="button" className={`type-btn${effectivePromoPdcTransmission === 'AT' ? ' active' : ''}`} onClick={() => { setPromoPdcMotorType('AT'); setPromoPdcDate(null); }}>Automatic (AT)</button>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {(!requiresTransmissionChoice || !!effectivePromoPdcTransmission) && (
+                                            <>
+                                                <div style={{ marginTop: '16px' }}>
+                                                    {renderPromoCalendar(promoPdcCalMonth, setPromoPdcCalMonth, (d) => setPromoPdcDate(d), promoPdcDate, null, promoPdcCalendarSlots)}
+                                                </div>
+                                                {promoPdcDate && (
+                                                    <div className="slots-section">
+                                                        <h4 className="slots-header">PDC Slots — {promoPdcDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</h4>
+                                                        {loadingPromoPdc ? (
+                                                            <div className="slots-loading">Loading slots...</div>
+                                                        ) : promoPdcFilteredSlots.length === 0 ? (
+                                                            <div className="slots-empty">
+                                                                <p className="slots-empty__title">No slots available</p>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="slots-grid">
+                                                                {promoPdcFilteredSlots.map(slot =>
+                                                                    renderPromoSlotCard(slot, formData.scheduleSlotId2 === slot.id, () => handlePromoPdcDay1Select(slot), slot.transmission)
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                    </>
+                                )}
+
+                                {(promoPdcSelectingDay2 || !!formData.promoPdcSlotId2) && (
+                                    <>
+                                        {!formData.promoPdcSlotId2 && (
+                                            <div className="schedule-banner schedule-banner--info" style={{ marginTop: '16px' }}>
+                                                <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                                                <div className="schedule-banner__body">
+                                                    <div className="schedule-banner__title">Day 2 Selection Required</div>
+                                                    <div className="schedule-banner__desc">Now pick a date for <strong>Day 2</strong>.</div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        <div style={{ marginTop: '16px' }}>
+                                            {renderPromoCalendar(promoPdcDay2CalMonth, setPromoPdcDay2CalMonth, (d) => setPromoPdcDate2(d), promoPdcDate2, formData.scheduleDate2, promoPdcCalendarSlots)}
+                                        </div>
+                                        {promoPdcDate2 && !formData.promoPdcSlotId2 && (
+                                            <div className="slots-section">
+                                                <h4 className="slots-header">Day 2 Slots — {promoPdcDate2.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</h4>
+                                                {loadingPromoPdc2 ? (
+                                                    <div className="slots-loading">Loading slots...</div>
+                                                ) : promoPdcFiltered2Slots.length === 0 ? (
+                                                    <div className="slots-empty">
+                                                        <p className="slots-empty__title">No valid slots available</p>
+                                                        <p className="slots-empty__sub">Find a slot for '{promoPdcDay1Session}'</p>
+                                                    </div>
+                                                ) : (
+                                                    <div className="slots-grid">
+                                                        {promoPdcFiltered2Slots.map(slot =>
+                                                            renderPromoSlotCard(slot, formData.promoPdcSlotId2 === slot.id, () => handlePromoPdcDay2Select(slot), slot.transmission)
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </>
+                                )}
                             </>
                         </>
                     )}
@@ -3151,18 +3196,18 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         <div className="schedule-banner" style={{ marginTop: '24px', background: 'linear-gradient(135deg, #eff6ff, #dbeafe)', border: '1.5px solid #93c5fd', borderRadius: '12px', padding: '20px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
                                 <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}>
-                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
                                 </div>
                                 <div className="schedule-banner__body">
                                     <h4 className="schedule-banner__title" style={{ color: '#1e40af', fontSize: '1.1rem', marginBottom: '4px' }}>PDC Scheduling Restricted</h4>
                                     <div className="schedule-banner__desc" style={{ color: '#1e3a8a', fontSize: '0.95rem', lineHeight: '1.5' }}>
-                                        For <strong>Online TDC bundles</strong>, practical schedules cannot be set during enrollment. 
+                                        For <strong>Online TDC bundles</strong>, practical schedules cannot be set during enrollment.
                                         The student must first complete the Online TDC course before they can be assigned to a PDC slot.
                                     </div>
                                 </div>
                             </div>
                             <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #bfdbfe', color: '#1e40af', fontSize: '0.85rem', fontWeight: 500 }}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '6px', verticalAlign: 'middle' }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '6px', verticalAlign: 'middle' }}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
                                 Note: You may proceed to payment and enrollment now.
                             </div>
                         </div>
@@ -3187,1023 +3232,1025 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 </div>
             );
         }
-// =====================================================================
-                    // END PROMO — regular TDC/PDC flow continues below
-                    // =====================================================================
+        // =====================================================================
+        // END PROMO — regular TDC/PDC flow continues below
+        // =====================================================================
 
-                    return (
-                    <div className="step-content animate-fadeIn walkin-schedule-theme">
-                        <div className="section-title">
-                            <span className="step-badge">3</span>
-                            <h3>Select Schedule</h3>
+        return (
+            <div className="step-content animate-fadeIn walkin-schedule-theme">
+                <div className="section-title">
+                    <span className="step-badge">3</span>
+                    <h3>Select Schedule</h3>
+                </div>
+
+                {formData.course && (
+                    <div className="selected-course-summary mb-6">
+                        <div className="summary-label">Selected Course:</div>
+                        <div className="summary-value">{formData.course.name}</div>
+                        <div style={{ marginTop: '8px', fontSize: '0.875rem', color: 'var(--secondary-text)' }}>
+                            Category: <strong>{formData.course.category}</strong> | Duration: <strong>{formData.course.duration}</strong>
                         </div>
+                    </div>
+                )}
 
-                        {formData.course && (
-                            <div className="selected-course-summary mb-6">
-                                <div className="summary-label">Selected Course:</div>
-                                <div className="summary-value">{formData.course.name}</div>
-                                <div style={{ marginTop: '8px', fontSize: '0.875rem', color: 'var(--secondary-text)' }}>
-                                    Category: <strong>{formData.course.category}</strong> | Duration: <strong>{formData.course.duration}</strong>
-                                </div>
-                            </div>
-                        )}
+                {/* Course Type Selection */}
+                {formData.course?.hasTypeOption && formData.course.typeOptions.length > 0 && (
+                    formData.course.category === 'PDC'
+                        ? /* PDC: two-level selector — vehicle type first, then transmission */ (() => {
+                            // Group typeOptions by vehicle category.
+                            // Pass the course name as fallback so that Motorcycle/Tricycle courses
+                            // with generic option values ("Manual"/"Automatic") are bucketed correctly.
+                            const pdcCourseName = formData.course.name || '';
+                            const vehicleGroups = {};
+                            formData.course.typeOptions.forEach(opt => {
+                                const vg = getPdcVehicleGroup(opt.value, pdcCourseName);
+                                if (!vehicleGroups[vg]) vehicleGroups[vg] = [];
+                                vehicleGroups[vg].push(opt);
+                            });
+                            const vehicleGroupKeys = Object.keys(vehicleGroups);
 
-                        {/* Course Type Selection */}
-                        {formData.course?.hasTypeOption && formData.course.typeOptions.length > 0 && (
-                            formData.course.category === 'PDC'
-                            ? /* PDC: two-level selector — vehicle type first, then transmission */ (() => {
-                                // Group typeOptions by vehicle category.
-                                // Pass the course name as fallback so that Motorcycle/Tricycle courses
-                                // with generic option values ("Manual"/"Automatic") are bucketed correctly.
-                                const pdcCourseName = formData.course.name || '';
-                                const vehicleGroups = {};
-                                formData.course.typeOptions.forEach(opt => {
-                                    const vg = getPdcVehicleGroup(opt.value, pdcCourseName);
-                                    if (!vehicleGroups[vg]) vehicleGroups[vg] = [];
-                                    vehicleGroups[vg].push(opt);
-                                });
-                                const vehicleGroupKeys = Object.keys(vehicleGroups);
+                            // Auto-select the only vehicle group — skip the redundant selector click
+                            // (e.g., PDC Motorcycle course always has only one group: 'motorcycle')
+                            const effectivePdcVehicleType = vehicleGroupKeys.length === 1
+                                ? vehicleGroupKeys[0]
+                                : pdcVehicleType;
+                            if (vehicleGroupKeys.length === 1 && pdcVehicleType !== vehicleGroupKeys[0]) {
+                                // Defer the state update to avoid setState-during-render
+                                Promise.resolve().then(() => setPdcVehicleType(vehicleGroupKeys[0]));
+                            }
 
-                                // Auto-select the only vehicle group — skip the redundant selector click
-                                // (e.g., PDC Motorcycle course always has only one group: 'motorcycle')
-                                const effectivePdcVehicleType = vehicleGroupKeys.length === 1
-                                    ? vehicleGroupKeys[0]
-                                    : pdcVehicleType;
-                                if (vehicleGroupKeys.length === 1 && pdcVehicleType !== vehicleGroupKeys[0]) {
-                                    // Defer the state update to avoid setState-during-render
-                                    Promise.resolve().then(() => setPdcVehicleType(vehicleGroupKeys[0]));
-                                }
+                            // Options for the currently-selected vehicle group
+                            const currentGroupOpts = effectivePdcVehicleType ? (vehicleGroups[effectivePdcVehicleType] || []) : [];
+                            const uniqueTransmissions = [...new Set(currentGroupOpts.map(opt => getPdcTxFromOption(opt.value)).filter(Boolean))];
+                            const needsTransmission = uniqueTransmissions.length > 0;
 
-                                // Options for the currently-selected vehicle group
-                                const currentGroupOpts = effectivePdcVehicleType ? (vehicleGroups[effectivePdcVehicleType] || []) : [];
-                                const uniqueTransmissions = [...new Set(currentGroupOpts.map(opt => getPdcTxFromOption(opt.value)).filter(Boolean))];
-                                const needsTransmission = uniqueTransmissions.length > 0;
+                            const vehicleLabels = { car: 'Car', motorcycle: 'Motorcycle', tricycle: 'Tricycle', b1b2: 'B1 Van / B2 L300' };
+                            const singleGroupLabel = vehicleGroupKeys.length === 1 ? (vehicleLabels[vehicleGroupKeys[0]] || vehicleGroupKeys[0]) : null;
 
-                                const vehicleLabels = { car: 'Car', motorcycle: 'Motorcycle', tricycle: 'Tricycle', b1b2: 'B1 Van / B2 L300' };
-                                const singleGroupLabel = vehicleGroupKeys.length === 1 ? (vehicleLabels[vehicleGroupKeys[0]] || vehicleGroupKeys[0]) : null;
-
-                                return (
-                                    <div className={`type-selector-card${formData.courseType ? ' has-selection' : ''}`}>
-                                        {/* Step A: Vehicle type — only show selector when there are multiple vehicle groups */}
-                                        <div className="type-selector-title">
-                                            {singleGroupLabel ? `${singleGroupLabel} — Select Transmission` : 'Select Vehicle Type'}
-                                            <span style={{ color: 'red' }}>*</span>
+                            return (
+                                <div className={`type-selector-card${formData.courseType ? ' has-selection' : ''}`}>
+                                    {/* Step A: Vehicle type — only show selector when there are multiple vehicle groups */}
+                                    <div className="type-selector-title">
+                                        {singleGroupLabel ? `${singleGroupLabel} — Select Transmission` : 'Select Vehicle Type'}
+                                        <span style={{ color: 'red' }}>*</span>
+                                    </div>
+                                    <div className="type-selector-sub">{singleGroupLabel ? `Select a transmission to view available ${singleGroupLabel} schedules.` : 'Choose your vehicle type before selecting a schedule.'}</div>
+                                    {checkingTypeAvail && (
+                                        <div style={{ fontSize: '0.78rem', color: 'var(--secondary-text)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
+                                            Checking slot availability…
                                         </div>
-                                        <div className="type-selector-sub">{singleGroupLabel ? `Select a transmission to view available ${singleGroupLabel} schedules.` : 'Choose your vehicle type before selecting a schedule.'}</div>
-                                        {checkingTypeAvail && (
-                                            <div style={{ fontSize: '0.78rem', color: 'var(--secondary-text)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
-                                                Checking slot availability…
-                                            </div>
-                                        )}
-                                        {/* Only show vehicle type buttons when there are multiple vehicle types */}
-                                        {vehicleGroupKeys.length > 1 && (
+                                    )}
+                                    {/* Only show vehicle type buttons when there are multiple vehicle types */}
+                                    {vehicleGroupKeys.length > 1 && (
+                                        <div className="type-btn-group">
+                                            {vehicleGroupKeys.map(vg => {
+                                                const optsForGroup = vehicleGroups[vg];
+                                                const allDisabled = !checkingTypeAvail && optsForGroup.every(opt => {
+                                                    const checked = opt.value in typeAvailability;
+                                                    return checked && typeAvailability[opt.value] === false;
+                                                });
+                                                const isSelected = effectivePdcVehicleType === vg;
+                                                return (
+                                                    <button
+                                                        key={vg}
+                                                        type="button"
+                                                        className={`type-btn${isSelected ? ' active' : ''}${allDisabled ? ' type-btn--disabled' : ''}${checkingTypeAvail ? ' type-btn--checking' : ''}`}
+                                                        disabled={allDisabled || checkingTypeAvail}
+                                                        title={allDisabled ? 'No available slots for this vehicle type' : checkingTypeAvail ? 'Checking availability…' : undefined}
+                                                        onClick={() => {
+                                                            if (allDisabled || checkingTypeAvail) return;
+                                                            setPdcVehicleType(vg);
+                                                            setPdcTransmission('');
+                                                            const groupOpts = vehicleGroups[vg];
+                                                            const txCodes = [...new Set(groupOpts.map(o => getPdcTxFromOption(o.value)).filter(Boolean))];
+                                                            if (txCodes.length === 0) {
+                                                                // No transmission needed — auto-select the single option
+                                                                setFormData(prev => ({
+                                                                    ...prev,
+                                                                    courseType: groupOpts[0].value,
+                                                                    scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
+                                                                    scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: ''
+                                                                }));
+                                                                setSelectedScheduleDate('');
+                                                            } else {
+                                                                // Transmission still to be chosen — clear courseType
+                                                                setFormData(prev => ({
+                                                                    ...prev,
+                                                                    courseType: '',
+                                                                    scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
+                                                                    scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: ''
+                                                                }));
+                                                                setSelectedScheduleDate('');
+                                                            }
+                                                        }}
+                                                    >
+                                                        <span className="type-btn__label">{vehicleLabels[vg] || (vg.charAt(0).toUpperCase() + vg.slice(1))}</span>
+                                                        {allDisabled && <span className="type-btn__no-slots">No Slots</span>}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+
+                                    {/* Step B: Transmission — only if vehicle type is selected (or auto-selected) and options exist */}
+                                    {effectivePdcVehicleType && needsTransmission && (
+                                        <>
+                                            {vehicleGroupKeys.length > 1 && (
+                                                <div className="type-selector-title" style={{ marginTop: '14px' }}>
+                                                    Select Transmission
+                                                    <span style={{ fontWeight: '400', color: 'var(--secondary-text)', fontSize: '0.82rem' }}>— Manual or Automatic</span>
+                                                    <span style={{ color: 'red' }}>*</span>
+                                                </div>
+                                            )}
                                             <div className="type-btn-group">
-                                                {vehicleGroupKeys.map(vg => {
-                                                    const optsForGroup = vehicleGroups[vg];
-                                                    const allDisabled = !checkingTypeAvail && optsForGroup.every(opt => {
-                                                        const checked = opt.value in typeAvailability;
-                                                        return checked && typeAvailability[opt.value] === false;
-                                                    });
-                                                    const isSelected = effectivePdcVehicleType === vg;
+                                                {uniqueTransmissions.map(tx => {
+                                                    const matchingOpt = currentGroupOpts.find(opt => getPdcTxFromOption(opt.value) === tx);
+                                                    const typeChecked = matchingOpt && !checkingTypeAvail && (matchingOpt.value in typeAvailability);
+                                                    const typeDisabled = typeChecked && typeAvailability[matchingOpt.value] === false;
+                                                    const isSelectedTx = pdcTransmission === tx;
                                                     return (
                                                         <button
-                                                            key={vg}
+                                                            key={tx}
                                                             type="button"
-                                                            className={`type-btn${isSelected ? ' active' : ''}${allDisabled ? ' type-btn--disabled' : ''}${checkingTypeAvail ? ' type-btn--checking' : ''}`}
-                                                            disabled={allDisabled || checkingTypeAvail}
-                                                            title={allDisabled ? 'No available slots for this vehicle type' : checkingTypeAvail ? 'Checking availability…' : undefined}
+                                                            className={`type-btn${isSelectedTx ? ' active' : ''}${typeDisabled ? ' type-btn--disabled' : ''}${checkingTypeAvail ? ' type-btn--checking' : ''}`}
+                                                            disabled={typeDisabled || checkingTypeAvail || !matchingOpt}
+                                                            title={typeDisabled ? 'No available slots for this transmission' : checkingTypeAvail ? 'Checking availability…' : undefined}
                                                             onClick={() => {
-                                                                if (allDisabled || checkingTypeAvail) return;
-                                                                setPdcVehicleType(vg);
-                                                                setPdcTransmission('');
-                                                                const groupOpts = vehicleGroups[vg];
-                                                                const txCodes = [...new Set(groupOpts.map(o => getPdcTxFromOption(o.value)).filter(Boolean))];
-                                                                if (txCodes.length === 0) {
-                                                                    // No transmission needed — auto-select the single option
-                                                                    setFormData(prev => ({
-                                                                        ...prev,
-                                                                        courseType: groupOpts[0].value,
-                                                                        scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
-                                                                        scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: ''
-                                                                    }));
-                                                                    setSelectedScheduleDate('');
-                                                                } else {
-                                                                    // Transmission still to be chosen — clear courseType
-                                                                    setFormData(prev => ({
-                                                                        ...prev,
-                                                                        courseType: '',
-                                                                        scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
-                                                                        scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: ''
-                                                                    }));
-                                                                    setSelectedScheduleDate('');
-                                                                }
+                                                                if (typeDisabled || checkingTypeAvail || !matchingOpt) return;
+                                                                setPdcTransmission(tx);
+                                                                setFormData(prev => ({
+                                                                    ...prev,
+                                                                    courseType: matchingOpt.value,
+                                                                    scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
+                                                                    scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: ''
+                                                                }));
+                                                                setSelectedScheduleDate('');
                                                             }}
                                                         >
-                                                            <span className="type-btn__label">{vehicleLabels[vg] || (vg.charAt(0).toUpperCase() + vg.slice(1))}</span>
-                                                            {allDisabled && <span className="type-btn__no-slots">No Slots</span>}
+                                                            <span className="type-btn__label">{tx === 'at' ? 'Automatic (AT)' : 'Manual (MT)'}</span>
+                                                            {typeDisabled && <span className="type-btn__no-slots">No Slots</span>}
                                                         </button>
                                                     );
                                                 })}
                                             </div>
-                                        )}
+                                        </>
+                                    )}
 
-                                        {/* Step B: Transmission — only if vehicle type is selected (or auto-selected) and options exist */}
-                                        {effectivePdcVehicleType && needsTransmission && (
-                                            <>
-                                                {vehicleGroupKeys.length > 1 && (
-                                                    <div className="type-selector-title" style={{ marginTop: '14px' }}>
-                                                        Select Transmission
-                                                        <span style={{ fontWeight: '400', color: 'var(--secondary-text)', fontSize: '0.82rem' }}>— Manual or Automatic</span>
-                                                        <span style={{ color: 'red' }}>*</span>
-                                                    </div>
-                                                )}
-                                                <div className="type-btn-group">
-                                                    {uniqueTransmissions.map(tx => {
-                                                        const matchingOpt = currentGroupOpts.find(opt => getPdcTxFromOption(opt.value) === tx);
-                                                        const typeChecked = matchingOpt && !checkingTypeAvail && (matchingOpt.value in typeAvailability);
-                                                        const typeDisabled = typeChecked && typeAvailability[matchingOpt.value] === false;
-                                                        const isSelectedTx = pdcTransmission === tx;
-                                                        return (
-                                                            <button
-                                                                key={tx}
-                                                                type="button"
-                                                                className={`type-btn${isSelectedTx ? ' active' : ''}${typeDisabled ? ' type-btn--disabled' : ''}${checkingTypeAvail ? ' type-btn--checking' : ''}`}
-                                                                disabled={typeDisabled || checkingTypeAvail || !matchingOpt}
-                                                                title={typeDisabled ? 'No available slots for this transmission' : checkingTypeAvail ? 'Checking availability…' : undefined}
-                                                                onClick={() => {
-                                                                    if (typeDisabled || checkingTypeAvail || !matchingOpt) return;
-                                                                    setPdcTransmission(tx);
-                                                                    setFormData(prev => ({
-                                                                        ...prev,
-                                                                        courseType: matchingOpt.value,
-                                                                        scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
-                                                                        scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: ''
-                                                                    }));
-                                                                    setSelectedScheduleDate('');
-                                                                }}
-                                                            >
-                                                                <span className="type-btn__label">{tx === 'at' ? 'Automatic (AT)' : 'Manual (MT)'}</span>
-                                                                {typeDisabled && <span className="type-btn__no-slots">No Slots</span>}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </>
-                                        )}
-
-                                        {!formData.courseType && (
-                                            <div className="type-error-msg">
-                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                                                {pdcVehicleType && needsTransmission
-                                                    ? 'Please select a transmission to view available schedules.'
-                                                    : 'Please select a vehicle type to view available schedules.'}
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })()
-                            : /* TDC: original flat type selector (unchanged) */
-                            <div className={`type-selector-card${formData.courseType ? ' has-selection' : ''}`}>
-                                <div className="type-selector-title">
-                                    Select Type
-                                    {formData.course.category === 'TDC' && <span style={{ fontWeight: '400', color: 'var(--secondary-text)', fontSize: '0.82rem' }}>— e.g. F2F / Online</span>}
-                                    <span style={{ color: 'red' }}>*</span>
-                                </div>
-                                <div className="type-selector-sub">Choose your preferred type before selecting a schedule.</div>
-                                {checkingTypeAvail && (
-                                    <div style={{ fontSize: '0.78rem', color: 'var(--secondary-text)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
-                                        Checking slot availability…
-                                    </div>
-                                )}
-                                <div className="type-btn-group">
-                                    {formData.course.typeOptions.map(opt => {
-                                        const isOnlineTdcType = formData.course?.category === 'TDC' && String(opt.value || '').toLowerCase().includes('online');
-                                        const typeChecked = !checkingTypeAvail && (opt.value in typeAvailability);
-                                        const typeDisabled = !isOnlineTdcType && typeChecked && typeAvailability[opt.value] === false;
-                                        const isLoading = checkingTypeAvail;
-                                        return (
-                                            <button
-                                                key={opt.value}
-                                                type="button"
-                                                className={`type-btn${formData.courseType === opt.value ? ' active' : ''}${typeDisabled ? ' type-btn--disabled' : ''}${isLoading ? ' type-btn--checking' : ''}`}
-                                                disabled={typeDisabled || isLoading}
-                                                title={typeDisabled ? 'No available slots for this type' : isLoading ? 'Checking availability…' : undefined}
-                                                onClick={() => {
-                                                    if (typeDisabled || isLoading) return;
-                                                    setFormData(prev => ({
-                                                        ...prev,
-                                                        courseType: opt.value,
-                                                        scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
-                                                        scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: ''
-                                                    }));
-                                                    setSelectedScheduleDate('');
-                                                }}
-                                            >
-                                                <span className="type-btn__label">{opt.label}</span>
-                                                {typeDisabled && <span className="type-btn__no-slots">No Slots</span>}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                                {!formData.courseType && (
-                                    <div className="type-error-msg">
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                                        Please select a type to view available schedules.
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {isOnlineTdcNoSchedule && (
-                            <div className="schedule-banner schedule-banner--info">
-                                <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M8 12h8" /></svg>
-                                <div className="schedule-banner__body">
-                                    <div className="schedule-banner__title">Online TDC Selected</div>
-                                    <div className="schedule-banner__desc">No branch slot selection is required for Online TDC. You can proceed directly to Enrollment.</div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* PDC Day 2 Selection Prompts */}
-                        {!isTDC && formData.scheduleSlotId && !formData.scheduleSlotId2 && formData.scheduleSession && (formData.scheduleSession.toLowerCase().includes('morning') || formData.scheduleSession.toLowerCase().includes('afternoon') || formData.scheduleSession.toLowerCase().includes('4 hours')) && (
-                            <div className="schedule-banner schedule-banner--info">
-                                <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                                <div className="schedule-banner__body">
-                                    <div className="schedule-banner__title">Day 2 Selection Required</div>
-                                    <div className="schedule-banner__desc">
-                                        Day 1: <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> — {formData.scheduleSession} ({formData.scheduleTime}). Now pick a date for <strong>Day 2</strong>.
-                                    </div>
-                                </div>
-                                <div className="schedule-banner__actions">
-                                    <button className="change-btn change-btn--primary" onClick={() => { setFormData(prev => ({ ...prev, scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '', scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '' })); setPromoPdcDate(null); setPromoPdcRawSlots([]); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]); }}>
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
-                                        Change Day 1
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                        {
-                            !isTDC && formData.scheduleSlotId && formData.scheduleSlotId2 && (
-                                <div className="schedule-banner schedule-banner--success">
-                                    <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
-                                    <div className="schedule-banner__body">
-                                        <div className="schedule-banner__title">Schedule Complete</div>
-                                        <div className="schedule-banner__desc">
-                                            Day 1: <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong> · Day 2: <strong>{new Date(formData.scheduleDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong> — {formData.scheduleSession}
-                                        </div>
-                                    </div>
-                                    <div className="schedule-banner__actions">
-                                        <button className="change-btn change-btn--green" onClick={() => { setFormData(prev => ({ ...prev, scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '' })); setPromoPdcDate(null); setPromoPdcRawSlots([]); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]); }}>
-                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
-                                            Change Day 2
-                                        </button>
-                                        <button className="change-btn change-btn--grey" onClick={() => { setFormData(prev => ({ ...prev, scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '', scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '' })); setPromoPdcDate(null); setPromoPdcRawSlots([]); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]); }}>
-                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
-                                            Change Day 1
-                                        </button>
-                                    </div>
-                                </div>
-                            )
-                        }
-
-                        {/* TDC Selected Schedule Banner */}
-                        {
-                            isTDC && formData.scheduleSlotId && (
-                                <div className="schedule-banner schedule-banner--success">
-                                    <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
-                                    <div className="schedule-banner__body">
-                                        <div className="schedule-banner__title">TDC Schedule Selected</div>
-                                        <div className="schedule-banner__desc">
-                                            <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> — {formData.scheduleSession} ({formData.scheduleTime})
-                                        </div>
-                                    </div>
-                                    <div className="schedule-banner__actions">
-                                        <button className="change-btn change-btn--green" onClick={() => setFormData(prev => ({ ...prev, scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '' }))}>
-                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
-                                            Change
-                                        </button>
-                                    </div>
-                                </div>
-                            )
-                        }
-
-                        {/* PDC Whole Day selected banner (single-slot, no Day 2 needed) */}
-                        {
-                            !isTDC && formData.scheduleSlotId && !formData.scheduleSlotId2 && !isSelectingDay2 && (
-                                <div className="schedule-banner schedule-banner--success">
-                                    <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
-                                    <div className="schedule-banner__body">
-                                        <div className="schedule-banner__title">Schedule Selected</div>
-                                        <div className="schedule-banner__desc">
-                                            <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> — {formData.scheduleSession} ({formData.scheduleTime})
-                                        </div>
-                                    </div>
-                                    <div className="schedule-banner__actions">
-                                        <button className="change-btn change-btn--green" onClick={() => { setFormData(prev => ({ ...prev, scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '', scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '' })); setSelectedScheduleDate(''); }}>
-                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
-                                            Change
-                                        </button>
-                                    </div>
-                                </div>
-                            )
-                        }
-
-                        {
-                            !isTDC && formData.courseType && (
-                                <div className="policy-banner">
-                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2" style={{ flexShrink: 0 }}>
-                                        <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                                    <div className="policy-banner__text">
-                                        <div className="policy-banner__title">Schedule Policy</div>
-                                        <div className="policy-banner__desc">Schedules must be booked at least <strong>2 days in advance</strong>. Sundays are not available.</div>
-                                    </div>
-                                </div>
-                            )}
-
-                    {
-                        !isTDC && formData.courseType && (
-                            <div className="schedule-calendar-wrap">
-                                <div className="month-nav-bar">
-                                    <button className="month-nav-btn-icon" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))}>
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
-                                    </button>
-                                    <h3 className="month-label">{viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h3>
-                                    <button className="month-nav-btn-icon" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))}>
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
-                                    </button>
-                                </div>
-                                <div className="cal-legend-row">
-                                    <div className="cal-legend-item morning-legend">
-                                        <span className="cal-legend-dot morning-dot"></span>
-                                        Morning
-                                    </div>
-                                    <div className="cal-legend-item afternoon-legend">
-                                        <span className="cal-legend-dot afternoon-dot"></span>
-                                        Afternoon
-                                    </div>
-                                    <div className="cal-legend-item whole-legend">
-                                        <span className="cal-legend-dot whole-dot"></span>
-                                        Whole Day
-                                    </div>
-                                </div>
-                                <div className="calendar-grid-7">
-                                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                                        <div key={day} className="cal-day-header">{day}</div>
-                                    ))}
-                                    {(() => {
-                                        const year = viewDate.getFullYear();
-                                        const month = viewDate.getMonth();
-                                        const firstDay = new Date(year, month, 1).getDay();
-                                        const daysInMonth = new Date(year, month + 1, 0).getDate();
-                                        const days = [];
-                                        for (let i = 0; i < firstDay; i++) {
-                                            days.push(<div key={`pad-${i}`} className="cal-day cal-day--pad" />);
-                                        }
-                                        const minDateStr = (() => { const d = new Date(today); d.setDate(d.getDate() + 2); return d.toISOString().split('T')[0]; })();
-                                        for (let d = 1; d <= daysInMonth; d++) {
-                                            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                                            const isSelected = selectedScheduleDate === dateStr;
-                                            const isToday = today === dateStr;
-                                            const isSunday = new Date(year, month, d).getDay() === 0;
-                                            const isDisabled = dateStr < minDateStr || isSunday;
-                                            const daySlots = isDisabled ? [] : pdcCalendarSlots.filter(s => dateStr >= s.date && dateStr <= (s.end_date || s.date));
-                                            const slotStatus = isDisabled ? '' : daySlots.length === 0 ? ' no-slots' : daySlots.every(s => s.available_slots === 0) ? ' full-slots' : ' has-slots';
-                                            let cls = 'cal-day' + slotStatus;
-                                            if (isDisabled) cls += ' cal-day--disabled';
-                                            else if (isSelected) cls += ' cal-day--selected';
-                                            if (isToday) cls += ' cal-day--today';
-                                            days.push(
-                                                <div key={d} className={cls} onClick={() => !isDisabled && setSelectedScheduleDate(dateStr)}>
-                                                    <div className="cal-day-header-mini flex items-center justify-between px-2 pt-2 pb-1">
-                                                         <span className={`cal-day-num text-[13px] font-bold ${isToday ? 'text-[#2157da]' : ''}`}>{d}</span>
-                                                         {isToday && <div className="w-1.5 h-1.5 rounded-full bg-[#2157da] opacity-60 flex-shrink-0" />}
-                                                     </div>
-                                                    <div className="day-slots-container">
-                                                        {(() => {
-                                                            const morningSlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('morning'));
-                                                            const afternoonSlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('afternoon'));
-                                                            const wholeDaySlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('whole'));
-
-                                                            const renderSubBox = (label, slots, type) => {
-                                                                     // Hide completely if no slots exist for this session
-                                                                     if (!slots || slots.length === 0) return null;
-
-                                                                     const hasSlots = slots.length > 0;
-                                                                     const isSelected = hasSlots && slots.some(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id);
-                                                                     const currentSlotId = hasSlots ? slots.find(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id)?.id || "" : "";
-                                                                     const allFull = hasSlots && slots.every(s => s.available_slots === 0);
-                                                                     const hasMultiple = slots.length > 1;
-
-                                                                     const sessionLabel = (() => {
-                                                                         const sn = label.toLowerCase();
-                                                                         if (sn.includes('morning')) return 'Morning Class';
-                                                                         if (sn.includes('afternoon')) return 'Afternoon Class';
-                                                                         if (sn.includes('whole')) return 'Whole Day';
-                                                                         return label;
-                                                                     })();
-
-                                                                     const timeStr = slots[0].time_range.toLowerCase().replace(/ - /g, ' / ').replace(/ am/g, 'am').replace(/ pm/g, 'pm');
-                                                                     
-                                                                     return (
-                                                                         <div 
-                                                                             key={type} 
-                                                                             className={`session-sub-box ${type}${isSelected ? ' selected' : ''}${allFull ? ' full' : ''}`}
-                                                                             onClick={(e) => {
-                                                                                 e.stopPropagation();
-                                                                                 setSelectedScheduleDate(dateStr);
-                                                                                 if (allFull) return;
-                                                                                 if (!hasMultiple) handleScheduleSelect(slots[0]);
-                                                                             }}
-                                                                         >
-                                                                             <div className="session-sub-content">
-                                                                                 <div className="flex items-center justify-between gap-1 leading-none mb-1">
-                                                                                     <span className="session-sub-label-text text-[9px] font-black truncate">{sessionLabel}</span>
-                                                                                     <span className="session-sub-count-tag text-[8px] font-bold px-1 rounded bg-white/20">
-                                                                                         {allFull ? 'FULL' : `${slots[0].available_slots} Slots`}
-                                                                                     </span>
-                                                                                 </div>
-                                                                                 
-                                                                                 {hasSlots && (
-                                                                                     hasMultiple ? (
-                                                                                         <select 
-                                                                                             className="session-mini-select"
-                                                                                             value={currentSlotId}
-                                                                                             onClick={(e) => e.stopPropagation()}
-                                                                                             onChange={(e) => {
-                                                                                                 const id = parseInt(e.target.value);
-                                                                                                 const s = slots.find(x => x.id === id);
-                                                                                                 if (s) {
-                                                                                                     setSelectedScheduleDate(dateStr);
-                                                                                                     handleScheduleSelect(s);
-                                                                                                 }
-                                                                                             }}
-                                                                                         >
-                                                                                             <option value="" disabled>Pick Time</option>
-                                                                                             {slots.map(s => (
-                                                                                                 <option key={s.id} value={s.id} disabled={s.available_slots === 0}>
-                                                                                                     {s.time_range} ({s.available_slots} Slots)
-                                                                                                 </option>
-                                                                                             ))}
-                                                                                         </select>
-                                                                                     ) : (
-                                                                                         <div className="session-sub-time-mini text-[7px] font-medium opacity-80">{timeStr}</div>
-                                                                                     )
-                                                                                 )}
-                                                                             </div>
-                                                                         </div>
-                                                                     );
-                                                                 };
-                                                            return (
-                                                                <>
-                                                                    {renderSubBox('Morning', morningSlots, 'morning')}
-                                                                    {renderSubBox('Afternoon', afternoonSlots, 'afternoon')}
-                                                                    {renderSubBox('Whole Day', wholeDaySlots, 'whole')}
-                                                                </>
-                                                            );
-                                                        })()}
-                                                    </div>
-                                                </div>
-                                            );
-                                        }
-                                        return days;
-                                    })()}
-                                </div>
-                            </div>
-                        )
-                    }
-
-
-                    {
-                        formData.courseType && isTDC && !String(formData.courseType || '').toLowerCase().includes('online') && (
-                            <div className="slots-section">
-                                <div style={{ marginBottom: '24px' }}>
-                                    <div className="month-nav-bar">
-                                        <button className="month-nav-btn-icon" onClick={goToPrevMonth} disabled={!hasPrevSlotMonth}>
-                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
-                                        </button>
-                                        <div style={{ textAlign: 'center' }}>
-                                            <h3 className="month-label">{viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h3>
-                                            {tdcMonthKeys.length > 1 && <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', marginTop: '2px' }}>{tdcMonthKeys.length} months with available schedules</div>}
-                                        </div>
-                                        <button className="month-nav-btn-icon" onClick={goToNextMonth} disabled={!hasNextSlotMonth}>
-                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
-                                        </button>
-                                    </div>
-                                    {tdcMonthKeys.length > 1 && (
-                                        <div className="tdc-month-dots">
-                                            {tdcMonthKeys.map(key => (
-                                                <div
-                                                    key={key}
-                                                    className={`tdc-month-dot${key === currentMonthKey ? ' tdc-month-dot--active' : ''}`}
-                                                    style={{ width: key === currentMonthKey ? '24px' : '8px' }}
-                                                    onClick={() => { const [y, m] = key.split('-').map(Number); setViewDate(new Date(y, m - 1, 1)); }}
-                                                    title={new Date(key + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                                                />
-                                            ))}
+                                    {!formData.courseType && (
+                                        <div className="type-error-msg">
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                                            {pdcVehicleType && needsTransmission
+                                                ? 'Please select a transmission to view available schedules.'
+                                                : 'Please select a vehicle type to view available schedules.'}
                                         </div>
                                     )}
                                 </div>
-
-                                <h4 className="slots-header">
-                                    Available TDC Schedules — {viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                                </h4>
-
-                                {(() => {
-                                    const filteredPdcSlots = tdcSlotsForMonth.filter(slot => {
-                                        if (!formData.courseType) return true;
-                                        const slotType = (slot.course_type || '').toLowerCase().trim();
-                                        const selectedType = formData.courseType.toLowerCase().trim();
-                                        return slotType === selectedType || slotType.includes(selectedType) || selectedType.includes(slotType);
-                                    });
-
-                                    return loadingSchedule ? (
-                                        <div className="slots-loading">Loading available slots...</div>
-                                    ) : filteredPdcSlots.length === 0 ? (
-                                        <div className="slots-empty">
-                                            <p className="slots-empty__title">No available slots in {viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
-                                            <p className="slots-empty__sub">Try navigating to another month using the arrows above or check back later.</p>
-                                        </div>
-                                    ) : (
-                                        <div className="slots-grid">
-                                            {filteredPdcSlots.map(slot => 
-                                                renderPromoSlotCard(slot, formData.scheduleSlotId === slot.id, () => handleScheduleSelect(slot), slot.course_type || 'F2F')
-                                            )}
-                                        </div>
-                                    );
-                                })()}
+                            );
+                        })()
+                        : /* TDC: original flat type selector (unchanged) */
+                        <div className={`type-selector-card${formData.courseType ? ' has-selection' : ''}`}>
+                            <div className="type-selector-title">
+                                Select Type
+                                {formData.course.category === 'TDC' && <span style={{ fontWeight: '400', color: 'var(--secondary-text)', fontSize: '0.82rem' }}>— e.g. F2F / Online</span>}
+                                <span style={{ color: 'red' }}>*</span>
                             </div>
-                        )
-                    }
-
-                    {
-                        formData.courseType && !isTDC && selectedScheduleDate && isSelectingDay2 && (
-                            <div className="day2-lock-badge" style={{ marginTop: '24px' }}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
-                                Showing {formData.scheduleSession} slots only — select Day 2
-                            </div>
-                        )
-                    }
-
-                    {/* Always-visible Back button + Next when schedule is fully picked */}
-                    <div className="step-actions step-actions--always mt-8">
-                        <button type="button" className="back-btn" onClick={prevStep}>
-                            <svg className="mr-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                            </svg>
-                            Back
-                        </button>
-                        {/* Show Next button when schedule is fully selected */}
-                        {(String(formData.courseType || '').toLowerCase().includes('online') && isTDC) || (formData.scheduleSlotId && (!isSelectingDay2 || formData.scheduleSlotId2)) ? (
-                            <button type="button" className="next-btn" onClick={nextStep}>
-                                Next: Enrollment
-                                <svg className="ml-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                            </button>
-                        ) : null}
-                    </div>
-                </div>
-            );
-        };
-
-        const renderStep4 = () => {
-            const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
-            const selectedTypeOpt = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType);
-            const selectedPrice = selectedTypeOpt?.price || dynamicCourse?.price || 0;
-            const isRegularPromoBundle = isPromo && !!formData.course?._isManualBundle;
-            const regularBundleCourses = isRegularPromoBundle
-                ? [
-                    ...(formData.course?._tdcCourse ? [formData.course._tdcCourse] : []),
-                    ...((formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
-                        ? formData.course._pdcCourses
-                        : (formData.course?._pdcCourse ? [formData.course._pdcCourse] : []))
-                ]
-                : [];
-            const regularBundleOriginalTotal = regularBundleCourses.reduce((sum, c) => {
-                const itemPrice = Number(c?.price || 0);
-                const itemOriginal = Number(c?.original_price ?? c?.originalPrice ?? itemPrice);
-                return sum + itemOriginal;
-            }, 0);
-            const originalPrice = isRegularPromoBundle
-                ? regularBundleOriginalTotal
-                : (selectedTypeOpt?.original_price || dynamicCourse?.original_price || 0);
-            const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
-            const promoDiscount = isRegularPromoBundle ? Number((selectedPrice * 0.03).toFixed(2)) : 0;
-            const promoPdcSummaryCourses = isPromo
-                ? ((formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
-                    ? formData.course._pdcCourses
-                    : formData.course?._pdcCourse ? [formData.course._pdcCourse] : [])
-                : [];
-            
-            let courseTypeDisplay = '';
-            if (isPromo) {
-                const tdcDisplay = promoTdcType === 'F2F' ? 'TDC F2F' : `TDC ${promoTdcType || 'F2F'}`;
-                const pdcDisplay = `${promoPdcSummaryCourses.length || 1} PDC course${(promoPdcSummaryCourses.length || 1) > 1 ? 's' : ''}`;
-                courseTypeDisplay = `${tdcDisplay} + ${pdcDisplay}`;
-            } else if (selectedTypeOpt) {
-                courseTypeDisplay = selectedTypeOpt.label;
-            }
-            
-            // Subtotal includes course + addons
-            const subtotal = selectedPrice + addonsTotal;
-            // Total amount due after regular promo bundle 3% discount
-            const totalAmount = Math.max(0, Number((subtotal - promoDiscount).toFixed(2)));
-
-            const requiredAmount = formData.paymentStatus === 'Downpayment' ? 1 : totalAmount;
-            const balanceDue = totalAmount - (Number(formData.amountPaid) || 0);
-            const change = formData.amountPaid ? Math.max(0, Number(formData.amountPaid) - totalAmount) : 0;
-
-            return (
-                <div className="step-content animate-fadeIn">
-                    <div className="section-title">
-                        <span className="step-badge">4</span>
-                        <h3>Enrollment & Payment</h3>
-                    </div>
-
-                    <div className="form-card-inner">
-                        {/* ── Booking Summary Card ── */}
-                        {/* ── Booking Summary Card(s) ── */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {formData.course && !isPromo && (
-                                <div className="payment-summary-card">
-                                    <div className="payment-summary-card__left">
-                                        <div className="payment-summary-card__icon">
-                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
-                                        </div>
-                                        <div>
-                                            <p className="payment-summary-card__course-name">{formData.course.name}</p>
-                                            <div className="payment-summary-card__meta">
-                                                <span className="payment-summary-card__pill">{formData.course.category}</span>
-                                                <span className="payment-summary-card__dot">·</span>
-                                                <span>{formData.course.duration}</span>
-                                                {courseTypeDisplay && (
-                                                    <>
-                                                        <span className="payment-summary-card__dot">·</span>
-                                                        <span style={{ fontWeight: '700', color: 'var(--primary-color)' }}>{courseTypeDisplay}</span>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="payment-summary-card__right">
-                                        {selectedTypeOpt && (
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                                                <span className="payment-summary-card__type-label" style={{ margin: 0 }}>TYPE</span>
-                                                <span className="payment-summary-card__type-value">{selectedTypeOpt.label}</span>
-                                            </div>
-                                        )}
-                                        <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                                            {originalPrice > selectedPrice && (
-                                                <span className="payment-summary-card__price" style={{ fontSize: '0.9rem', color: '#94a3b8', textDecoration: 'line-through', fontWeight: 'bold' }}>
-                                                    ₱{originalPrice.toLocaleString()}
-                                                </span>
-                                            )}
-                                            <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>
-                                                ₱{selectedPrice.toLocaleString()}
-                                            </span>
-                                        </div>
-                                    </div>
+                            <div className="type-selector-sub">Choose your preferred type before selecting a schedule.</div>
+                            {checkingTypeAvail && (
+                                <div style={{ fontSize: '0.78rem', color: 'var(--secondary-text)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
+                                    Checking slot availability…
                                 </div>
                             )}
-
-                            {formData.course && isPromo && (
-                                <div className="payment-summary-card">
-                                    <div className="payment-summary-card__left">
-                                        <div className="payment-summary-card__icon">
-                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
-                                        </div>
-                                        <div>
-                                            <p className="payment-summary-card__course-name">{formData.course.name}</p>
-                                            <div className="payment-summary-card__meta">
-                                                <span className="payment-summary-card__pill">PROMO</span>
-                                                <span className="payment-summary-card__dot">·</span>
-                                                <span>{formData.course.duration}</span>
-                                                {courseTypeDisplay && (
-                                                    <>
-                                                        <span className="payment-summary-card__dot">·</span>
-                                                        <span style={{ fontWeight: '700', color: 'var(--primary-color)' }}>{courseTypeDisplay}</span>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="payment-summary-card__right">
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                                            <span className="payment-summary-card__type-label" style={{ margin: 0 }}>PROMO</span>
-                                            <span className="payment-summary-card__type-value">BUNDLE</span>
-                                        </div>
-                                        <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                                            {originalPrice > selectedPrice && (
-                                                <span className="payment-summary-card__price" style={{ fontSize: '0.9rem', color: '#94a3b8', textDecoration: 'line-through', fontWeight: 'bold' }}>
-                                                    ₱{originalPrice.toLocaleString()}
-                                                </span>
-                                            )}
-                                            <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>
-                                                ₱{selectedPrice.toLocaleString()}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {isRegularPromoBundle && regularBundleCourses.length > 0 && (
-                                <div className="payment-form-section" style={{ marginTop: '2px' }}>
-                                    <p className="payment-form-section__title">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 7h18M7 3v4m10-4v4M5 11h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z"/></svg>
-                                        Selected Courses Breakdown (Regular Promo Bundle)
-                                    </p>
-                                    <div style={{ display: 'grid', gap: '10px' }}>
-                                        {regularBundleCourses.map((course, idx) => {
-                                            const itemPrice = Number(course?.price || 0);
-                                            const itemOriginal = Number(course?.original_price ?? course?.originalPrice ?? itemPrice);
-                                            const typeLabel = String(course?.course_type || '').toUpperCase();
-                                            return (
-                                                <div key={`${course?.id || course?.name || 'course'}-${idx}`} className="payment-summary-card" style={{ margin: 0 }}>
-                                                    <div className="payment-summary-card__left">
-                                                        <div className="payment-summary-card__icon">
-                                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
-                                                        </div>
-                                                        <div>
-                                                            <p className="payment-summary-card__course-name">{course?.name || 'Selected course'}</p>
-                                                            <div className="payment-summary-card__meta">
-                                                                <span className="payment-summary-card__pill">{course?.category || 'COURSE'}</span>
-                                                                {course?.duration && (
-                                                                    <>
-                                                                        <span className="payment-summary-card__dot">·</span>
-                                                                        <span>{course.duration}</span>
-                                                                    </>
-                                                                )}
-                                                                {typeLabel && (
-                                                                    <>
-                                                                        <span className="payment-summary-card__dot">·</span>
-                                                                        <span style={{ fontWeight: '700', color: 'var(--primary-color)' }}>{typeLabel}</span>
-                                                                    </>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="payment-summary-card__right">
-                                                        <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                                                            {itemOriginal > itemPrice && (
-                                                                <span className="payment-summary-card__price" style={{ fontSize: '0.9rem', color: '#94a3b8', textDecoration: 'line-through', fontWeight: 'bold' }}>
-                                                                    ₱{itemOriginal.toLocaleString()}
-                                                                </span>
-                                                            )}
-                                                            <span className="payment-summary-card__price" style={{ fontSize: '1.2rem' }}>
-                                                                ₱{itemPrice.toLocaleString()}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-
-
-                        {/* ── Add-ons Selection ── */}
-                        <div className="payment-form-section addons-section">
-                            <p className="payment-form-section__title">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-                                Optional Add-ons
-                            </p>
-                            <div className="addon-selection-grid">
-                                {DEFAULT_ADDONS.map(addon => {
-                                    const isSelected = formData.addons.some(a => a.id === addon.id);
+                            <div className="type-btn-group">
+                                {formData.course.typeOptions.map(opt => {
+                                    const isOnlineTdcType = formData.course?.category === 'TDC' && String(opt.value || '').toLowerCase().includes('online');
+                                    const typeChecked = !checkingTypeAvail && (opt.value in typeAvailability);
+                                    const typeDisabled = !isOnlineTdcType && typeChecked && typeAvailability[opt.value] === false;
+                                    const isLoading = checkingTypeAvail;
                                     return (
-                                        <div 
-                                            key={addon.id} 
-                                            className={`addon-card${isSelected ? ' selected' : ''}`}
-                                            onClick={() => toggleAddon(addon)}
+                                        <button
+                                            key={opt.value}
+                                            type="button"
+                                            className={`type-btn${formData.courseType === opt.value ? ' active' : ''}${typeDisabled ? ' type-btn--disabled' : ''}${isLoading ? ' type-btn--checking' : ''}`}
+                                            disabled={typeDisabled || isLoading}
+                                            title={typeDisabled ? 'No available slots for this type' : isLoading ? 'Checking availability…' : undefined}
+                                            onClick={() => {
+                                                if (typeDisabled || isLoading) return;
+                                                setFormData(prev => ({
+                                                    ...prev,
+                                                    courseType: opt.value,
+                                                    scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
+                                                    scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: ''
+                                                }));
+                                                setSelectedScheduleDate('');
+                                            }}
                                         >
-                                            <div className="addon-icon">{addon.icon}</div>
-                                            <div className="addon-info">
-                                                <div className="addon-name">{addon.name}</div>
-                                                <div className="addon-price">₱{addon.price.toLocaleString()}</div>
-                                            </div>
-                                            <div className="addon-check">
-                                                {isSelected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
-                                            </div>
-                                        </div>
+                                            <span className="type-btn__label">{opt.label}</span>
+                                            {typeDisabled && <span className="type-btn__no-slots">No Slots</span>}
+                                        </button>
                                     );
                                 })}
                             </div>
-                        </div>
-
-                        {/* ── Payment Breakdown ── */}
-                        <div className="payment-breakdown">
-                            <span className="breakdown-title">Final Billing Breakdown</span>
-                            <div className="breakdown-row">
-                                <span>Course Fee ({formData.courseType || 'Standard'})</span>
-                                <span>₱{selectedPrice.toLocaleString()}</span>
-                            </div>
-                            {formData.addons.map(a => (
-                                <div key={a.id} className="breakdown-row">
-                                    <span>{a.name}</span>
-                                    <span>₱{a.price.toLocaleString()}</span>
-                                </div>
-                            ))}
-                            <div className="breakdown-row" style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px dashed #e2e8f0' }}>
-                                <span style={{ color: '#64748b' }}>Subtotal</span>
-                                <span style={{ color: '#64748b' }}>₱{subtotal.toLocaleString()}</span>
-                            </div>
-                            {promoDiscount > 0 && (
-                                <div className="breakdown-row" style={{ color: '#dc2626' }}>
-                                    <span>Promo Discount (3%)</span>
-                                    <span>-₱{promoDiscount.toLocaleString()}</span>
+                            {!formData.courseType && (
+                                <div className="type-error-msg">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                                    Please select a type to view available schedules.
                                 </div>
                             )}
-                            
-                            <div className="breakdown-row total">
-                                <span>Total Amount Due</span>
-                                <span>₱{totalAmount.toLocaleString()}</span>
-                            </div>
+                        </div>
+                )}
 
-                            {formData.paymentStatus === 'Downpayment' && (
-                                <div className="breakdown-row dpt-badge" style={{ marginTop: '10px', background: '#fffbeb', padding: '10px', borderRadius: '8px', border: '1px solid #fde68a' }}>
-                                    <div>
-                                        <div style={{ fontWeight: '700', color: '#92400e', fontSize: '0.85rem' }}>DOWNPAYMENT (DPT) MODE</div>
-                                        <div style={{ fontSize: '0.75rem', color: '#b45309' }}>Any amount can be accepted and recorded today</div>
+                {isOnlineTdcNoSchedule && (
+                    <div className="schedule-banner schedule-banner--info">
+                        <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M8 12h8" /></svg>
+                        <div className="schedule-banner__body">
+                            <div className="schedule-banner__title">Online TDC Selected</div>
+                            <div className="schedule-banner__desc">No branch slot selection is required for Online TDC. You can proceed directly to Enrollment.</div>
+                        </div>
+                    </div>
+                )}
+
+                {/* PDC Day 2 Selection Prompts */}
+                {!isTDC && formData.scheduleSlotId && !formData.scheduleSlotId2 && formData.scheduleSession && (formData.scheduleSession.toLowerCase().includes('morning') || formData.scheduleSession.toLowerCase().includes('afternoon') || formData.scheduleSession.toLowerCase().includes('4 hours')) && (
+                    <div className="schedule-banner schedule-banner--info">
+                        <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                        <div className="schedule-banner__body">
+                            <div className="schedule-banner__title">Day 2 Selection Required</div>
+                            <div className="schedule-banner__desc">
+                                Day 1: <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> — {formData.scheduleSession} ({formData.scheduleTime}). Now pick a date for <strong>Day 2</strong>.
+                            </div>
+                        </div>
+                        <div className="schedule-banner__actions">
+                            <button className="change-btn change-btn--primary" onClick={() => { setFormData(prev => ({ ...prev, scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '', scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '' })); setPromoPdcDate(null); setPromoPdcRawSlots([]); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]); }}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
+                                Change Day 1
+                            </button>
+                        </div>
+                    </div>
+                )}
+                {
+                    !isTDC && formData.scheduleSlotId && formData.scheduleSlotId2 && (
+                        <div className="schedule-banner schedule-banner--success">
+                            <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
+                            <div className="schedule-banner__body">
+                                <div className="schedule-banner__title">Schedule Complete</div>
+                                <div className="schedule-banner__desc">
+                                    Day 1: <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong> · Day 2: <strong>{new Date(formData.scheduleDate2 + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong> — {formData.scheduleSession}
+                                </div>
+                            </div>
+                            <div className="schedule-banner__actions">
+                                <button className="change-btn change-btn--green" onClick={() => { setFormData(prev => ({ ...prev, scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '' })); setPromoPdcDate(null); setPromoPdcRawSlots([]); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]); }}>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
+                                    Change Day 2
+                                </button>
+                                <button className="change-btn change-btn--grey" onClick={() => { setFormData(prev => ({ ...prev, scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '', scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '' })); setPromoPdcDate(null); setPromoPdcRawSlots([]); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]); }}>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
+                                    Change Day 1
+                                </button>
+                            </div>
+                        </div>
+                    )
+                }
+
+                {/* TDC Selected Schedule Banner */}
+                {
+                    isTDC && formData.scheduleSlotId && (
+                        <div className="schedule-banner schedule-banner--success">
+                            <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
+                            <div className="schedule-banner__body">
+                                <div className="schedule-banner__title">TDC Schedule Selected</div>
+                                <div className="schedule-banner__desc">
+                                    <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> — {formData.scheduleSession} ({formData.scheduleTime})
+                                </div>
+                            </div>
+                            <div className="schedule-banner__actions">
+                                <button className="change-btn change-btn--green" onClick={() => setFormData(prev => ({ ...prev, scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '' }))}>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
+                                    Change
+                                </button>
+                            </div>
+                        </div>
+                    )
+                }
+
+                {/* PDC Whole Day selected banner (single-slot, no Day 2 needed) */}
+                {
+                    !isTDC && formData.scheduleSlotId && !formData.scheduleSlotId2 && !isSelectingDay2 && (
+                        <div className="schedule-banner schedule-banner--success">
+                            <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
+                            <div className="schedule-banner__body">
+                                <div className="schedule-banner__title">Schedule Selected</div>
+                                <div className="schedule-banner__desc">
+                                    <strong>{new Date(formData.scheduleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong> — {formData.scheduleSession} ({formData.scheduleTime})
+                                </div>
+                            </div>
+                            <div className="schedule-banner__actions">
+                                <button className="change-btn change-btn--green" onClick={() => { setFormData(prev => ({ ...prev, scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '', scheduleDate2: '', scheduleSlotId2: null, scheduleSession2: '', scheduleTime2: '' })); setSelectedScheduleDate(''); }}>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
+                                    Change
+                                </button>
+                            </div>
+                        </div>
+                    )
+                }
+
+                {
+                    !isTDC && formData.courseType && (
+                        <div className="policy-banner">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2" style={{ flexShrink: 0 }}>
+                                <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                            <div className="policy-banner__text">
+                                <div className="policy-banner__title">Schedule Policy</div>
+                                <div className="policy-banner__desc">Schedules must be booked at least <strong>2 days in advance</strong>. Sundays are not available.</div>
+                            </div>
+                        </div>
+                    )}
+
+                {
+                    !isTDC && formData.courseType && (
+                        <div className="schedule-calendar-wrap">
+                            <div className="month-nav-bar">
+                                <button className="month-nav-btn-icon" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))}>
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
+                                </button>
+                                <h3 className="month-label">{viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h3>
+                                <button className="month-nav-btn-icon" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))}>
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
+                                </button>
+                            </div>
+                            <div className="cal-legend-row">
+                                <div className="cal-legend-item morning-legend">
+                                    <span className="cal-legend-dot morning-dot"></span>
+                                    Morning
+                                </div>
+                                <div className="cal-legend-item afternoon-legend">
+                                    <span className="cal-legend-dot afternoon-dot"></span>
+                                    Afternoon
+                                </div>
+                                <div className="cal-legend-item whole-legend">
+                                    <span className="cal-legend-dot whole-dot"></span>
+                                    Whole Day
+                                </div>
+                            </div>
+                            <div className="calendar-grid-7">
+                                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                                    <div key={day} className="cal-day-header">{day}</div>
+                                ))}
+                                {(() => {
+                                    const year = viewDate.getFullYear();
+                                    const month = viewDate.getMonth();
+                                    const firstDay = new Date(year, month, 1).getDay();
+                                    const daysInMonth = new Date(year, month + 1, 0).getDate();
+                                    const days = [];
+                                    for (let i = 0; i < firstDay; i++) {
+                                        days.push(<div key={`pad-${i}`} className="cal-day cal-day--pad" />);
+                                    }
+                                    const minDateStr = (() => { const d = new Date(today); d.setDate(d.getDate() + 2); return d.toISOString().split('T')[0]; })();
+                                    for (let d = 1; d <= daysInMonth; d++) {
+                                        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                                        const isSelected = selectedScheduleDate === dateStr;
+                                        const isToday = today === dateStr;
+                                        const isSunday = new Date(year, month, d).getDay() === 0;
+                                        const isDisabled = dateStr < minDateStr || isSunday;
+                                        const daySlots = isDisabled ? [] : pdcCalendarSlots.filter(s => dateStr >= s.date && dateStr <= (s.end_date || s.date));
+                                        const slotStatus = isDisabled ? '' : daySlots.length === 0 ? ' no-slots' : daySlots.every(s => s.available_slots === 0) ? ' full-slots' : ' has-slots';
+                                        let cls = 'cal-day' + slotStatus;
+                                        if (isDisabled) cls += ' cal-day--disabled';
+                                        else if (isSelected) cls += ' cal-day--selected';
+                                        if (isToday) cls += ' cal-day--today';
+                                        days.push(
+                                            <div key={d} className={cls} onClick={() => !isDisabled && setSelectedScheduleDate(dateStr)}>
+                                                <div className="cal-day-header-mini flex items-center justify-between px-2 pt-2 pb-1">
+                                                    <span className={`cal-day-num text-[13px] font-bold ${isToday ? 'text-[#2157da]' : ''}`}>{d}</span>
+                                                    {isToday && <div className="w-1.5 h-1.5 rounded-full bg-[#2157da] opacity-60 flex-shrink-0" />}
+                                                </div>
+                                                <div className="day-slots-container">
+                                                    {(() => {
+                                                        const morningSlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('morning'));
+                                                        const afternoonSlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('afternoon'));
+                                                        const wholeDaySlots = daySlots.filter(s => (s.session || '').toLowerCase().includes('whole'));
+
+                                                        const renderSubBox = (label, slots, type) => {
+                                                            // Hide completely if no slots exist for this session
+                                                            if (!slots || slots.length === 0) return null;
+
+                                                            const hasSlots = slots.length > 0;
+                                                            const isSelected = hasSlots && slots.some(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id);
+                                                            const currentSlotId = hasSlots ? slots.find(s => formData.scheduleSlotId === s.id || formData.scheduleSlotId2 === s.id)?.id || "" : "";
+                                                            const allFull = hasSlots && slots.every(s => s.available_slots === 0);
+                                                            const hasMultiple = slots.length > 1;
+
+                                                            const sessionLabel = (() => {
+                                                                const sn = label.toLowerCase();
+                                                                if (sn.includes('morning')) return 'Morning Class';
+                                                                if (sn.includes('afternoon')) return 'Afternoon Class';
+                                                                if (sn.includes('whole')) return 'Whole Day';
+                                                                return label;
+                                                            })();
+
+                                                            const timeStr = slots[0].time_range.toLowerCase().replace(/ - /g, ' / ').replace(/ am/g, 'am').replace(/ pm/g, 'pm');
+
+                                                            return (
+                                                                <div
+                                                                    key={type}
+                                                                    className={`session-sub-box ${type}${isSelected ? ' selected' : ''}${allFull ? ' full' : ''}`}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setSelectedScheduleDate(dateStr);
+                                                                        if (allFull) return;
+                                                                        if (!hasMultiple) handleScheduleSelect(slots[0]);
+                                                                    }}
+                                                                >
+                                                                    <div className="session-sub-content">
+                                                                        <div className="flex items-center justify-between gap-1 leading-none mb-1">
+                                                                            <span className="session-sub-label-text text-[9px] font-black truncate">{sessionLabel}</span>
+                                                                            <span className="session-sub-count-tag text-[8px] font-bold px-1 rounded bg-white/20">
+                                                                                {allFull ? 'FULL' : `${slots[0].available_slots} Slots`}
+                                                                            </span>
+                                                                        </div>
+
+                                                                        {hasSlots && (
+                                                                            hasMultiple ? (
+                                                                                <select
+                                                                                    className="session-mini-select"
+                                                                                    value={currentSlotId}
+                                                                                    onClick={(e) => e.stopPropagation()}
+                                                                                    onChange={(e) => {
+                                                                                        const id = parseInt(e.target.value);
+                                                                                        const s = slots.find(x => x.id === id);
+                                                                                        if (s) {
+                                                                                            setSelectedScheduleDate(dateStr);
+                                                                                            handleScheduleSelect(s);
+                                                                                        }
+                                                                                    }}
+                                                                                >
+                                                                                    <option value="" disabled>Pick Time</option>
+                                                                                    {slots.map(s => (
+                                                                                        <option key={s.id} value={s.id} disabled={s.available_slots === 0}>
+                                                                                            {s.time_range} ({s.available_slots} Slots)
+                                                                                        </option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            ) : (
+                                                                                <div className="session-sub-time-mini text-[7px] font-medium opacity-80">{timeStr}</div>
+                                                                            )
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        };
+                                                        return (
+                                                            <>
+                                                                {renderSubBox('Morning', morningSlots, 'morning')}
+                                                                {renderSubBox('Afternoon', afternoonSlots, 'afternoon')}
+                                                                {renderSubBox('Whole Day', wholeDaySlots, 'whole')}
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+                                    return days;
+                                })()}
+                            </div>
+                        </div>
+                    )
+                }
+
+
+                {
+                    formData.courseType && isTDC && !String(formData.courseType || '').toLowerCase().includes('online') && (
+                        <div className="slots-section">
+                            <div style={{ marginBottom: '24px' }}>
+                                <div className="month-nav-bar">
+                                    <button className="month-nav-btn-icon" onClick={goToPrevMonth} disabled={!hasPrevSlotMonth}>
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
+                                    </button>
+                                    <div style={{ textAlign: 'center' }}>
+                                        <h3 className="month-label">{viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h3>
+                                        {tdcMonthKeys.length > 1 && <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', marginTop: '2px' }}>{tdcMonthKeys.length} months with available schedules</div>}
                                     </div>
-                                    <div style={{ fontWeight: '800', color: '#92400e', fontSize: '1.1rem' }}>Flexible</div>
+                                    <button className="month-nav-btn-icon" onClick={goToNextMonth} disabled={!hasNextSlotMonth}>
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
+                                    </button>
                                 </div>
-                            )}
-                        </div>
-
-                        {/* ── Payment Form ── */}
-                        <div className="payment-form-section">
-                            <p className="payment-form-section__title">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
-                                Branch & Payment Method
-                            </p>
-                            <div className="form-grid">
-                                <div className="form-group">
-                                    <label>Branch</label>
-                                    <select
-                                        name="branchId"
-                                        value={formData.branchId}
-                                        onChange={(e) => {
-                                            const branch = branches.find(b => b.id === parseInt(e.target.value));
-                                            setFormData(prev => ({ 
-                                                ...prev, 
-                                                branchId: e.target.value, 
-                                                branchName: branch ? branch.name : '',
-                                                zipCode: (branch && !prev.zipCode) ? getZipForBranch(branch.name) : prev.zipCode
-                                            }));
-                                        }}
-                                        disabled={adminProfile?.rawRole === 'admin' && !!adminProfile?.branchId}
-                                    >
-                                        {branches.map(b => <option key={b.id} value={b.id}>{formatBranchName(b.name)}</option>)}
-                                    </select>
-                                </div>
-                                <div className="form-group">
-                                    <label>Payment Method</label>
-                                    <select name="paymentMethod" value={formData.paymentMethod} onChange={handleChange}>
-                                        <option value="Cash">Cash</option>
-                                        <option value="StarPay">StarPay</option>
-                                    </select>
-                                </div>
+                                {tdcMonthKeys.length > 1 && (
+                                    <div className="tdc-month-dots">
+                                        {tdcMonthKeys.map(key => (
+                                            <div
+                                                key={key}
+                                                className={`tdc-month-dot${key === currentMonthKey ? ' tdc-month-dot--active' : ''}`}
+                                                style={{ width: key === currentMonthKey ? '24px' : '8px' }}
+                                                onClick={() => { const [y, m] = key.split('-').map(Number); setViewDate(new Date(y, m - 1, 1)); }}
+                                                title={new Date(key + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
                             </div>
-                        </div>
 
-                        <div className="payment-form-section">
-                            <p className="payment-form-section__title">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
-                                Amount & Status
-                            </p>
-                            <div className="form-grid">
-                                <div className="form-group">
-                                    <label>
-                                        Amount Paid (₱)
-                                        {formData.paymentStatus === 'Downpayment' && (
-                                            <span className="field-hint">Enter any amount for downpayment</span>
+                            <h4 className="slots-header">
+                                Available TDC Schedules — {viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                            </h4>
+
+                            {(() => {
+                                const filteredPdcSlots = tdcSlotsForMonth.filter(slot => {
+                                    if (!formData.courseType) return true;
+                                    const slotType = (slot.course_type || '').toLowerCase().trim();
+                                    const selectedType = formData.courseType.toLowerCase().trim();
+                                    return slotType === selectedType || slotType.includes(selectedType) || selectedType.includes(slotType);
+                                });
+
+                                return loadingSchedule ? (
+                                    <div className="slots-loading">Loading available slots...</div>
+                                ) : filteredPdcSlots.length === 0 ? (
+                                    <div className="slots-empty">
+                                        <p className="slots-empty__title">No available slots in {viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+                                        <p className="slots-empty__sub">Try navigating to another month using the arrows above or check back later.</p>
+                                    </div>
+                                ) : (
+                                    <div className="slots-grid">
+                                        {filteredPdcSlots.map(slot =>
+                                            renderPromoSlotCard(slot, formData.scheduleSlotId === slot.id, () => handleScheduleSelect(slot), slot.course_type || 'F2F')
                                         )}
-                                    </label>
-                                    <input type="number" name="amountPaid" value={formData.amountPaid} onChange={handleChange} placeholder={formData.paymentStatus === 'Downpayment' ? 'Enter any amount' : `₱${requiredAmount.toLocaleString()}`} required />
-                                    {formData.paymentStatus !== 'Downpayment' && formData.amountPaid && Number(formData.amountPaid) >= requiredAmount && (
-                                        <div className="amount-required-row">
-                                            <span className="amount-required-row__label">Required</span>
-                                            <span className="amount-required-row__value">₱{requiredAmount.toLocaleString()}</span>
-                                            {change > 0 && (
-                                                <span className="amount-change-badge">Change: ₱{change.toLocaleString()}</span>
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    )
+                }
+
+                {
+                    formData.courseType && !isTDC && selectedScheduleDate && isSelectingDay2 && (
+                        <div className="day2-lock-badge" style={{ marginTop: '24px' }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+                            Showing {formData.scheduleSession} slots only — select Day 2
+                        </div>
+                    )
+                }
+
+                {/* Always-visible Back button + Next when schedule is fully picked */}
+                <div className="step-actions step-actions--always mt-8">
+                    <button type="button" className="back-btn" onClick={prevStep}>
+                        <svg className="mr-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                        Back
+                    </button>
+                    {/* Show Next button when schedule is fully selected */}
+                    {(String(formData.courseType || '').toLowerCase().includes('online') && isTDC) || (formData.scheduleSlotId && (!isSelectingDay2 || formData.scheduleSlotId2)) ? (
+                        <button type="button" className="next-btn" onClick={nextStep}>
+                            Next: Enrollment
+                            <svg className="ml-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                        </button>
+                    ) : null}
+                </div>
+            </div>
+        );
+    };
+
+    const renderStep4 = () => {
+        const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
+        const selectedTypeOpt = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType);
+        const selectedPrice = selectedTypeOpt?.price || dynamicCourse?.price || 0;
+        const isRegularPromoBundle = isPromo && !!formData.course?._isManualBundle;
+        const regularBundleCourses = isRegularPromoBundle
+            ? [
+                ...(formData.course?._tdcCourse ? [formData.course._tdcCourse] : []),
+                ...((formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
+                    ? formData.course._pdcCourses
+                    : (formData.course?._pdcCourse ? [formData.course._pdcCourse] : []))
+            ]
+            : [];
+        const regularBundleOriginalTotal = regularBundleCourses.reduce((sum, c) => {
+            const itemPrice = Number(c?.price || 0);
+            const itemOriginal = Number(c?.original_price ?? c?.originalPrice ?? itemPrice);
+            return sum + itemOriginal;
+        }, 0);
+        const originalPrice = isRegularPromoBundle
+            ? regularBundleOriginalTotal
+            : (selectedTypeOpt?.original_price || dynamicCourse?.original_price || 0);
+        const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
+        const subtotal = selectedPrice + addonsTotal;
+        
+        // Calculate dynamic discount
+        const discountPct = selectedTypeOpt?.discount || dynamicCourse?.discount || 0;
+        const promoDiscount = discountPct > 0 ? Number((subtotal * (discountPct / 100)).toFixed(2)) : 0;
+        const totalAmount = Math.max(0, Number((subtotal - promoDiscount).toFixed(2)));
+
+        const promoPdcSummaryCourses = isPromo
+            ? ((formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
+                ? formData.course._pdcCourses
+                : formData.course?._pdcCourse ? [formData.course._pdcCourse] : [])
+            : [];
+
+        let courseTypeDisplay = '';
+        if (isPromo) {
+            const tdcDisplay = promoTdcType === 'F2F' ? 'TDC F2F' : `TDC ${promoTdcType || 'F2F'}`;
+            const pdcDisplay = `${promoPdcSummaryCourses.length || 1} PDC course${(promoPdcSummaryCourses.length || 1) > 1 ? 's' : ''}`;
+            courseTypeDisplay = `${tdcDisplay} + ${pdcDisplay}`;
+        } else if (selectedTypeOpt) {
+            courseTypeDisplay = selectedTypeOpt.label;
+        }
+
+        const requiredAmount = formData.paymentStatus === 'Downpayment' ? 1 : totalAmount;
+        const balanceDue = totalAmount - (Number(formData.amountPaid) || 0);
+        const change = formData.amountPaid ? Math.max(0, Number(formData.amountPaid) - totalAmount) : 0;
+
+        return (
+            <div className="step-content animate-fadeIn">
+                <div className="section-title">
+                    <span className="step-badge">4</span>
+                    <h3>Enrollment & Payment</h3>
+                </div>
+
+                <div className="form-card-inner">
+                    {/* ── Booking Summary Card ── */}
+                    {/* ── Booking Summary Card(s) ── */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        {formData.course && !isPromo && (
+                            <div className="payment-summary-card">
+                                <div className="payment-summary-card__left">
+                                    <div className="payment-summary-card__icon">
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
+                                    </div>
+                                    <div>
+                                        <p className="payment-summary-card__course-name">{formData.course.name}</p>
+                                        <div className="payment-summary-card__meta">
+                                            <span className="payment-summary-card__pill">{formData.course.category}</span>
+                                            <span className="payment-summary-card__dot">·</span>
+                                            <span>{formData.course.duration}</span>
+                                            {courseTypeDisplay && (
+                                                <>
+                                                    <span className="payment-summary-card__dot">·</span>
+                                                    <span style={{ fontWeight: '700', color: 'var(--primary-color)' }}>{courseTypeDisplay}</span>
+                                                </>
                                             )}
                                         </div>
-                                    )}
-                                    {formData.paymentStatus !== 'Downpayment' && formData.amountPaid && Number(formData.amountPaid) > 0 && Number(formData.amountPaid) < requiredAmount && (
-                                        <div className="amount-required-row amount-required-row--short">
-                                            <span className="amount-required-row__label">Still needed</span>
-                                            <span className="amount-required-row__value">₱{(requiredAmount - Number(formData.amountPaid)).toLocaleString()}</span>
+                                    </div>
+                                </div>
+                                <div className="payment-summary-card__right">
+                                    {selectedTypeOpt && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                            <span className="payment-summary-card__type-label" style={{ margin: 0 }}>TYPE</span>
+                                            <span className="payment-summary-card__type-value">{selectedTypeOpt.label}</span>
                                         </div>
                                     )}
+                                    <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                        {originalPrice > selectedPrice && (
+                                            <span className="payment-summary-card__price" style={{ fontSize: '0.9rem', color: '#94a3b8', textDecoration: 'line-through', fontWeight: 'bold' }}>
+                                                ₱{originalPrice.toLocaleString()}
+                                            </span>
+                                        )}
+                                        <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>
+                                            ₱{selectedPrice.toLocaleString()}
+                                        </span>
+                                    </div>
                                 </div>
-                                <div className="form-group">
-                                    <label>Payment Status</label>
-                                    <select name="paymentStatus" value={formData.paymentStatus} onChange={handleChange}>
-                                        <option value="Full Payment">Full Payment</option>
-                                        <option value="Downpayment">Downpayment</option>
-                                    </select>
+                            </div>
+                        )}
+
+                        {formData.course && isPromo && (
+                            <div className="payment-summary-card">
+                                <div className="payment-summary-card__left">
+                                    <div className="payment-summary-card__icon">
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
+                                    </div>
+                                    <div>
+                                        <p className="payment-summary-card__course-name">{formData.course.name}</p>
+                                        <div className="payment-summary-card__meta">
+                                            <span className="payment-summary-card__pill">PROMO</span>
+                                            <span className="payment-summary-card__dot">·</span>
+                                            <span>{formData.course.duration}</span>
+                                            {courseTypeDisplay && (
+                                                <>
+                                                    <span className="payment-summary-card__dot">·</span>
+                                                    <span style={{ fontWeight: '700', color: 'var(--primary-color)' }}>{courseTypeDisplay}</span>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
+                                <div className="payment-summary-card__right">
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                        <span className="payment-summary-card__type-label" style={{ margin: 0 }}>PROMO</span>
+                                        <span className="payment-summary-card__type-value">BUNDLE</span>
+                                    </div>
+                                    <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                        {originalPrice > selectedPrice && (
+                                            <span className="payment-summary-card__price" style={{ fontSize: '0.9rem', color: '#94a3b8', textDecoration: 'line-through', fontWeight: 'bold' }}>
+                                                ₱{originalPrice.toLocaleString()}
+                                            </span>
+                                        )}
+                                        <span className="payment-summary-card__price" style={{ fontSize: '1.4rem' }}>
+                                            ₱{selectedPrice.toLocaleString()}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {isRegularPromoBundle && regularBundleCourses.length > 0 && (
+                            <div className="payment-form-section" style={{ marginTop: '2px' }}>
+                                <p className="payment-form-section__title">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 7h18M7 3v4m10-4v4M5 11h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z" /></svg>
+                                    Selected Courses Breakdown (Regular Promo Bundle)
+                                </p>
+                                <div style={{ display: 'grid', gap: '10px' }}>
+                                    {regularBundleCourses.map((course, idx) => {
+                                        const itemPrice = Number(course?.price || 0);
+                                        const itemOriginal = Number(course?.original_price ?? course?.originalPrice ?? itemPrice);
+                                        const typeLabel = String(course?.course_type || '').toUpperCase();
+                                        return (
+                                            <div key={`${course?.id || course?.name || 'course'}-${idx}`} className="payment-summary-card" style={{ margin: 0 }}>
+                                                <div className="payment-summary-card__left">
+                                                    <div className="payment-summary-card__icon">
+                                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4" /><rect x="2" y="10" width="20" height="12" rx="2" /><circle cx="12" cy="16" r="2" /></svg>
+                                                    </div>
+                                                    <div>
+                                                        <p className="payment-summary-card__course-name">{course?.name || 'Selected course'}</p>
+                                                        <div className="payment-summary-card__meta">
+                                                            <span className="payment-summary-card__pill">{course?.category || 'COURSE'}</span>
+                                                            {course?.duration && (
+                                                                <>
+                                                                    <span className="payment-summary-card__dot">·</span>
+                                                                    <span>{course.duration}</span>
+                                                                </>
+                                                            )}
+                                                            {typeLabel && (
+                                                                <>
+                                                                    <span className="payment-summary-card__dot">·</span>
+                                                                    <span style={{ fontWeight: '700', color: 'var(--primary-color)' }}>{typeLabel}</span>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="payment-summary-card__right">
+                                                    <div className="payment-summary-card__price-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                                        {itemOriginal > itemPrice && (
+                                                            <span className="payment-summary-card__price" style={{ fontSize: '0.9rem', color: '#94a3b8', textDecoration: 'line-through', fontWeight: 'bold' }}>
+                                                                ₱{itemOriginal.toLocaleString()}
+                                                            </span>
+                                                        )}
+                                                        <span className="payment-summary-card__price" style={{ fontSize: '1.2rem' }}>
+                                                            ₱{itemPrice.toLocaleString()}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+
+
+                    {/* ── Add-ons Selection ── */}
+                    <div className="payment-form-section addons-section">
+                        <p className="payment-form-section__title">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg>
+                            Optional Add-ons
+                        </p>
+                        <div className="addon-selection-grid">
+                            {DEFAULT_ADDONS.map(addon => {
+                                const isSelected = formData.addons.some(a => a.id === addon.id);
+                                return (
+                                    <div
+                                        key={addon.id}
+                                        className={`addon-card${isSelected ? ' selected' : ''}`}
+                                        onClick={() => toggleAddon(addon)}
+                                    >
+                                        <div className="addon-icon">{addon.icon}</div>
+                                        <div className="addon-info">
+                                            <div className="addon-name">{addon.name}</div>
+                                            <div className="addon-price">₱{addon.price.toLocaleString()}</div>
+                                        </div>
+                                        <div className="addon-check">
+                                            {isSelected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* ── Payment Breakdown ── */}
+                    <div className="payment-breakdown">
+                        <span className="breakdown-title">Final Billing Breakdown</span>
+                        <div className="breakdown-row">
+                            <span>Course Fee ({formData.courseType || 'Standard'})</span>
+                            <span>₱{selectedPrice.toLocaleString()}</span>
+                        </div>
+                        {formData.addons.map(a => (
+                            <div key={a.id} className="breakdown-row">
+                                <span>{a.name}</span>
+                                <span>₱{a.price.toLocaleString()}</span>
+                            </div>
+                        ))}
+                        <div className="breakdown-row" style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px dashed #e2e8f0' }}>
+                            <span style={{ color: '#64748b' }}>Subtotal</span>
+                            <span style={{ color: '#64748b' }}>₱{subtotal.toLocaleString()}</span>
+                        </div>
+                        {discountPct > 0 && (
+                            <div className="breakdown-row" style={{ color: '#ef4444', fontWeight: 'bold' }}>
+                                <span>Discount ({discountPct}%)</span>
+                                <span>-₱{promoDiscount.toLocaleString()}</span>
+                            </div>
+                        )}
+                        <div className="breakdown-row total">
+                            <span>Total Amount Due</span>
+                            <span>₱{totalAmount.toLocaleString()}</span>
+                        </div>
+
+                        {formData.paymentStatus === 'Downpayment' && (
+                            <div className="breakdown-row dpt-badge" style={{ marginTop: '10px', background: '#fffbeb', padding: '10px', borderRadius: '8px', border: '1px solid #fde68a' }}>
+                                <div>
+                                    <div style={{ fontWeight: '700', color: '#92400e', fontSize: '0.85rem' }}>DOWNPAYMENT (DPT) MODE</div>
+                                    <div style={{ fontSize: '0.75rem', color: '#b45309' }}>Any amount can be accepted and recorded today</div>
+                                </div>
+                                <div style={{ fontWeight: '800', color: '#92400e', fontSize: '1.1rem' }}>Flexible</div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* ── Payment Form ── */}
+                    <div className="payment-form-section">
+                        <p className="payment-form-section__title">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
+                            Branch & Payment Method
+                        </p>
+                        <div className="form-grid">
+                            <div className="form-group">
+                                <label>Branch</label>
+                                <select
+                                    name="branchId"
+                                    value={formData.branchId}
+                                    onChange={(e) => {
+                                        const branch = branches.find(b => b.id === parseInt(e.target.value));
+                                        setFormData(prev => ({
+                                            ...prev,
+                                            branchId: e.target.value,
+                                            branchName: branch ? branch.name : '',
+                                            zipCode: (branch && !prev.zipCode) ? getZipForBranch(branch.name) : prev.zipCode
+                                        }));
+                                    }}
+                                    disabled={adminProfile?.rawRole === 'admin' && !!adminProfile?.branchId}
+                                >
+                                    {branches.map(b => <option key={b.id} value={b.id}>{formatBranchName(b.name)}</option>)}
+                                </select>
+                            </div>
+                            <div className="form-group">
+                                <label>Payment Method</label>
+                                <select name="paymentMethod" value={formData.paymentMethod} onChange={handleChange}>
+                                    <option value="Cash">Cash</option>
+                                    <option value="StarPay">StarPay</option>
+                                </select>
                             </div>
                         </div>
                     </div>
 
-                    {(() => {
-                        const paid = Number(formData.amountPaid);
-                        const hasAmount = formData.amountPaid !== '' && !isNaN(paid) && paid > 0;
-                        const isEnough = hasAmount && paid >= requiredAmount;
-                        const canProceed = isEnough;
-
-                        let hint = null;
-                        if (!hasAmount) hint = 'Enter the amount paid to continue.';
-                        else if (!isEnough) {
-                            hint = formData.paymentStatus === 'Downpayment'
-                                ? 'Enter any amount greater than ₱0 to continue.'
-                                : `Amount is short by ₱${(requiredAmount - paid).toLocaleString()}.`;
-                        }
-
-                        return (
-                            <>
-                                <div className="step-actions">
-                                    <button type="button" onClick={prevStep} className="back-btn">
-                                        <svg className="mr-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                                        </svg>
-                                        Back
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => canProceed && nextStep()}
-                                        className="next-btn"
-                                        disabled={!canProceed}
-                                        style={{ opacity: canProceed ? 1 : 0.45, cursor: canProceed ? 'pointer' : 'not-allowed' }}
-                                    >
-                                        Review Enrollment
-                                        <svg className="ml-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                        </svg>
-                                    </button>
-                                </div>
-                                {hint && <p className="step4-hint">{hint}</p>}
-                            </>
-                        );
-                    })()}
+                    <div className="payment-form-section">
+                        <p className="payment-form-section__title">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+                            Amount & Status
+                        </p>
+                        <div className="form-grid">
+                            <div className="form-group">
+                                <label>
+                                    Amount Paid (₱)
+                                    {formData.paymentStatus === 'Downpayment' && (
+                                        <span className="field-hint">Enter any amount for downpayment</span>
+                                    )}
+                                </label>
+                                <input type="number" name="amountPaid" value={formData.amountPaid} onChange={handleChange} placeholder={formData.paymentStatus === 'Downpayment' ? 'Enter any amount' : `₱${requiredAmount.toLocaleString()}`} required />
+                                {formData.paymentStatus !== 'Downpayment' && formData.amountPaid && Number(formData.amountPaid) >= requiredAmount && (
+                                    <div className="amount-required-row">
+                                        <span className="amount-required-row__label">Required</span>
+                                        <span className="amount-required-row__value">₱{requiredAmount.toLocaleString()}</span>
+                                        {change > 0 && (
+                                            <span className="amount-change-badge">Change: ₱{change.toLocaleString()}</span>
+                                        )}
+                                    </div>
+                                )}
+                                {formData.paymentStatus !== 'Downpayment' && formData.amountPaid && Number(formData.amountPaid) > 0 && Number(formData.amountPaid) < requiredAmount && (
+                                    <div className="amount-required-row amount-required-row--short">
+                                        <span className="amount-required-row__label">Still needed</span>
+                                        <span className="amount-required-row__value">₱{(requiredAmount - Number(formData.amountPaid)).toLocaleString()}</span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="form-group">
+                                <label>Payment Status</label>
+                                <select name="paymentStatus" value={formData.paymentStatus} onChange={handleChange}>
+                                    <option value="Full Payment">Full Payment</option>
+                                    <option value="Downpayment">Downpayment</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            );
-        };
 
-        const renderStep5 = () => {
-            const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not selected';
+                {(() => {
+                    const paid = Number(formData.amountPaid);
+                    const hasAmount = formData.amountPaid !== '' && !isNaN(paid) && paid > 0;
+                    const isEnough = hasAmount && paid >= requiredAmount;
+                    const canProceed = isEnough;
 
-            // Determine schedule label prefixes
-            const isTdcCourse = formData.course?.category === 'TDC';
-            const isOnlineTdcNoSchedule =
-                ['TDC', 'PROMO'].includes(String(formData.course?.category || '').toUpperCase()) &&
-                (String(formData.courseType || '').toLowerCase().includes('online') ||
-                    String(formData.courseType || '').toLowerCase().includes('otdc') ||
-                    String(formData.promoTdcType || '').toLowerCase().includes('online') ||
-                    String(formData.promoTdcType || '').toLowerCase().includes('otdc') ||
-                    String(formData.course?.name || '').toLowerCase().includes('otdc') ||
-                    String(formData.course?.shortName || '').toLowerCase().includes('otdc'));
-            const sessionPrefix = isTdcCourse ? 'TDC' : (formData.course?.category === 'PDC' ? 'PDC' : '');
+                    let hint = null;
+                    if (!hasAmount) hint = 'Enter the amount paid to continue.';
+                    else if (!isEnough) {
+                        hint = formData.paymentStatus === 'Downpayment'
+                            ? 'Enter any amount greater than ₱0 to continue.'
+                            : `Amount is short by ₱${(requiredAmount - paid).toLocaleString()}.`;
+                    }
 
-            // Recalculate balance for downpayment
-            const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
-            const selectedTypeOpt = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType);
-            const selectedPrice = selectedTypeOpt?.price || dynamicCourse?.price || 0;
-            const isRegularPromoBundle = String(formData.course?.category || '').toLowerCase() === 'promo' && !!formData.course?._isManualBundle;
-            const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
-            const promoDiscount = isRegularPromoBundle ? Number((selectedPrice * 0.03).toFixed(2)) : 0;
-            const totalAmount = Math.max(0, Number((selectedPrice + addonsTotal - promoDiscount).toFixed(2)));
-            const balanceDue = Math.max(0, Number((totalAmount - (Number(formData.amountPaid) || 0)).toFixed(2)));
+                    return (
+                        <>
+                            <div className="step-actions">
+                                <button type="button" onClick={prevStep} className="back-btn">
+                                    <svg className="mr-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                    </svg>
+                                    Back
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => canProceed && nextStep()}
+                                    className="next-btn"
+                                    disabled={!canProceed}
+                                    style={{ opacity: canProceed ? 1 : 0.45, cursor: canProceed ? 'pointer' : 'not-allowed' }}
+                                >
+                                    Review Enrollment
+                                    <svg className="ml-2" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                </button>
+                            </div>
+                            {hint && <p className="step4-hint">{hint}</p>}
+                        </>
+                    );
+                })()}
+            </div>
+        );
+    };
 
-            const promoPdcSummaryCount = (formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
-                ? formData.course._pdcCourses.length
-                : (formData.course?._pdcCourse ? 1 : 0);
-            let courseTypeDisplay = '';
-            if (isPromo) {
-                const tdcDisplay = promoTdcType === 'F2F' ? 'TDC F2F' : `TDC ${promoTdcType || 'F2F'}`;
-                const pdcDisplay = `${promoPdcSummaryCount || 1} PDC course${(promoPdcSummaryCount || 1) > 1 ? 's' : ''}`;
-                courseTypeDisplay = `${tdcDisplay} + ${pdcDisplay}`;
-            } else if (selectedTypeOpt) {
-                courseTypeDisplay = selectedTypeOpt.label;
-            }
+    const renderStep5 = () => {
+        const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not selected';
 
-            const selectedPromoTdcSlot = isPromo
-                ? promoTdcRawSlots.find((slot) => String(slot.id) === String(formData.scheduleSlotId))
-                : null;
-            const promoTdcDay1Date = formData.scheduleDate || selectedPromoTdcSlot?.date || '';
-            const promoTdcDay2Date = (selectedPromoTdcSlot?.end_date && selectedPromoTdcSlot.end_date !== (selectedPromoTdcSlot?.date || promoTdcDay1Date))
-                ? selectedPromoTdcSlot.end_date
-                : '';
-            const promoTdcSession = formData.scheduleSession || selectedPromoTdcSlot?.session || 'Not selected';
-            const promoTdcTime = formData.scheduleTime || selectedPromoTdcSlot?.time_range || 'Not selected';
+        // Determine schedule label prefixes
+        const isTdcCourse = formData.course?.category === 'TDC';
+        const isOnlineTdcNoSchedule =
+            ['TDC', 'PROMO'].includes(String(formData.course?.category || '').toUpperCase()) &&
+            (String(formData.courseType || '').toLowerCase().includes('online') ||
+                String(formData.courseType || '').toLowerCase().includes('otdc') ||
+                String(formData.promoTdcType || '').toLowerCase().includes('online') ||
+                String(formData.promoTdcType || '').toLowerCase().includes('otdc') ||
+                String(formData.course?.name || '').toLowerCase().includes('otdc') ||
+                String(formData.course?.shortName || '').toLowerCase().includes('otdc'));
+        const sessionPrefix = isTdcCourse ? 'TDC' : (formData.course?.category === 'PDC' ? 'PDC' : '');
 
-            return (
+        // Recalculate balance for downpayment
+        const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
+        const selectedTypeOpt = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType);
+        const selectedPrice = selectedTypeOpt?.price || dynamicCourse?.price || 0;
+        const isRegularPromoBundle = String(formData.course?.category || '').toLowerCase() === 'promo' && !!formData.course?._isManualBundle;
+        const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
+        const subtotal = selectedPrice + addonsTotal;
+        const discountPct = selectedTypeOpt?.discount || dynamicCourse?.discount || 0;
+        const promoDiscount = discountPct > 0 ? Number((subtotal * (discountPct / 100)).toFixed(2)) : 0;
+        const totalAmount = Math.max(0, Number((subtotal - promoDiscount).toFixed(2)));
+        const balanceDue = Math.max(0, Number((totalAmount - (Number(formData.amountPaid) || 0)).toFixed(2)));
+
+        const promoPdcSummaryCount = (formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
+            ? formData.course._pdcCourses.length
+            : (formData.course?._pdcCourse ? 1 : 0);
+        let courseTypeDisplay = '';
+        if (isPromo) {
+            const tdcDisplay = promoTdcType === 'F2F' ? 'TDC F2F' : `TDC ${promoTdcType || 'F2F'}`;
+            const pdcDisplay = `${promoPdcSummaryCount || 1} PDC course${(promoPdcSummaryCount || 1) > 1 ? 's' : ''}`;
+            courseTypeDisplay = `${tdcDisplay} + ${pdcDisplay}`;
+        } else if (selectedTypeOpt) {
+            courseTypeDisplay = selectedTypeOpt.label;
+        }
+
+        const selectedPromoTdcSlot = isPromo
+            ? promoTdcRawSlots.find((slot) => String(slot.id) === String(formData.scheduleSlotId))
+            : null;
+        const promoTdcDay1Date = formData.scheduleDate || selectedPromoTdcSlot?.date || '';
+        const promoTdcDay2Date = (selectedPromoTdcSlot?.end_date && selectedPromoTdcSlot.end_date !== (selectedPromoTdcSlot?.date || promoTdcDay1Date))
+            ? selectedPromoTdcSlot.end_date
+            : '';
+        const promoTdcSession = formData.scheduleSession || selectedPromoTdcSlot?.session || 'Not selected';
+        const promoTdcTime = formData.scheduleTime || selectedPromoTdcSlot?.time_range || 'Not selected';
+
+        return (
             <div className="step-content animate-fadeIn">
                 <div className="section-title">
                     <span className="step-badge">5</span>
@@ -4259,21 +4306,21 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         ) : isPromo ? (
                             <>
                                 <>
-                                        {/* TDC schedule */}
-                                        <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 1:</p>
-                                        <p><strong>Date:</strong> {fmtDate(promoTdcDay1Date)}</p>
-                                        <p><strong>Session:</strong> {promoTdcSession}</p>
-                                        <p><strong>Time:</strong> {promoTdcTime}</p>
+                                    {/* TDC schedule */}
+                                    <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 1:</p>
+                                    <p><strong>Date:</strong> {fmtDate(promoTdcDay1Date)}</p>
+                                    <p><strong>Session:</strong> {promoTdcSession}</p>
+                                    <p><strong>Time:</strong> {promoTdcTime}</p>
 
-                                        {promoTdcDay2Date && (
-                                            <>
-                                                <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
-                                                <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 2:</p>
-                                                <p><strong>Date:</strong> {fmtDate(promoTdcDay2Date)}</p>
-                                                <p><strong>Session:</strong> {promoTdcSession}</p>
-                                                <p><strong>Time:</strong> {promoTdcTime}</p>
-                                            </>
-                                        )}
+                                    {promoTdcDay2Date && (
+                                        <>
+                                            <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
+                                            <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 2:</p>
+                                            <p><strong>Date:</strong> {fmtDate(promoTdcDay2Date)}</p>
+                                            <p><strong>Session:</strong> {promoTdcSession}</p>
+                                            <p><strong>Time:</strong> {promoTdcTime}</p>
+                                        </>
+                                    )}
                                 </>
 
                                 {isOnlineTdcNoSchedule ? (
@@ -4287,7 +4334,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                         const key = course?._pdcKey || getPromoPdcCourseKey(course);
                                         const sel = promoPdcSelections[key] || {};
                                         const courseLabel = course?.shortName || course?.name || `PDC ${idx + 1}`;
-                                        
+
                                         return (
                                             <div key={`sched-${key}-${idx}`}>
                                                 <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
@@ -4337,6 +4384,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         <div className="review-payment-grid">
                             <p><strong>Method:</strong> {formData.paymentMethod}</p>
                             <p><strong>Payment Status:</strong> {formData.paymentStatus}</p>
+                            <p><strong>Subtotal:</strong> ₱{subtotal.toLocaleString()}</p>
+                            {discountPct > 0 && (
+                                <p style={{ color: '#ef4444' }}><strong>Discount ({discountPct}%):</strong> -₱{promoDiscount.toLocaleString()}</p>
+                            )}
+                            <p><strong>Total Amount Due:</strong> ₱{totalAmount.toLocaleString()}</p>
                             <p><strong>Amount Paid Today:</strong> ₱{Number(formData.amountPaid).toLocaleString()}</p>
                             {formData.paymentStatus === 'Downpayment' && (
                                 <p style={{ color: '#b45309', fontWeight: '700' }}>
@@ -4375,38 +4427,38 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     </button>
                 </div>
             </div>
-            );
-        };
-
-        return (
-            <div className="walk-in-container slide-up">
-                <div className="walk-in-header">
-                    <div className="header-info">
-                        <h2>Walk-in Enrollment</h2>
-                        <p>Physical registration for students at the branch</p>
-                    </div>
-                    <div className="step-indicator">
-                        <div className={`step-dot ${step >= 1 ? 'active' : ''}`}>1</div>
-                        <div className={`step-line ${step >= 2 ? 'active' : ''}`}></div>
-                        <div className={`step-dot ${step >= 2 ? 'active' : ''}`}>2</div>
-                        <div className={`step-line ${step >= 3 ? 'active' : ''}`}></div>
-                        <div className={`step-dot ${step >= 3 ? 'active' : ''}`}>3</div>
-                        <div className={`step-line ${step >= 4 ? 'active' : ''}`}></div>
-                        <div className={`step-dot ${step >= 4 ? 'active' : ''}`}>4</div>
-                        <div className={`step-line ${step >= 5 ? 'active' : ''}`}></div>
-                        <div className={`step-dot ${step >= 5 ? 'active' : ''}`}>5</div>
-                    </div>
-                </div>
-
-                <div className="enrollment-wizard">
-                    {step === 1 && renderStep1()}
-                    {step === 2 && renderStep2()}
-                    {step === 3 && renderStep3()}
-                    {step === 4 && renderStep4()}
-                    {step === 5 && renderStep5()}
-                </div>
-            </div>
         );
     };
 
-    export default WalkInEnrollment;
+    return (
+        <div className="walk-in-container slide-up">
+            <div className="walk-in-header">
+                <div className="header-info">
+                    <h2>Walk-in Enrollment</h2>
+                    <p>Physical registration for students at the branch</p>
+                </div>
+                <div className="step-indicator">
+                    <div className={`step-dot ${step >= 1 ? 'active' : ''}`}>1</div>
+                    <div className={`step-line ${step >= 2 ? 'active' : ''}`}></div>
+                    <div className={`step-dot ${step >= 2 ? 'active' : ''}`}>2</div>
+                    <div className={`step-line ${step >= 3 ? 'active' : ''}`}></div>
+                    <div className={`step-dot ${step >= 3 ? 'active' : ''}`}>3</div>
+                    <div className={`step-line ${step >= 4 ? 'active' : ''}`}></div>
+                    <div className={`step-dot ${step >= 4 ? 'active' : ''}`}>4</div>
+                    <div className={`step-line ${step >= 5 ? 'active' : ''}`}></div>
+                    <div className={`step-dot ${step >= 5 ? 'active' : ''}`}>5</div>
+                </div>
+            </div>
+
+            <div className="enrollment-wizard">
+                {step === 1 && renderStep1()}
+                {step === 2 && renderStep2()}
+                {step === 3 && renderStep3()}
+                {step === 4 && renderStep4()}
+                {step === 5 && renderStep5()}
+            </div>
+        </div>
+    );
+};
+
+export default WalkInEnrollment;

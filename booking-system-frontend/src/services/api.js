@@ -83,6 +83,13 @@ const apiRequest = async (endpoint, options = {}) => {
     },
   };
 
+  // The 'cache' property in requestOptions is used by our application-level cache logic.
+  // Native fetch() also has a 'cache' property but it expects an enum string (e.g. 'no-store'),
+  // not a boolean. We must remove it if it's a boolean to avoid TypeError in fetch.
+  if (typeof config.cache === 'boolean') {
+    delete config.cache;
+  }
+
   // Only set JSON content type when a body exists and it's not FormData.
   if (requestOptions.body !== undefined && requestOptions.body !== null && !(requestOptions.body instanceof FormData)) {
     config.headers['Content-Type'] = 'application/json';
@@ -744,7 +751,7 @@ export const schedulesAPI = {
     if (endDate) params.append('end_date', endDate);
     if (branchId) params.append('branch_id', branchId);
     if (type) params.append('type', type);
-    return await apiRequest(`/schedules/slots?${params.toString()}`);
+    return await apiRequest(`/schedules/slots?${params.toString()}`, { cache: false });
   },
 
   // Create new slot

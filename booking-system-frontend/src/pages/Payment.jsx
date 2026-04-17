@@ -169,13 +169,15 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       subtotal += totals.finalItemPrice * qty;
     });
     
-    const hasTDC = false;
-    const hasPDC = false;
+    const highestDiscount = activeCart.reduce((max, item) => {
+      const discount = parseFloat(item.discount || 0);
+      return discount > max ? discount : max;
+    }, 0);
     
-    const hasBundleDiscount = false;
-    const promoBundleDiscountPercent = 0;
-    const bundleDiscountValue = 0;
-    const finalTotal = subtotal;
+    const hasDiscount = highestDiscount > 0;
+    const discountPercent = highestDiscount;
+    const discountValue = hasDiscount ? Number((subtotal * (discountPercent / 100)).toFixed(2)) : 0;
+    const finalTotal = Number((subtotal - discountValue).toFixed(2));
 
     return { 
       baseCoursePriceTotal, 
@@ -183,19 +185,18 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       vehicleTipsTotal, 
       customAddonsTotal,
       convenienceTotal, 
-
       subtotal, 
-      hasBundleDiscount, 
-      promoBundleDiscountPercent,
-      bundleDiscountValue, 
+      hasDiscount, 
+      discountPercent,
+      discountValue, 
       finalTotal 
     };
   };
 
   const totalsData = getPaymentTotals();
   const baseSubtotal = totalsData.subtotal;
-  const hasBundleDiscount = totalsData.hasBundleDiscount;
-  const bundleDiscountValue = totalsData.bundleDiscountValue;
+  const hasDiscount = totalsData.hasDiscount;
+  const discountValue = totalsData.discountValue;
 
   const subtotal = totalsData.finalTotal;
   const downpaymentAmount = subtotal * 0.5;
@@ -281,12 +282,24 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     showNotification('Payment successful! Enrollment confirmed.', 'success')
   }
 
-  const handlePaymentFailure = (reason = 'failed') => {
+  const handlePaymentFailure = async (reason = 'failed') => {
+    const bookingId = starpayQR?.bookingId;
+
     pollActiveRef.current = false
     if (pollRef.current) {
       clearTimeout(pollRef.current)
       pollRef.current = null
     }
+
+    // If student manually cancels, notify server so booking is marked Cancelled instead of Pending
+    if (reason === 'cancelled' && bookingId) {
+      try {
+        await bookingsAPI.updateStatus(bookingId, 'Cancelled');
+      } catch (err) {
+        console.warn('Failed to mark booking as cancelled in DB:', err);
+      }
+    }
+
     setQrStatus('failed')
     setStarpayQR(null)
     setQrExpiresAt(null)
@@ -294,6 +307,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     setPaymentFailReason(reason)
     setShowPaymentSuccess(false)
     setShowPaymentFailed(true)
+
     if (reason === 'expired') {
       showNotification('Payment session expired. Please try again.', 'error')
     } else if (reason === 'cancelled') {
@@ -478,6 +492,20 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         scheduleSession2: scheduleSelection.slotDetails2?.session || null,
         scheduleTime2: scheduleSelection.slotDetails2?.time_range || scheduleSelection.slotDetails2?.time || null,
         pdcSelections: scheduleSelection.pdcSelections || {},
+        promoPdcSchedules: Object.values(scheduleSelection.pdcSelections || {}).map(sel => ({
+          courseId: sel.courseId,
+          courseName: sel.courseName,
+          courseType: sel.courseType,
+          scheduleSlotId: sel.pdcSlot,
+          scheduleDate: sel.pdcDate,
+          scheduleSession: sel.pdcSlotDetails?.session,
+          scheduleTime: sel.pdcSlotDetails?.time,
+          promoPdcSlotId2: sel.pdcSlot2 || null,
+          promoPdcDate2: sel.pdcDate2 || '',
+          promoPdcSession2: sel.pdcSlotDetails2?.session || '',
+          promoPdcTime2: sel.pdcSlotDetails2?.time || '',
+          label: `${sel.courseName} (${sel.courseType})`
+        })),
         pdcCourseIds: uniquePdcCourseIds,
         noScheduleRequired: !!scheduleSelection.noScheduleRequired,
         isOnlineTdcNoSchedule: !!scheduleSelection.isOnlineTdcNoSchedule,
@@ -489,16 +517,10 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         addonsDetailed: addonsDetailedPayload,
         convenienceFee: totalsData.convenienceTotal,
         subtotal: totalsData.subtotal,
-        promoDiscount: totalsData.bundleDiscountValue,
+        promoDiscount: totalsData.discountValue,
+        promoPct: totalsData.discountPercent,
         totalAmount: totalsData.finalTotal,
-        localDbTest: true, // TEST MODE BYPASS
       })
-
-      if (paymentResponse?.localDbTest) {
-        setQrStatus('success');
-        handlePaymentSuccess();
-        return;
-      }
 
       const msgId = paymentResponse?.msgId
       const codeUrl = paymentResponse?.codeUrl
@@ -634,7 +656,9 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                     <div key={index} className="flex flex-col pb-4 border-b border-slate-200 last:border-0 last:pb-0">
                       <div className="flex justify-between items-start">
                         <div>
-                          <div className="font-semibold text-slate-800 text-[15px]">{item.name}</div>
+                          <div className="font-semibold text-slate-800 text-[15px]">
+                            {item.name}
+                          </div>
                           <div className="text-sm text-slate-500 mt-1 flex flex-wrap gap-x-3 gap-y-1">
                             {item.type && item.type !== 'standard' && <span className="bg-slate-200/60 px-2 py-0.5 rounded-md text-slate-700 capitalize">{item.type.replace('-', ' ')}</span>}
                             {item.selectedBranch && <span><span className="text-slate-400">Branch:</span> {item.selectedBranch}</span>}
@@ -679,20 +703,12 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
               </div>
 
               {/* Convenience Fees & Bundle Discount */}
-              {(totalsData.hasBundleDiscount || totalsData.convenienceTotal > 0) && (
+              {totalsData.hasDiscount && totalsData.discountValue > 0 && (
                 <div className="mt-4 pt-4 border-t border-slate-200 space-y-2">
-                  {totalsData.convenienceTotal > 0 && (
-                    <div className="flex justify-between items-center text-sm text-slate-600">
-                      <span>Convenience Fee</span>
-                      <span className="font-semibold">₱{totalsData.convenienceTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
-                  {totalsData.hasBundleDiscount && totalsData.bundleDiscountValue > 0 && (
-                    <div className="flex justify-between items-center text-sm text-red-500 font-semibold bg-red-50 p-2 rounded-lg -mx-2 px-2">
-                      <span>Promo Bundle (-{totalsData.promoBundleDiscountPercent}%)</span>
-                      <span>-₱{totalsData.bundleDiscountValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
+                  <div className="flex justify-between items-center text-sm text-red-500 font-semibold bg-red-50 p-2 rounded-lg -mx-2 px-2">
+                    <span>Discount (-{totalsData.discountPercent}%)</span>
+                    <span>-₱{totalsData.discountValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
                 </div>
               )}
 

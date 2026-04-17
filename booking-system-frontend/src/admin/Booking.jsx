@@ -2443,7 +2443,7 @@ const Booking = () => {
 
                 <div className="booking-table-wrapper">
                     <table className="booking-table">
-                        <thead><tr><th>ID</th><th>Student</th><th>Branch</th><th>Payment</th><th>Status</th><th>Action</th></tr></thead>
+                        <thead><tr><th>ID</th><th>Student</th><th>Branch</th><th>First Payment</th><th>Payment</th><th>Status</th><th>Action</th></tr></thead>
                         <tbody>
                             {loading ? (
                                 Array.from({ length: 5 }).map((_, i) => (
@@ -2456,6 +2456,7 @@ const Booking = () => {
                                             </div>
                                         </td>
                                         <td><div className="bk-skeleton-cell" style={{ width: '90px' }}></div></td>
+                                        <td><div className="bk-skeleton-cell" style={{ width: '100px' }}></div></td>
                                         <td><div className="bk-skeleton-cell" style={{ width: '80px' }}></div></td>
                                         <td><div className="bk-skeleton-cell" style={{ width: '70px', borderRadius: '20px' }}></div></td>
                                         <td><div className="bk-skeleton-cell" style={{ width: '80px' }}></div></td>
@@ -2463,7 +2464,7 @@ const Booking = () => {
                                 ))
                             ) : filteredBookings.length === 0 ? (
                                 <tr>
-                                    <td colSpan="6" className="no-data">
+                                    <td colSpan="7" className="no-data">
                                         <div className="bk-empty-state">
                                             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -2489,8 +2490,8 @@ const Booking = () => {
                                         }
                                     }}
                                 >
-                                    <td className="bk-id">{booking.id}</td>
-                                    <td>
+                                    <td className="bk-id" data-label="ID">{booking.id}</td>
+                                    <td data-label="Student">
                                         <div className="bk-table-student">
                                             <div className="bk-student-avatar">
                                                 {booking.student.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
@@ -2500,19 +2501,25 @@ const Booking = () => {
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="bk-branch">{booking.branch}</td>
-                                    <td className="bk-payment">
+                                    <td className="bk-branch" data-label="Branch">{booking.branch}</td>
+                                    <td className="bk-date" data-label="First Payment">
+                                        <div className="bk-date-info">
+                                            <span className="main-date">{booking.firstPaymentDate ? new Date(booking.firstPaymentDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-'}</span>
+                                            <span className="meta-time">{booking.firstPaymentDate ? new Date(booking.firstPaymentDate).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                                        </div>
+                                    </td>
+                                    <td className="bk-payment" data-label="Payment">
                                         <div className="payment-info-v2">
                                             <span className="amount font-bold">{booking.amount}</span>
                                             <span className="meta">{booking.paymentType} via {booking.paymentMethod}</span>
                                         </div>
                                     </td>
-                                    <td>
+                                    <td data-label="Status">
                                         <span className={`status-pill ${booking.statusKey}`}>
                                             {booking.status}
                                         </span>
                                     </td>
-                                    <td>
+                                    <td data-label="Action">
                                         <div className="table-actions">
                                             {booking.statusKey === 'partial-payment' && (
                                                 <>
@@ -2641,6 +2648,7 @@ const Booking = () => {
                                         <th>Student</th>
                                         <th>Course</th>
                                         <th>Branch</th>
+                                        <th>First Payment</th>
                                         <th>Payment</th>
                                         <th>Status</th>
                                         <th>Action</th>
@@ -2662,6 +2670,12 @@ const Booking = () => {
                                             </td>
                                             <td>{booking.courseSummary || booking.type}</td>
                                             <td className="bk-branch">{booking.branch}</td>
+                                            <td className="bk-date">
+                                                <div className="bk-date-info">
+                                                    <span className="main-date">{booking.firstPaymentDate ? new Date(booking.firstPaymentDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-'}</span>
+                                                    <span className="meta-time">{booking.firstPaymentDate ? new Date(booking.firstPaymentDate).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                                                </div>
+                                            </td>
                                             <td className="bk-payment">
                                                 <div className="payment-info-v2">
                                                     <span className="amount font-bold">{booking.amount}</span>
@@ -2688,7 +2702,7 @@ const Booking = () => {
                                         </tr>
                                     )) : (
                                         <tr>
-                                            <td colSpan="7" className="no-data">
+                                            <td colSpan="8" className="no-data">
                                                 <div className="bk-empty-state">
                                                     <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                                                     <p>No bookings found</p>

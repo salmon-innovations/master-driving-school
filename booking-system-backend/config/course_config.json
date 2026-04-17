@@ -55,6 +55,16 @@
         "PDC Motor Automatic"
       ],
       "label": "OTDC + 4 PDC"
+    },
+    {
+      "value": "None+PDC Car Automatic|PDC Motor Manual",
+      "key": "None+PDC Car Automatic|PDC Motor Manual",
+      "tdcPart": "None",
+      "pdcParts": [
+        "PDC Car Automatic",
+        "PDC Motor Manual"
+      ],
+      "label": "PDC + PDC"
     }
   ]
 }

@@ -90,6 +90,7 @@ const createBooking = async (req, res) => {
                 paymentStatus: paymentType || 'Full Payment',
                 subtotal: req.body.subtotal || 0,
                 promoDiscount: req.body.promoDiscount || 0,
+                promoPct: req.body.promoPct || 0,
                 convenienceFee: req.body.convenienceFee || 0,
                 totalAmount: req.body.totalAmount || totalAmount || 0,
             }, hasReviewer, hasVehicleTips);

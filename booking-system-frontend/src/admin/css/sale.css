@@ -241,7 +241,7 @@
 /* Stats Grid */
 .revenue-stats-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 20px;
 }
 
@@ -310,6 +310,14 @@
 
 .rev-stat-card.red {
     border-left: 4px solid #ef4444;
+}
+
+.rev-stat-card.purple {
+    border-left: 4px solid #8b5cf6;
+}
+
+.rev-stat-card.indigo {
+    border-left: 4px solid #4f46e5;
 }
 
 /* Charts Layout */
@@ -591,49 +599,107 @@
 
 .txn-table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
 }
 
 .txn-table th {
     text-align: left;
-    padding: 15px;
-    font-size: 0.75rem;
+    padding: 16px;
+    font-size: 0.72rem;
     color: var(--secondary-text);
     text-transform: uppercase;
     font-weight: 700;
+    letter-spacing: 0.05em;
     border-bottom: 2px solid var(--border-color);
+    background: var(--bg-color);
+    white-space: nowrap;
+}
+
+/* --- Table Specific Widths --- */
+
+/* Recent Transactions Table (7 columns) */
+.recent-txns-table th:nth-child(1), .recent-txns-table td:nth-child(1) { width: 140px; }
+/* .recent-txns-table th:nth-child(2), .recent-txns-table td:nth-child(2) { width: auto; } (Student Name) */
+.recent-txns-table th:nth-child(3), .recent-txns-table td:nth-child(3) { width: 130px; }
+.recent-txns-table th:nth-child(4), .recent-txns-table td:nth-child(4) { width: 120px; }
+.recent-txns-table th:nth-child(5), .recent-txns-table td:nth-child(5) { width: 100px; }
+.recent-txns-table th:nth-child(6), .recent-txns-table td:nth-child(6) { width: 155px; } /* Widened for status pills */
+.recent-txns-table th:nth-child(7), .recent-txns-table td:nth-child(7) { width: 100px; text-align: center; }
+
+/* Partial Payment Bookings Table (8 columns) */
+.partial-bookings-table th:nth-child(1), .partial-bookings-table td:nth-child(1) { width: 110px; }
+/* .partial-bookings-table th:nth-child(2), .partial-bookings-table td:nth-child(2) { width: auto; } (Student & Contact) */
+.partial-bookings-table th:nth-child(3), .partial-bookings-table td:nth-child(3) { width: 220px; } /* Course name */
+.partial-bookings-table th:nth-child(4), .partial-bookings-table td:nth-child(4) { width: 100px; }
+.partial-bookings-table th:nth-child(5), .partial-bookings-table td:nth-child(5) { width: 100px; }
+.partial-bookings-table th:nth-child(6), .partial-bookings-table td:nth-child(6) { width: 130px; }
+.partial-bookings-table th:nth-child(7), .partial-bookings-table td:nth-child(7) { width: 155px; } /* Status pill */
+.partial-bookings-table th:nth-child(8), .partial-bookings-table td:nth-child(8) { width: 90px; text-align: center; }
+
+/* History Modal Table (9 columns) */
+.history-modal .txn-table th:nth-child(1), .history-modal .txn-table td:nth-child(1) { width: 130px; }
+.history-modal .txn-table th:nth-child(3), .history-modal .txn-table td:nth-child(3) { width: 180px; }
+.history-modal .txn-table th:nth-child(4), .history-modal .txn-table td:nth-child(4) { width: 120px; }
+.history-modal .txn-table th:nth-child(5), .history-modal .txn-table td:nth-child(5) { width: 110px; }
+.history-modal .txn-table th:nth-child(6), .history-modal .txn-table td:nth-child(6) { width: 110px; }
+.history-modal .txn-table th:nth-child(7), .history-modal .txn-table td:nth-child(7) { width: 110px; text-align: right; }
+.history-modal .txn-table th:nth-child(8), .history-modal .txn-table td:nth-child(8) { width: 140px; } /* Status poll */
+.history-modal .txn-table th:nth-child(9), .history-modal .txn-table td:nth-child(9) { width: 90px; text-align: center; }
+
+.st-name {
+    text-align: left !important;
+    font-weight: 700;
+}
+
+.txn-table td.st-name {
+    text-align: left !important;
 }
 
 .txn-table td {
-    padding: 18px 15px;
+    padding: 14px 16px;
     border-bottom: 1px solid var(--border-color);
     font-size: 0.9rem;
     color: var(--text-color);
+    vertical-align: middle;
+    text-align: left; /* Default to left */
+}
+
+.txn-table tbody tr {
+    transition: background 0.15s ease;
+}
+
+.txn-table tbody tr:hover {
+    background: rgba(33, 87, 218, 0.03);
 }
 
 .txn-id {
-    font-family: monospace;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-weight: 700;
-    color: #1a4fba;
+    color: var(--primary-color);
+    font-size: 0.8rem;
 }
 
 .method-tag {
-    padding: 4px 10px;
-    border-radius: 6px;
-    font-size: 0.75rem;
+    padding: 5px 10px;
+    border-radius: 8px;
+    font-size: 0.72rem;
     font-weight: 700;
     background: var(--bg-color);
     color: var(--secondary-text);
+    border: 1px solid var(--border-color);
 }
 
 .method-tag.cash {
-    background: #f1f5f9;
-    color: #475569;
+    background: #f8fafc;
+    color: #64748b;
 }
 
 .method-tag.starpay {
     background: #eff6ff;
-    color: #1d4ed8;
+    color: #2157da;
+    border-color: #dbeafe;
 }
 
 /* Action Buttons */
@@ -644,62 +710,115 @@
 }
 
 .edit-btn,
-.delete-btn {
-    padding: 6px;
-    border-radius: 8px;
+.delete-btn,
+.receipt-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
     border: 1px solid var(--border-color);
     background: var(--card-bg);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     align-items: center;
     justify-content: center;
-}
-
-.edit-btn {
-    color: #1a4fba;
+    color: var(--secondary-text);
 }
 
 .edit-btn:hover {
     background: #eff6ff;
-    border-color: #dbeafe;
-    transform: scale(1.05);
-}
-
-.delete-btn {
-    color: #ef4444;
+    border-color: #2157da;
+    color: #2157da;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(33, 87, 218, 0.15);
 }
 
 .delete-btn:hover {
     background: #fef2f2;
-    border-color: #fee2e2;
-    transform: scale(1.05);
+    border-color: #ef4444;
+    color: #ef4444;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.15);
+}
+
+.receipt-btn {
+    color: #1a4fba;
+}
+
+.receipt-btn:hover {
+    background: #eff6ff;
+    border-color: #1a4fba;
+    color: #1a4fba;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(26, 79, 186, 0.15);
 }
 
 .txn-table .amount {
     font-weight: 800;
+    color: var(--text-color);
 }
 
 .status-pill {
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 700;
+    padding: 6px 14px;
+    border-radius: 99px;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.status-pill::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
 }
 
 .status-pill.success {
     background: #f0fdf4;
-    color: #166534;
+    color: #16a34a;
+    border: 1px solid #dcfce7;
 }
 
-.status-pill.partial-payment {
-    background: #fff7ed;
-    color: #9a3412;
+.status-pill.partial-payment,
+.status-pill.partial_payment {
+    background: #fffbeb;
+    color: #d97706;
+    border: 1px solid #fef3c7;
 }
 
-.status-pill.pending {
-    background: #fff7ed;
-    color: #9a3412;
+.status-pill.pending,
+.status-pill.confirmed {
+    background: #fdf2ff;
+    color: #9333ea;
+    border: 1px solid #f3e8ff;
+}
+
+.status-pill.failed,
+.status-pill.cancelled {
+    background: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fee2e2;
+}
+
+/* Skeleton Loading State */
+.sale-skeleton-cell {
+    height: 18px;
+    background: linear-gradient(90deg, var(--border-color) 25%, var(--bg-color) 50%, var(--border-color) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-wave 1.5s infinite linear;
+    border-radius: 6px;
+    opacity: 0.6;
+}
+
+@keyframes skeleton-wave {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
 }
 
 /* History Modal Specifics */
@@ -1753,6 +1872,135 @@
 .sale-mark-paid-footer .confirm-btn {
     min-width: 170px;
     background: linear-gradient(135deg, #16a34a, #15803d) !important;
+}
+
+/* ── Responsive Sales & Payments ── */
+@media (max-width: 1200px) {
+    .sale-charts-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 1024px) {
+    .revenue-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .sale-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+    
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+    
+    .section-actions {
+        width: 100%;
+        justify-content: flex-start;
+        overflow-x: auto;
+        padding-bottom: 5px;
+    }
+
+    .txn-table, .txn-table thead, .txn-table tbody, .txn-table th, .txn-table td, .txn-table tr {
+        display: block;
+        width: 100% !important;
+    }
+
+    .txn-table thead tr {
+        position: absolute;
+        top: -9999px;
+        left: -9999px;
+    }
+
+    .txn-table tr {
+        border: 1px solid var(--border-color);
+        margin-bottom: 20px;
+        background: var(--card-bg);
+        border-radius: 16px;
+        padding: 10px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    }
+
+    .txn-table td {
+        border: none;
+        border-bottom: 1px solid var(--bg-color);
+        position: relative;
+        padding-left: 45% !important;
+        text-align: right !important;
+        min-height: 48px;
+        display: flex !important;
+        align-items: center;
+        justify-content: flex-end;
+    }
+
+    .txn-table td:last-child {
+        border-bottom: none;
+    }
+
+    .txn-table td:before {
+        position: absolute;
+        left: 15px;
+        width: 40%;
+        padding-right: 10px;
+        white-space: nowrap;
+        text-align: left;
+        font-weight: 800;
+        color: var(--secondary-text);
+        content: attr(data-label);
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .txn-table td .txn-student,
+    .txn-table td .txn-date-label,
+    .txn-table td .course-summary-v3,
+    .txn-table td .balance-info-v3,
+    .txn-table td .row-actions {
+        justify-content: flex-end;
+        text-align: right;
+    }
+    
+    .txn-table-wrapper {
+        overflow-x: visible;
+        padding: 0 4px;
+    }
+
+    .quick-method-filters {
+        width: 100%;
+        overflow-x: auto;
+        padding-bottom: 5px;
+        white-space: nowrap;
+    }
+
+    .transactions-section {
+        padding: 15px;
+    }
+}
+
+@media (max-width: 480px) {
+    .revenue-stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .header-controls {
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .header-controls select, .print-report-btn {
+        width: 100%;
+    }
+
+    .rev-stat-card {
+        padding: 18px;
+    }
 }
 
 @media (max-width: 640px) {

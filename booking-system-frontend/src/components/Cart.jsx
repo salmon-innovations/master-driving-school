@@ -255,7 +255,9 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                       <div key={`${item.id}-${item.type}-${index}`} className="bg-gray-50 p-4 rounded-lg">
                         <div className="flex justify-between items-start mb-2">
                           <div className="flex-1">
-                            <h3 className="font-semibold text-[#1a2332] text-sm">{item.name}</h3>
+                            <h3 className="font-semibold text-[#1a2332] text-sm">
+                              {item.name}
+                            </h3>
                             <p className="text-xs text-gray-500 mt-1">{item.duration}</p>
                             {item.type && (
                               <p className="text-xs text-[#2157da] font-medium mt-1 uppercase">{item.type}</p>

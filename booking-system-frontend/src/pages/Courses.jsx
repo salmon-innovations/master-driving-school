@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import { useNotification } from '../context/NotificationContext'
 import { coursesAPI, branchesAPI, schedulesAPI } from '../services/api'
 
@@ -326,25 +326,28 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
       const existingIdx = prevCart.findIndex(item => item.id === cartItem.id && item.type === cartItem.type)
       if (existingIdx !== -1) {
         const nextCart = [...prevCart]
-        nextCart[existingIdx].quantity += normalizedQty
+        // Overwrite the existing item with the new parameters (qty, addons, etc.)
+        // instead of just adding to the quantity. This prevents the "doubling" bug
+        // when users enroll, cancel, and enroll again.
+        nextCart[existingIdx] = cartItem;
         return nextCart
       }
       return [...prevCart, cartItem]
     })
   }
 
-  const isSelectedOnlineTdc = () => {
+  const isSelectedOnlineTdc = useCallback(() => {
     if (!selectedCourse) return false
     const isTdcCourse = selectedCourse?.type === 'tdc' || selectedCourse?.category === 'TDC' || (selectedCourse?.name || '').toLowerCase().includes('tdc') || (selectedCourse?.shortName || '').toLowerCase().includes('tdc')
     return isTdcCourse && String(courseType || '').toLowerCase().includes('online')
-  }
+  }, [selectedCourse, courseType])
 
-  const isSelectedPdcCourse = () => {
+  const isSelectedPdcCourse = useCallback(() => {
     if (!selectedCourse) return false
     const category = String(selectedCourse?.category || '').toLowerCase()
     const name = `${selectedCourse?.name || ''} ${selectedCourse?.shortName || ''}`.toLowerCase()
     return category === 'pdc' || name.includes('pdc')
-  }
+  }, [selectedCourse])
 
   const hasIncompleteOnlineTdc = async () => {
     if (!isLoggedIn) return false
@@ -465,127 +468,232 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   }
 
   // Check slot availability whenever the viewed course, branch, or type changes
-  useEffect(() => {
+  const checkAvailability = useCallback(async () => {
     if (!selectedCourse || !preSelectedBranch) {
       setHasAvailableSlots(true)
       setSlotAvailabilityDetail(null)
       return
     }
-    const checkAvailability = async () => {
-      setAvailabilityLoading(true)
-      setHasAvailableSlots(true)
-      setSlotAvailabilityDetail(null)
-      try {
-        const isOnlineOnlyTdc = isSelectedOnlineTdc() && !(courseType || '').includes('+') && !selectedCourse.pdcCourseIds?.length;
-        if (isOnlineOnlyTdc) {
-          setHasAvailableSlots(true)
-          setSlotAvailabilityDetail(null)
-          return
-        }
-
-        const name = (selectedCourse.name || '').toLowerCase()
-        const shortName = (selectedCourse.shortName || '').toLowerCase()
-        const category = selectedCourse.category || ''
-        const isPromo = category === 'Promo'
-        const isTDC = !isPromo && (category === 'TDC' || name.includes('tdc') || shortName.includes('tdc'))
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
-
-        if (isPromo) {
-          // Promo bundles (TDC + PDC): BOTH parts must have available slots
-          const allSlots = await schedulesAPI.getSlotsByDate(null, preSelectedBranch.id)
-          const tdcPart = courseType.includes('+') ? courseType.split('+')[0].toLowerCase().trim() : courseType.toLowerCase()
-          const pdcPart = courseType.includes('+') ? courseType.split('+').slice(1).join('+').toLowerCase().trim() : ''
-          const tdcMinDate = new Date(today); tdcMinDate.setDate(today.getDate() + 1)
-          const pdcMinDate = new Date(today); pdcMinDate.setDate(today.getDate() + 2)
-
-          const hasTdc = (tdcPart === 'online' || tdcPart.includes('otdc')) ? true : (Array.isArray(allSlots) && allSlots.some(s => {
-            if (s.type?.toLowerCase() !== 'tdc') return false
-            const sd = new Date((s.date || s.start_date) + 'T00:00:00')
-            if (sd < tdcMinDate) return false
-            if (tdcPart && s.course_type && s.course_type.toLowerCase() !== tdcPart) return false
-            return s.available_slots == null || s.available_slots > 0
-          }))
-
-          // Parse each PDC part separately (split by |)
-          const pdcPartsRaw = pdcPart.split('|').map(p => p.trim()).filter(Boolean)
-          const pdcResults = pdcPartsRaw.map(p => {
-             const label = p.toUpperCase()
-             const pLower = p.toLowerCase()
-             const isMoto = pLower.includes('motorcycle') || pLower.includes('motor') || pLower.includes('moto') || pLower.includes('bike')
-             const isAT = pLower.includes('automatic') || pLower.includes('auto') || pLower.includes('at')
-             const isMT = pLower.includes('manual') || pLower.includes('mt')
-             const isTricycle = pLower.includes('tricycle') || pLower.includes('v1')
-             const isB1B2 = pLower.includes('b1') || pLower.includes('b2') || pLower.includes('van') || pLower.includes('l300')
-             
-             const ok = Array.isArray(allSlots) && allSlots.some(s => {
-                if (s.type?.toLowerCase() !== 'pdc') return false
-                const sd = new Date((s.date || s.start_date) + 'T00:00:00')
-                if (sd < pdcMinDate) return false
-                const ct = (s.course_type || '').toLowerCase()
-                const tr = (s.transmission || '').toLowerCase()
-                
-                // Transmission check
-                if (isAT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false
-                if (isMT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false
-                
-                if (!ct || ct === 'both' || ct === 'any' || ct === 'all') return s.available_slots == null || s.available_slots > 0
-                
-                if (isTricycle) return ct.includes('tricycle')
-                if (isB1B2) return ct.includes('b1') || ct.includes('b2') || ct.includes('van') || ct.includes('l300')
-                if (isMoto) return ct.includes('motorcycle') || ct.includes('motor') || ct.includes('moto') || ct.includes('bike')
-                
-                // Generic Car
-                return !ct.includes('motorcycle') && !ct.includes('motor') && !ct.includes('tricycle') && !ct.includes('b1') && !ct.includes('b2')
-             })
-             return { label, ok }
-          })
-
-          const tdcLabel = (tdcPart === 'online' || tdcPart.includes('otdc')) ? 'TDC (Online)' : (tdcPart === 'f2f' ? 'TDC (Face-to-Face)' : 'TDC')
-          setSlotAvailabilityDetail({ 
-            tdc: { label: tdcLabel, ok: hasTdc }, 
-            pdc: pdcResults.length > 0 ? pdcResults : [{ label: 'PDC', ok: true }] 
-          })
-          
-          setHasAvailableSlots(hasTdc && (pdcResults.length === 0 || pdcResults.every(r => r.ok)))
-          return
-        }
-
-        const slotType = isTDC ? 'TDC' : 'PDC'
-        const slots = await schedulesAPI.getSlotsByDate(null, preSelectedBranch.id, slotType)
-        const minDate = new Date(today)
-        minDate.setDate(today.getDate() + (isTDC ? 1 : 2))
-        const courseTypeMatches = buildCourseTypeChecker(selectedCourse.name, selectedCourse.shortName)
-        const tdcCourseType = courseType.includes('+') ? courseType.split('+')[0].trim() : courseType
-        const available = Array.isArray(slots) ? slots.filter(s => {
-          const slotDate = new Date((s.date || s.start_date) + 'T00:00:00')
-          if (slotDate < minDate) return false
-          
-          // For initial availability check, we ignore strict type mapping (Online vs F2F)
-          // and just check if the category/vehicle class matches
-          if (!isTDC && !courseTypeMatches(s.course_type)) return false
-          
-          if (!isTDC && courseType) {
-            const tr = (s.transmission || '').toLowerCase()
-            const cType = courseType.toLowerCase()
-            if (cType.includes('automatic') || cType === 'at' || cType.includes('auto')) {
-              if (tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false
-            } else if (cType.includes('manual') || cType === 'mt') {
-              if (tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false
-            }
-          }
-          
-          return s.available_slots == null || s.available_slots > 0
-        }) : []
-        setHasAvailableSlots(available.length > 0)
-      } catch (e) {
-        setHasAvailableSlots(true) // fail open on error
-      } finally {
-        setAvailabilityLoading(false)
+    
+    setAvailabilityLoading(true)
+    try {
+      const isOnlineOnlyTdc = !!selectedCourse && (isSelectedOnlineTdc() && !(courseType || '').includes('+') && !selectedCourse.pdcCourseIds?.length);
+      if (isOnlineOnlyTdc) {
+        setHasAvailableSlots(true)
+        setSlotAvailabilityDetail(null)
+        return
       }
+
+      const name = (selectedCourse.name || '').toLowerCase()
+      const shortName = (selectedCourse.shortName || '').toLowerCase()
+      const category = selectedCourse.category || ''
+      const isPromo = category === 'Promo'
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      if (isPromo) {
+        // Promo bundles (TDC + PDC): BOTH parts must have available slots
+        const allSlots = await schedulesAPI.getSlotsByDate(null, preSelectedBranch.id)
+        const tdcPart = courseType.includes('+') ? courseType.split('+')[0].toLowerCase().trim() : courseType.toLowerCase()
+        const pdcPart = courseType.includes('+') ? courseType.split('+').slice(1).join('+').toLowerCase().trim() : ''
+        const tdcMinDate = new Date(today); tdcMinDate.setDate(today.getDate() + 1)
+        const pdcMinDate = new Date(today); pdcMinDate.setDate(today.getDate() + 2)
+
+        const hasTdc = (tdcPart === 'online' || tdcPart.includes('otdc')) ? true : (Array.isArray(allSlots) && allSlots.some(s => {
+          if (s.type?.toLowerCase() !== 'tdc') return false
+          const sd = new Date((s.date || s.start_date) + 'T00:00:00')
+          if (sd < tdcMinDate) return false
+          if (tdcPart && s.course_type && s.course_type.toLowerCase() !== tdcPart) return false
+          return s.available_slots == null || s.available_slots > 0
+        }))
+
+        // Parse each PDC part separately (split by |)
+        const pdcPartsRaw = pdcPart.split('|').map(p => p.trim()).filter(Boolean)
+        const pdcResults = pdcPartsRaw.map(p => {
+           const label = p.toUpperCase()
+           const pLower = p.toLowerCase()
+           const isMoto = pLower.includes('motorcycle') || pLower.includes('motor') || pLower.includes('moto') || pLower.includes('bike')
+           const isAT = pLower.includes('automatic') || pLower.includes('auto') || pLower.includes('at')
+           const isMT = pLower.includes('manual') || pLower.includes('mt')
+           const isTricycle = pLower.includes('tricycle') || pLower.includes('v1')
+           const isB1B2 = pLower.includes('b1') || pLower.includes('b2') || pLower.includes('van') || pLower.includes('l300')
+           
+           const ok = Array.isArray(allSlots) && allSlots.some(s => {
+              if (s.type?.toLowerCase() !== 'pdc') return false
+              const sd = new Date((s.date || s.start_date) + 'T00:00:00')
+              if (sd < pdcMinDate) return false
+              const ct = (s.course_type || '').toLowerCase()
+              const tr = (s.transmission || '').toLowerCase()
+              
+              // Transmission check
+              if (isAT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false
+              if (isMT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false
+              
+              if (!ct || ct === 'both' || ct === 'any' || ct === 'all') return s.available_slots == null || s.available_slots > 0
+              
+              if (isTricycle) return ct.includes('tricycle')
+              if (isB1B2) return ct.includes('b1') || ct.includes('b2') || ct.includes('van') || ct.includes('l300')
+              if (isMoto) return ct.includes('motorcycle') || ct.includes('motor') || ct.includes('moto') || ct.includes('bike')
+              
+              // Generic Car
+              return !ct.includes('motorcycle') && !ct.includes('motor') && !ct.includes('tricycle') && !ct.includes('b1') && !ct.includes('b2')
+           })
+           return { label, ok }
+        })
+
+        const isOnlineTdcInBundle = tdcPart === 'online' || tdcPart.includes('otdc')
+        const tdcLabel = isOnlineTdcInBundle ? 'TDC (Online)' : (tdcPart === 'f2f' ? 'TDC (Face-to-Face)' : 'TDC')
+        setSlotAvailabilityDetail({ 
+          tdc: { label: tdcLabel, ok: hasTdc }, 
+          pdc: pdcResults.length > 0 ? pdcResults : [{ label: 'PDC', ok: true }] 
+        })
+        
+        setHasAvailableSlots(isOnlineTdcInBundle || (hasTdc && (pdcResults.length === 0 || pdcResults.every(r => r.ok))))
+        return
+      }
+
+      const isTDC = (category === 'TDC' || name.includes('tdc') || shortName.includes('tdc'))
+      const slotType = isTDC ? 'TDC' : 'PDC'
+      const slots = await schedulesAPI.getSlotsByDate(null, preSelectedBranch.id, slotType)
+      const minDate = new Date(today)
+      minDate.setDate(today.getDate() + (isTDC ? 1 : 2))
+      const courseTypeMatches = buildCourseTypeChecker(selectedCourse.name, selectedCourse.shortName)
+      const available = Array.isArray(slots) ? slots.filter(s => {
+        const slotDate = new Date((s.date || s.start_date) + 'T00:00:00')
+        if (slotDate < minDate) return false
+        if (!isTDC && !courseTypeMatches(s.course_type)) return false
+        if (!isTDC && courseType) {
+          const tr = (s.transmission || '').toLowerCase()
+          const cType = courseType.toLowerCase()
+          if (cType.includes('automatic') || cType === 'at' || cType.includes('auto')) {
+            if (tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false
+          } else if (cType.includes('manual') || cType === 'mt') {
+            if (tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false
+          }
+        }
+        return s.available_slots == null || s.available_slots > 0
+      }) : []
+      setHasAvailableSlots(available.length > 0)
+    } catch (e) {
+      setHasAvailableSlots(true) // fail open on error
+    } finally {
+      setAvailabilityLoading(false)
     }
+  }, [selectedCourse, preSelectedBranch, courseType]);
+
+  useEffect(() => {
     checkAvailability()
-  }, [selectedCourse?.id, preSelectedBranch?.id, courseType])
+  }, [checkAvailability])
+
+  const checkPromoAvailabilityListing = useCallback(async () => {
+    if (!preSelectedBranch) {
+      setPromoListingAvailability({});
+      return;
+    }
+    const promoPackagesList = courses
+      .filter(c => String(c.category || '').toLowerCase() === 'promo')
+      .map(c => ({ id: c.id, typeOptions: (() => {
+        const opts = [];
+        if (c.course_type) opts.push({ value: c.course_type.toLowerCase().replace(/\s+/g, '-') });
+        if (c.pricing_data) c.pricing_data.forEach(v => opts.push({ value: v.type.toLowerCase().replace(/\s+/g, '-') }));
+        return opts;
+      })() }));
+    if (promoPackagesList.length === 0) return;
+
+    const results = {};
+    try {
+      const allSlots = await schedulesAPI.getSlotsByDate(null, preSelectedBranch.id);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tdcMinDate = new Date(today); tdcMinDate.setDate(today.getDate() + 1);
+      const pdcMinDate = new Date(today); pdcMinDate.setDate(today.getDate() + 2);
+      
+      for (const pkg of promoPackagesList) {
+        const defaultTypeValue = (pkg.typeOptions?.[0]?.value || '').toLowerCase();
+        const tdcPart = defaultTypeValue.includes('+') ? defaultTypeValue.split('+')[0].trim() : defaultTypeValue;
+        const pdcPart = defaultTypeValue.includes('+') ? defaultTypeValue.split('+').slice(1).join('+').trim() : '';
+
+        const isOnlineTdc = tdcPart.includes('online') || tdcPart.includes('otdc');
+        const hasTdc = isOnlineTdc ? true : (Array.isArray(allSlots) && allSlots.some(s => {
+          if (s.type?.toLowerCase() !== 'tdc') return false;
+          const sd = new Date((s.date || s.start_date) + 'T00:00:00');
+          if (sd < tdcMinDate) return false;
+          return s.available_slots == null || s.available_slots > 0;
+        }));
+
+        const pdcPartsRaw = pdcPart.split('|').map(p => p.trim()).filter(Boolean);
+        const pdcResults = pdcPartsRaw.map(p => {
+           const pLower = p.toLowerCase();
+           const isMoto = pLower.includes('motorcycle') || pLower.includes('motor') || pLower.includes('moto') || pLower.includes('bike');
+           const isAT = pLower.includes('automatic') || pLower.includes('auto') || pLower.includes('at');
+           const isMT = pLower.includes('manual') || pLower.includes('mt');
+           const isTricycle = pLower.includes('tricycle') || pLower.includes('v1');
+           const isB1B2 = pLower.includes('b1') || pLower.includes('b2') || pLower.includes('van') || pLower.includes('l300');
+           
+           return Array.isArray(allSlots) && allSlots.some(s => {
+              if (s.type?.toLowerCase() !== 'pdc') return false;
+              const sd = new Date((s.date || s.start_date) + 'T00:00:00');
+              if (sd < pdcMinDate) return false;
+              const ct = (s.course_type || '').toLowerCase();
+              const tr = (s.transmission || '').toLowerCase();
+              if (isAT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false;
+              if (isMT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false;
+              if (!ct || ct === 'both' || ct === 'any' || ct === 'all') return s.available_slots == null || s.available_slots > 0;
+              if (isTricycle) return ct.includes('tricycle');
+              if (isB1B2) return ct.includes('b1') || ct.includes('b2') || ct.includes('van') || ct.includes('l300');
+              if (isMoto) return ct.includes('motorcycle') || ct.includes('motor') || ct.includes('moto') || ct.includes('bike');
+              return !ct.includes('motorcycle') && !ct.includes('motor') && !ct.includes('tricycle') && !ct.includes('b1') && !ct.includes('b2');
+           });
+        });
+
+        const hasPdc = isOnlineTdc ? true : (pdcResults.length === 0 || pdcResults.every(ok => ok));
+        const tdcLabel = isOnlineTdc ? 'TDC (Online)' : (tdcPart === 'f2f' ? 'TDC (Face-to-Face)' : 'TDC');
+        const pdcLabel = pdcPart.includes('|') ? `${pdcPartsRaw.length} PDC Tracks` : (pdcPart.includes('motor') ? 'PDC Motorcycle' : 'PDC Car');
+        results[pkg.id] = { loading: false, hasTdc, hasPdc, tdcLabel, pdcLabel };
+      }
+      setPromoListingAvailability(results);
+    } catch (e) {
+      promoPackagesList.forEach(pkg => { results[pkg.id] = { loading: false, hasTdc: true, hasPdc: true }; });
+      setPromoListingAvailability(results);
+    }
+  }, [preSelectedBranch?.id, courses, isSelectedOnlineTdc]);
+
+  useEffect(() => {
+    checkPromoAvailabilityListing();
+  }, [checkPromoAvailabilityListing]);
+
+  // Handle Window Focus for Live Updates
+  useEffect(() => {
+    const handleFocus = async () => {
+      // Re-fetch everything to ensure live updates
+      try {
+        const [coursesRes, branchesRes, addonsRes] = await Promise.all([
+          coursesAPI.getAll(),
+          branchesAPI.getAll(),
+          coursesAPI.getAddonsConfig()
+        ]);
+        if (coursesRes.success) {
+          const activeCourses = coursesRes.courses.filter(c => c.status === 'active');
+          setCourses(activeCourses);
+        }
+        if (branchesRes.success) {
+          setBranchContacts(branchesRes.branches);
+        }
+        if (addonsRes?.success && addonsRes.config) {
+          setAddonsConfig(prev => ({ ...prev, ...addonsRes.config }));
+        }
+        // Re-check individual and listing availability
+        await Promise.all([
+          checkAvailability(),
+          checkPromoAvailabilityListing()
+        ]);
+      } catch (err) {
+        console.warn("Failed to background refresh live data:", err);
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [checkAvailability, checkPromoAvailabilityListing]);
 
   const handleViewCourse = (pkg) => {
     setSelectedCourse(pkg)
@@ -633,7 +741,21 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   }
 
   const filteredPackages = getFilteredPackages()
-  const regularPackages = filteredPackages.filter(pkg => String(pkg.category || '').toLowerCase() !== 'promo')
+  
+  const getCourseOrder = (pkg) => {
+    const name = (pkg.name || '').toLowerCase();
+    const category = (pkg.category || '').toLowerCase();
+    if (category === 'tdc' || name.includes('theoretical')) return 1;
+    if (name.includes('motorcycle')) return 2;
+    if (name.includes('pdc') && name.includes('car')) return 3;
+    if (name.includes('tricycle') || name.includes('a1')) return 4;
+    if (name.includes('van') || name.includes('b1') || name.includes('b2') || name.includes('l300')) return 5;
+    return 6;
+  };
+
+  const regularPackages = filteredPackages
+    .filter(pkg => String(pkg.category || '').toLowerCase() !== 'promo')
+    .sort((a, b) => getCourseOrder(a) - getCourseOrder(b));
   const promoBundlePackages = filteredPackages.filter(pkg => String(pkg.category || '').toLowerCase() === 'promo')
 
   const getPriceDisplay = (pkg, dash = ' - ') => {
@@ -706,6 +828,11 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
               onClick={() => handleViewCourse(pkg)}
             >
               {pkg.name}
+              {String(pkg.category || '').toUpperCase() !== 'PROMO' && (String(pkg.category || '').toUpperCase() === 'TDC' || (pkg.name || '').toLowerCase().includes('tdc')) ? (
+                <span className="text-[10px] text-gray-500 font-normal ml-2 block sm:inline">*REQUIRED FOR STUDENT PERMIT</span>
+              ) : String(pkg.category || '').toUpperCase() !== 'PROMO' && (String(pkg.category || '').toUpperCase() === 'PDC' || (pkg.name || '').toLowerCase().includes('pdc')) ? (
+                <span className="text-[10px] text-gray-500 font-normal ml-2 block sm:inline">*REQUIRED FOR DRIVERS LICENSE</span>
+              ) : null}
             </button>
             {pkg.popular && (
               <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3B74C] text-[#2157da] shadow-sm whitespace-nowrap flex-shrink-0 mt-0.5">
@@ -755,12 +882,17 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                 <td className="py-4 px-6 align-middle">
                   <div className="flex flex-col">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <h3
-                        className="text-sm sm:text-base font-bold text-[#2157da] cursor-pointer hover:underline"
-                        onClick={() => handleViewCourse(pkg)}
-                      >
-                        {pkg.name}
-                      </h3>
+                        <h3
+                          className="text-sm sm:text-base font-bold text-[#2157da] cursor-pointer hover:underline"
+                          onClick={() => handleViewCourse(pkg)}
+                        >
+                          {pkg.name}
+                          {String(pkg.category || '').toUpperCase() !== 'PROMO' && (String(pkg.category || '').toUpperCase() === 'TDC' || (pkg.name || '').toLowerCase().includes('tdc')) ? (
+                            <span className="text-[10px] text-gray-500 font-normal ml-2 italic">*REQUIRED FOR STUDENT PERMIT</span>
+                          ) : String(pkg.category || '').toUpperCase() !== 'PROMO' && (String(pkg.category || '').toUpperCase() === 'PDC' || (pkg.name || '').toLowerCase().includes('pdc')) ? (
+                            <span className="text-[10px] text-gray-500 font-normal ml-2 italic">*REQUIRED FOR DRIVERS LICENSE</span>
+                          ) : null}
+                        </h3>
                       {pkg.popular && (
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3B74C] text-[#2157da] shadow-sm whitespace-nowrap">
                           BEST SELLER
@@ -893,6 +1025,11 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
               <div className="flex flex-wrap items-center gap-3 mb-6">
                 <h1 className="text-2xl sm:text-3xl font-black text-[#2157da]">
                   {selectedCourse.name}
+                  {selectedCourse.category !== 'PROMO' && (selectedCourse.category === 'TDC' || (selectedCourse.name || '').toLowerCase().includes('tdc') || (selectedCourse.shortName || '').toLowerCase().includes('tdc')) ? (
+                    <span className="text-xs sm:text-sm text-gray-500 font-normal ml-3">*REQUIRED FOR STUDENT PERMIT</span>
+                  ) : selectedCourse.category !== 'PROMO' && (selectedCourse.category === 'PDC' || (selectedCourse.name || '').toLowerCase().includes('pdc')) ? (
+                    <span className="text-xs sm:text-sm text-gray-500 font-normal ml-3">*REQUIRED FOR DRIVERS LICENSE</span>
+                  ) : null}
                 </h1>
               </div>
 

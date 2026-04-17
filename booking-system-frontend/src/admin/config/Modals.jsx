@@ -157,7 +157,7 @@ export const BranchQrModal = ({ isOpen, onClose, branch }) => {
         ctx.textAlign = 'center';
         ctx.fillStyle = '#0f172a';
         ctx.font = '900 64px System-ui, -apple-system, sans-serif';
-        ctx.fillText('Official Registration QR', canvasW / 2, 120 + logoH + 180);
+        ctx.fillText('Official Master Driving QR', canvasW / 2, 120 + logoH + 180);
 
         ctx.fillStyle = currentTheme.colors[0];
         ctx.font = '800 42px System-ui, -apple-system, sans-serif';
@@ -193,7 +193,7 @@ export const BranchQrModal = ({ isOpen, onClose, branch }) => {
         
         ctx.fillStyle = '#64748b';
         ctx.font = '600 28px System-ui, -apple-system, sans-serif';
-        ctx.fillText('Building Champions on the Road • Since 1999', canvasW / 2, footerY + 50);
+        ctx.fillText('Building Champions on the Road • Since 2021', canvasW / 2, footerY + 50);
 
         URL.revokeObjectURL(qrUrlObj);
         return canvas;

@@ -138,7 +138,9 @@ const normalizePermissionList = (permissions) => {
 
 const getDefaultPermissionsForRole = (role) => {
     const normalizedRole = normalizeRoleValue(role);
-    return [...(ROLE_PERMISSION_PRESETS[normalizedRole] || [])];
+    // Correct mapping for underscored roles
+    const roleKey = normalizedRole === 'super_admin' ? 'admin' : normalizedRole;
+    return [...(ROLE_PERMISSION_PRESETS[roleKey] || [])];
 };
 
 const getPermissionGroupsForDisplay = (permissions) => {
@@ -216,10 +218,14 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
 
     const currentPermissionSet = new Set(normalizePermissionList(currentUserPermissions));
     const normalizedCurrentUserRole = normalizeRoleValue(currentUserRole);
+    const isSuperAdmin = normalizedCurrentUserRole === 'super_admin';
+    const isBranchManager = normalizedCurrentUserRole === 'admin';
+    const isAccessManager = isSuperAdmin || isBranchManager;
+
     const isCurrentUserAdmin = normalizedCurrentUserRole === 'admin';
     const isAddMode = !editingUser;
     const isAdminAddingUser = isCurrentUserAdmin && isAddMode;
-    const isAdminTargetRole = normalizeRoleValue(userData.role) === 'admin';
+    const isAdminTargetRole = normalizeRoleValue(userData.role) === 'admin' || normalizeRoleValue(userData.role) === 'super_admin';
     const limitPermissionPickerToAdmin = isAdminAddingUser || isAdminTargetRole;
     const visiblePermissionGroups = limitPermissionPickerToAdmin
         ? PERMISSION_GROUPS.map((group) => ({
@@ -230,10 +236,10 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
     const visiblePermissionKeys = visiblePermissionGroups.flatMap((group) => group.permissions.map((permission) => permission.key));
     const visiblePermissionKeySet = new Set(visiblePermissionKeys);
 
-    const canCreateUsers = currentPermissionSet.has('accounts.users.create');
-    const canEditUsers = currentPermissionSet.has('accounts.users.edit');
-    const canToggleUserStatus = currentPermissionSet.has('accounts.users.status');
-    const canResetPasswords = currentPermissionSet.has('accounts.users.reset_password');
+    const canCreateUsers = currentPermissionSet.has('accounts.users.create') && isAccessManager;
+    const canEditUsers = currentPermissionSet.has('accounts.users.edit') && isAccessManager;
+    const canToggleUserStatus = currentPermissionSet.has('accounts.users.status') && isAccessManager;
+    const canResetPasswords = currentPermissionSet.has('accounts.users.reset_password') && isAccessManager;
 
     // Fetch users and branches from database
     useEffect(() => {
@@ -579,6 +585,11 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                 // Check if email has changed
                 const emailChanged = userData.email !== originalEmail;
 
+                // Normalize role for database
+                let submitRole = normalizeRoleValue(userData.role);
+                if (submitRole === 'super admin') submitRole = 'super_admin';
+                if (submitRole === 'walkin student') submitRole = 'walkin_student';
+
                 // Update existing user
                 const response = await adminAPI.updateUser(editingUser.id, {
                     firstName: userData.firstName,
@@ -592,7 +603,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                     zipCode: userData.zipCode,
                     contactNumber: userData.contactNumber,
                     email: userData.email,
-                    role: userData.role.toLowerCase(),
+                    role: submitRole,
                     branch: userData.branch,
                     status: userData.status.toLowerCase(),
                     emailChanged: emailChanged,
@@ -606,6 +617,11 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                     showNotification('User updated successfully!', 'success');
                 }
             } else {
+                // Normalize role for database
+                let submitRole = normalizeRoleValue(userData.role);
+                if (submitRole === 'super admin') submitRole = 'super_admin';
+                if (submitRole === 'walkin student') submitRole = 'walkin_student';
+
                 // Create new user (Admin only) - password auto-generated
                 const response = await adminAPI.createUser({
                     firstName: userData.firstName,
@@ -619,7 +635,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                     zipCode: userData.zipCode,
                     contactNumber: userData.contactNumber,
                     email: userData.email,
-                    role: userData.role.toLowerCase(),
+                    role: submitRole,
                     branch: userData.branch,
                     permissions: normalizePermissionList(userData.permissions),
                 });

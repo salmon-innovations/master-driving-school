@@ -194,6 +194,7 @@ const initiatePayment = async (req, res) => {
         branchName,
         branchAddress,
         tdcScheduleLabel,
+        promoPct = 0
     } = req.body;
 
     // TEST MODE: skip all DB writes and send enrollment email only.
@@ -280,6 +281,7 @@ const initiatePayment = async (req, res) => {
                 courseTypeTdc,
                 subtotal: req.body.subtotal || 0,
                 promoDiscount: req.body.promoDiscount || 0,
+                promoPct: req.body.promoPct || 0,
                 convenienceFee: req.body.convenienceFee || 0,
                 totalAmount: req.body.totalAmount || req.body.finalTotal || req.body.grandTotal || 0,
                 tdcLabel: (() => {
@@ -438,6 +440,7 @@ const initiatePayment = async (req, res) => {
             addonsDetailed: Array.isArray(req.body.addonsDetailed) ? req.body.addonsDetailed : [],
             subtotal: req.body.subtotal || 0,
             promoDiscount: req.body.promoDiscount || 0,
+            promoPct: promoPct || 0,
             convenienceFee: req.body.convenienceFee || 0,
             totalAmount: req.body.totalAmount || req.body.finalTotal || req.body.grandTotal || 0,
             initialAmountPaid: Number(amount || 0),
@@ -672,6 +675,7 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
                         courseTypeTdc: meta.courseTypeTdc || null,
                         subtotal: meta.subtotal || 0,
                         promoDiscount: meta.promoDiscount || 0,
+                        promoPct: meta.promoPct || 0,
                         convenienceFee: meta.convenienceFee || 0,
                         totalAmount: meta.totalAmount || 0,
                         tdcLabel: (() => {

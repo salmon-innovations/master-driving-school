@@ -45,11 +45,28 @@ const getCourseSummaryFromTransaction = (txn) => {
     const notesJson = parseNotesJson(txn?.notes);
     const list = Array.isArray(notesJson?.courseList) ? notesJson.courseList.filter(Boolean) : [];
     if (list.length > 0) {
-        const labels = [...new Set(list.map((c) => formatCourseWithType(c?.name, c?.type)).filter(Boolean))];
+        const hasBundle = list.some(item => {
+            const n = String(item?.name || '').toLowerCase();
+            const c = String(item?.category || '').toLowerCase();
+            return n.includes('bundle') || n.includes('promo') || c.includes('bundle') || c.includes('promo');
+        });
+
+        const displayList = hasBundle 
+            ? list.filter(item => {
+                const n = String(item?.name || '').toLowerCase();
+                const c = String(item?.category || '').toLowerCase();
+                const isRoot = n.includes('bundle') || n.includes('promo') || c.includes('bundle') || c.includes('promo');
+                const isComponent = !isRoot && (n.includes('pdc') || n.includes('tdc') || c.includes('pdc') || c.includes('tdc'));
+                return !isComponent;
+            })
+            : list;
+
+        const labels = [...new Set(displayList.map((c) => formatCourseWithType(c?.name, c?.type)?.replace(/\(Bundle\)/g, '')?.trim()).filter(Boolean))];
         const names = [...new Set(list.map((c) => c?.name).filter(Boolean))];
         const shortLabel = labels.length > 1
             ? `${labels.length} courses: ${labels.slice(0, 2).join(', ')}${labels.length > 2 ? ` +${labels.length - 2} more` : ''}`
             : (labels[0] || txn?.course_name || 'N/A');
+        
         return {
             courseSummary: shortLabel,
             courseSummaryFull: labels.join(', '),
@@ -58,7 +75,7 @@ const getCourseSummaryFromTransaction = (txn) => {
         };
     }
 
-    const fallbackLabel = formatCourseWithType(txn?.course_name || 'N/A', txn?.course_type || '');
+    const fallbackLabel = formatCourseWithType(txn?.course_name || 'N/A', txn?.course_type || '')?.replace(/\(Bundle\)/g, '')?.trim();
     return {
         courseSummary: fallbackLabel,
         courseSummaryFull: fallbackLabel,
@@ -71,10 +88,26 @@ const getCourseSummaryFromBooking = (booking) => {
     const notesJson = parseNotesJson(booking?.notes);
     const list = Array.isArray(notesJson?.courseList) ? notesJson.courseList.filter(Boolean) : [];
     if (list.length > 0) {
-        const labels = [...new Set(list.map((item) => toCompactCourseLabel(item)).filter(Boolean))];
+        const hasBundle = list.some(item => {
+            const n = String(item?.name || '').toLowerCase();
+            const c = String(item?.category || '').toLowerCase();
+            return n.includes('bundle') || n.includes('promo') || c.includes('bundle') || c.includes('promo');
+        });
+
+        const displayList = hasBundle 
+            ? list.filter(item => {
+                const n = String(item?.name || '').toLowerCase();
+                const c = String(item?.category || '').toLowerCase();
+                const isRoot = n.includes('bundle') || n.includes('promo') || c.includes('bundle') || c.includes('promo');
+                const isComponent = !isRoot && (n.includes('pdc') || n.includes('tdc') || c.includes('pdc') || c.includes('tdc'));
+                return !isComponent;
+            })
+            : list;
+
+        const labels = [...new Set(displayList.map((item) => toCompactCourseLabel(item)?.replace(/\(Bundle\)/g, '')?.trim()).filter(Boolean))];
         return {
             courseSummary: labels.join(', '),
-            courseCount: labels.length,
+            courseCount: list.length,
         };
     }
 
@@ -145,10 +178,22 @@ const resolveBookingAssessment = (booking = {}) => {
 
     const hasBundleInNotes = notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'TDC')
         && notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'PDC');
-    const fallbackPromoBase = notesCourseTotal + notesAddonTotal + notesConvenience;
+    const fallbackPromoBase = notesCourseTotal + notesAddonTotal;
     const fallbackPromoDiscount = hasBundleInNotes ? Number((fallbackPromoBase * 0.03).toFixed(2)) : 0;
     const notesPromoRaw = Number(notesJson?.promoDiscount || booking?.promo_discount || 0);
-    const notesPromoDiscount = Math.max(0, notesPromoRaw > 0 ? notesPromoRaw : fallbackPromoDiscount);
+    const storedPct = Number(notesJson?.promoPct || 0);
+    
+    let promoDiscount = 0;
+    if (storedPct > 0) {
+        // Recalculate based on stored percentage to avoid corruption from full-price calculations
+        // The percentage applies ONLY to the subtotal (courses + add-ons), NOT the convenience fee
+        promoDiscount = Number(((notesCourseTotal + notesAddonTotal) * (storedPct / 100)).toFixed(2));
+    } else if (notesPromoRaw > 0) {
+        promoDiscount = notesPromoRaw;
+    } else {
+        promoDiscount = fallbackPromoDiscount;
+    }
+    const notesPromoDiscount = Math.max(0, promoDiscount);
 
     const notesComputedTotal = Math.max(0, Number((notesCourseTotal + notesAddonTotal + notesConvenience - notesPromoDiscount).toFixed(2)));
 
@@ -199,15 +244,19 @@ const getEffectiveBalanceDue = (booking = {}) => {
     return resolveBookingAssessment(booking).remaining;
 };
 
-const toCompactCourseLabel = (item = {}) => {
+const toCompactCourseLabel = (item = {}, hideRequirements = false) => {
     const source = `${item?.name || ''} ${item?.type || ''} ${item?.category || ''}`.toUpperCase();
     const hasTdc = source.includes('TDC') || source.includes('THEORETICAL');
     const hasPdc = source.includes('PDC') || source.includes('PRACTICAL');
 
+    const isPromo = source.includes('PROMO');
+    if (isPromo) return item?.name || 'Course';
+
     if (hasTdc) {
-        if (source.includes('F2F') || source.includes('FACE TO FACE')) return 'TDC F2F';
-        if (source.includes('ONLINE')) return 'TDC Online';
-        return 'TDC';
+        let label = 'TDC';
+        if (source.includes('F2F') || source.includes('FACE TO FACE')) label = 'TDC F2F';
+        else if (source.includes('ONLINE')) label = 'TDC Online';
+        return label;
     }
 
     if (hasPdc) {
@@ -223,7 +272,8 @@ const toCompactCourseLabel = (item = {}) => {
         if (source.includes('MANUAL')) transmission = 'Manual';
         else if (source.includes('AUTOMATIC')) transmission = 'Automatic';
 
-        return ['PDC', vehicle, transmission].filter(Boolean).join(' ');
+        const pdcLabel = ['PDC', vehicle, transmission].filter(Boolean).join(' ');
+        return pdcLabel;
     }
 
     return item?.name || 'Course';
@@ -235,62 +285,83 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
         ? notesJson.courseList
         : [{ name: txn?.courseFull || txn?.course || 'Course', type: '', category: '' }];
 
-    const byName = new Map((coursesList || []).map((c) => [String(c?.name || '').trim().toLowerCase(), Number(c?.price || 0)]));
-    const courseLines = courseList.map((item) => ({
-        label: toCompactCourseLabel(item),
-        amount: byName.get(String(item?.name || '').trim().toLowerCase()) || 0,
-        rawName: item?.name || 'Course',
-    }));
+    const byName = new Map((coursesList || []).map((c) => [
+        String(c?.name || '').trim().toLowerCase(), 
+        { price: Number(c?.price || 0), discount: Number(c?.discount || 0) }
+    ]));
+    
+    const hasBundleInTxn = courseList.some(item => 
+        String(item?.name || '').toLowerCase().includes('bundle') || 
+        String(item?.category || '').toLowerCase().includes('promo')
+    );
+
+    // Dynamic discount from Course Management
+    let appliedDiscountPct = 0;
+
+    const courseLines = courseList.map((item) => {
+        const rawName = String(item?.name || '').toLowerCase();
+        const courseData = byName.get(rawName) || { price: 0, discount: 0 };
+        const isComp = hasBundleInTxn && (rawName.includes('tdc') || rawName.includes('pdc'));
+        const isBundleRoot = rawName.includes('bundle') || rawName.includes('promo');
+        
+        // Track the highest discount found among the selected courses
+        if (courseData.discount > appliedDiscountPct) {
+            appliedDiscountPct = courseData.discount;
+        }
+
+        return {
+            label: toCompactCourseLabel(item, hasBundleInTxn),
+            amount: (isComp && !isBundleRoot) ? 0 : (Number(item?.price || 0) || courseData.price || 0),
+            rawName: item?.name || 'Course',
+            isBundleComponent: isComp && !isBundleRoot
+        };
+    });
 
     const courseSubtotal = courseLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    
+    let convenienceFee = Number(notesJson?.convenienceFee || txn?.convenience_fee || 0);
+    let promoDiscount = Number(notesJson?.promoDiscount || txn?.promo_discount || 0);
+    
     const hasReviewer = Boolean(notesJson?.hasReviewer);
     const hasVehicleTips = Boolean(notesJson?.hasVehicleTips);
     const reviewerEach = 30;
     const vehicleTipsEach = 20;
     const convenienceEach = 25;
-    const promoPct = 3;
-
-    const hasBundle = courseList.some((c) => String(c?.category || c?.name || '').toLowerCase().includes('tdc'))
-        && courseList.some((c) => String(c?.category || c?.name || '').toLowerCase().includes('pdc'));
 
     const paidAmount = Number(txn?.rawAmount || 0);
     const isDownpayment = String(txn?.paymentType || '').toLowerCase().includes('down');
-    const assessedTarget = isDownpayment ? paidAmount * 2 : paidAmount;
-    const promoFactor = hasBundle ? (1 - (promoPct / 100)) : 1;
-    const targetBaseBeforePromo = promoFactor > 0 ? (assessedTarget / promoFactor) : assessedTarget;
 
-    const addonUnit = (hasReviewer ? reviewerEach : 0) + (hasVehicleTips ? vehicleTipsEach : 0);
-    const convenienceCandidates = [
-        convenienceEach * Math.max(1, courseList.length),
-        convenienceEach,
-    ];
-
-    let addonMultiplier = (hasReviewer || hasVehicleTips) ? 1 : 0;
-    let convenienceFee = convenienceEach;
-    if (addonUnit > 0 && targetBaseBeforePromo > 0) {
-        const best = convenienceCandidates
-            .map((candidate) => {
-                const rawMultiplier = (targetBaseBeforePromo - courseSubtotal - candidate) / addonUnit;
-                const rounded = Math.max(0, Math.round(rawMultiplier));
-                const rebuilt = courseSubtotal + candidate + (rounded * addonUnit);
-                return { candidate, rounded, error: Math.abs(rebuilt - targetBaseBeforePromo) };
-            })
-            .sort((a, b) => a.error - b.error)[0];
-        addonMultiplier = Number(best?.rounded ?? addonMultiplier);
-        convenienceFee = Number(best?.candidate ?? convenienceFee);
+    if (convenienceFee === 0) {
+        const method = String(txn?.method || '').toLowerCase();
+        const isCash = method.includes('cash');
+        convenienceFee = isCash ? 0 : convenienceEach;
     }
 
-    const reviewerTotal = hasReviewer ? reviewerEach * addonMultiplier : 0;
-    const vehicleTipsTotal = hasVehicleTips ? vehicleTipsEach * addonMultiplier : 0;
+    const reviewerTotal = hasReviewer ? reviewerEach : 0;
+    const vehicleTipsTotal = hasVehicleTips ? vehicleTipsEach : 0;
     const addonLines = [
-        ...(reviewerTotal > 0 ? [{ name: `LTO Exam Reviewer${addonMultiplier > 1 ? ` x${addonMultiplier}` : ''}`, price: reviewerTotal }] : []),
-        ...(vehicleTipsTotal > 0 ? [{ name: `Vehicle Maintenance Tips${addonMultiplier > 1 ? ` x${addonMultiplier}` : ''}`, price: vehicleTipsTotal }] : []),
+        ...(reviewerTotal > 0 ? [{ name: 'LTO Exam Reviewer', price: reviewerTotal }] : []),
+        ...(vehicleTipsTotal > 0 ? [{ name: 'Vehicle Maintenance Tips', price: vehicleTipsTotal }] : []),
     ];
 
     const subtotal = courseSubtotal + reviewerTotal + vehicleTipsTotal;
-    const promoDiscount = hasBundle ? Number((((subtotal + convenienceFee) * promoPct) / 100).toFixed(2)) : 0;
+    
+    // Internal discount calculation using the dynamic percentage from Course Management
+    // We prioritize the dynamic percentage from Course Management OR the stored percentage in notes
+    const storedPct = Number(notesJson?.promoPct || 0);
+    const effectivePct = appliedDiscountPct > 0 ? appliedDiscountPct : storedPct;
+
+    if (effectivePct > 0) {
+        // ALWAYS recalculate if a percentage is available to ensure it applies to the CURRENT subtotal
+        // The percentage applies ONLY to the subtotal (courses + add-ons), NOT the convenience fee
+        promoDiscount = Number((subtotal * (effectivePct / 100)).toFixed(2));
+    } else if (promoDiscount === 0 && hasBundleInTxn) {
+        // Legacy 3% fallback for bundles without explicit percentages
+        promoDiscount = Number((subtotal * 0.03).toFixed(2));
+    }
+
     const netTotal = Number((subtotal + convenienceFee - promoDiscount).toFixed(2));
-    const remainingBalance = getPaymentStatusKey(txn?.status) === 'partial-payment'
+    const remainingBalance = (isDownpayment || getPaymentStatusKey(txn?.status) === 'partial-payment')
         ? Math.max(0, Number((netTotal - paidAmount).toFixed(2)))
         : 0;
 
@@ -300,6 +371,7 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
         subtotal,
         convenienceFee,
         promoDiscount,
+        promoPct: appliedDiscountPct, // Pass the percentage back for display
         netTotal,
         remainingBalance,
     };
@@ -727,20 +799,49 @@ const SalePayment = () => {
 
     const isSuperAdmin = String(userRole || '').toLowerCase() === 'super_admin';
 
+    const totalTransactionsCount = pageFilteredHistory.length;
+    const grossVal = branchRevenueBreakdown.total;
+    
+    const getShare = (val) => {
+        if (!grossVal || grossVal === 0) return '0%';
+        return `${Math.round((val / grossVal) * 100)}%`;
+    };
+
     const stats = [
         {
             label: 'Gross Revenue',
             value: `P ${branchRevenueBreakdown.total.toLocaleString()}`,
-            trend: '0%',
+            trend: 'Total Sales',
             color: 'blue'
         },
+        {
+            label: 'Net Revenue',
+            value: `P ${branchRevenueBreakdown.course.toLocaleString()}`,
+            trend: getShare(branchRevenueBreakdown.course),
+            color: 'indigo'
+        },
         ...(isSuperAdmin ? [
-            { label: 'Add-ons Revenue', value: `P ${branchRevenueBreakdown.addons.toLocaleString()}`, trend: '0%', color: 'purple' },
-            { label: 'Convenience Fees', value: `P ${branchRevenueBreakdown.convenience.toLocaleString()}`, trend: '0%', color: 'indigo' }
+            { label: 'Add-ons Revenue', value: `P ${branchRevenueBreakdown.addons.toLocaleString()}`, trend: getShare(branchRevenueBreakdown.addons), color: 'purple' },
+            { label: 'Convenience Fees', value: `P ${branchRevenueBreakdown.convenience.toLocaleString()}`, trend: getShare(branchRevenueBreakdown.convenience), color: 'blue' }
         ] : []),
-        { label: 'Completed Payments', value: branchStats.completed.toString(), trend: '0%', color: 'green' },
-        { label: 'Partial Payment', value: branchPartialPaymentCount.toString(), trend: `P ${branchPartialPayment.toLocaleString()}`, color: 'orange' },
-        { label: 'Refunds / Cancelled', value: `P ${branchStats.refunds.toLocaleString()}`, trend: '0%', color: 'red' },
+        { 
+            label: 'Completed Payments', 
+            value: branchStats.completed.toString(), 
+            trend: totalTransactionsCount > 0 ? `${Math.round((branchStats.completed / totalTransactionsCount) * 100)}%` : '0%', 
+            color: 'green' 
+        },
+        { 
+            label: 'Partial Payment', 
+            value: branchPartialPaymentCount.toString(), 
+            trend: `P ${branchPartialPayment.toLocaleString()}`, 
+            color: 'orange' 
+        },
+        { 
+            label: 'Refunds / Cancelled', 
+            value: `P ${branchStats.refunds.toLocaleString()}`, 
+            trend: getShare(branchStats.refunds), 
+            color: 'red' 
+        },
     ];
 
     // Chart data — derived from branch + period filtered history
@@ -1063,7 +1164,10 @@ const SalePayment = () => {
         const remainingBalanceValue = isPartialPayment
             ? (Number(unpaidRef?.balance_due || 0) > 0 ? Number(unpaidRef.balance_due) : breakdown.remainingBalance)
             : 0;
-        const toPeso = (v) => `P ${Number(v || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const toPeso = (v, isIncluded = false) => {
+            if (isIncluded && Number(v) === 0) return 'Included';
+            return `P ${Number(v || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        };
 
         const html = `
             <html>
@@ -1147,7 +1251,7 @@ const SalePayment = () => {
                     <div class="breakdown-head">Payment Breakdown</div>
                     <div class="breakdown-head" style="background:#fff;">Courses & Training</div>
                     ${breakdown.courseLines.map((line) => `
-                        <div class="line"><span>${line.label}</span><span class="line-strong">${toPeso(line.amount)}</span></div>
+                        <div class="line"><span>${line.label}</span><span class="line-strong">${toPeso(line.amount, line.isBundleComponent)}</span></div>
                     `).join('')}
                     <div class="breakdown-head" style="background:#fff;">Custom Add-ons</div>
                     ${breakdown.addonLines.length > 0
@@ -1160,7 +1264,7 @@ const SalePayment = () => {
                     <div class="line"><span>Subtotal</span><span class="line-strong">${toPeso(breakdown.subtotal)}</span></div>
                     <div class="line"><span>Convenience Fee</span><span class="line-strong">${toPeso(breakdown.convenienceFee)}</span></div>
                     ${breakdown.promoDiscount > 0
-                        ? `<div class="line line-discount"><span>Promo Discount (3%)</span><span class="line-strong">-${toPeso(breakdown.promoDiscount).replace('P ', '')}</span></div>`
+                        ? `<div class="line line-discount"><span>Discount (${breakdown.promoPct}%)</span><span class="line-strong">-${toPeso(breakdown.promoDiscount).replace('P ', '')}</span></div>`
                         : ''
                     }
                     <div class="line line-total"><span>Net Total</span><span>${toPeso(breakdown.netTotal)}</span></div>
@@ -1432,10 +1536,16 @@ const SalePayment = () => {
                         <div className="rev-info">
                             <span className="label">{stat.label}</span>
                             <div className="value-group">
-                                <h3>{stat.value}</h3>
-                                <span className={`trend ${stat.trend.startsWith('+') ? 'up' : 'down'}`}>
-                                    {stat.trend}
-                                </span>
+                                {loading ? (
+                                    <div className="sale-skeleton-cell" style={{ width: '80px', height: '24px', marginTop: '8px' }}></div>
+                                ) : (
+                                    <h3>{stat.value}</h3>
+                                )}
+                                {!loading && (
+                                    <span className={`trend ${stat.trend.startsWith('+') ? 'up' : 'down'}`}>
+                                        {stat.trend}
+                                    </span>
+                                )}
                             </div>
                             {Array.isArray(stat.metaLines) && stat.metaLines.length > 0 && (
                                 <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '4px', background: 'var(--subtle-bg, #f7f9fc)', padding: '8px', borderRadius: '6px' }}>
@@ -1601,7 +1711,7 @@ const SalePayment = () => {
                     </div>
                 </div>
                 <div className="txn-table-wrapper">
-                    <table className="txn-table">
+                    <table className="txn-table recent-txns-table">
                         <thead>
                             <tr>
                                 <th>Transaction ID</th>
@@ -1610,7 +1720,7 @@ const SalePayment = () => {
                                 <th>Method</th>
                                 <th>Amount</th>
                                 <th>Status</th>
-                                <th style={{ textAlign: 'right' }}>Action</th>
+                                <th style={{ textAlign: 'center' }}>Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1628,10 +1738,10 @@ const SalePayment = () => {
                                 ))
                             ) : recentTransactions.length > 0 ? recentTransactions.map(txn => (
                                 <tr key={txn.id}>
-                                    <td className="txn-id">{txn.id}</td>
-                                    <td className="st-name">{txn.student}</td>
-                                    <td>{txn.date}</td>
-                                    <td>
+                                    <td data-label="Transaction ID" className="txn-id">{txn.id}</td>
+                                    <td data-label="Student Name" className="st-name" style={{ textAlign: 'left' }}>{txn.student}</td>
+                                    <td data-label="Date">{txn.date}</td>
+                                    <td data-label="Method">
                                         <span
                                             className={`method-tag ${txn.method?.toLowerCase().replace(' ', '-')} clickable-tag`}
                                             onClick={() => {
@@ -1643,14 +1753,14 @@ const SalePayment = () => {
                                             {txn.method || 'Cash'}
                                         </span>
                                     </td>
-                                    <td className="amount">{txn.amount}</td>
-                                    <td>
-                                        <span className={`status-pill ${txn.status?.toLowerCase()}`}>
+                                    <td data-label="Amount" className="amount">{txn.amount}</td>
+                                    <td data-label="Status">
+                                        <span className={`status-pill ${txn.status?.toLowerCase().replace(' ', '-')}`}>
                                             {txn.status}
                                         </span>
                                     </td>
-                                    <td style={{ textAlign: 'right' }}>
-                                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                                    <td data-label="Action" style={{ textAlign: 'center' }}>
+                                        <div className="action-btns" style={{ justifyContent: 'center' }}>
                                             <button className="receipt-btn" onClick={() => handlePrintReceipt(txn)} title="Print Receipt">
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9V2h12v7"></path><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                                             </button>
@@ -1709,17 +1819,16 @@ const SalePayment = () => {
                         </div>
                     </div>
                     <div className="txn-table-wrapper">
-                        <table className="txn-table">
+                        <table className="txn-table partial-bookings-table">
                             <thead>
                                 <tr>
                                     <th>Booking ID</th>
-                                    <th>Student Name</th>
+                                    <th>Student & Contact</th>
                                     <th>Course</th>
                                     <th>Paid</th>
                                     <th>Balance Due</th>
                                     <th>Payment Type</th>
                                     <th>Status</th>
-                                    <th>Contact</th>
                                     <th style={{ textAlign: 'center' }}>Action</th>
                                 </tr>
                             </thead>
@@ -1728,9 +1837,14 @@ const SalePayment = () => {
                                     const effectiveBalanceDue = getEffectiveBalanceDue(b);
                                     return (
                                     <tr key={b.id}>
-                                        <td className="txn-id">BK-{String(b.id).padStart(3, '0')}</td>
-                                        <td className="st-name">{b.student_name}</td>
-                                        <td>
+                                        <td data-label="Booking ID" className="txn-id">BK-{String(b.id).padStart(3, '0')}</td>
+                                        <td data-label="Student" className="st-name" style={{ textAlign: 'left' }}>
+                                            <div>{b.student_name}</div>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-secondary, #64748b)', fontWeight: 500, marginTop: '2px' }}>
+                                                {b.student_contact || 'N/A'}
+                                            </div>
+                                        </td>
+                                        <td data-label="Course">
                                             <div>{b.course_summary || b.course_name}</div>
                                             {(Number(b.course_count || 1) > 1) && (
                                                 <div style={{ fontSize: '11px', color: 'var(--text-secondary, #64748b)', marginTop: '2px' }}>
@@ -1738,14 +1852,13 @@ const SalePayment = () => {
                                                 </div>
                                             )}
                                         </td>
-                                        <td className="amount" style={{ color: '#16a34a' }}>P {parseFloat(b.total_amount || 0).toLocaleString()}</td>
-                                        <td className="amount" style={{ color: '#ea580c', fontWeight: 700 }}>P {effectiveBalanceDue.toLocaleString()}</td>
-                                        <td>{b.payment_type}</td>
-                                        <td>
+                                        <td data-label="Paid" className="amount" style={{ color: '#16a34a' }}>P {parseFloat(b.total_amount || 0).toLocaleString()}</td>
+                                        <td data-label="Balance Due" className="amount" style={{ color: '#ea580c', fontWeight: 700 }}>P {effectiveBalanceDue.toLocaleString()}</td>
+                                        <td data-label="Payment Type">{b.payment_type}</td>
+                                        <td data-label="Status">
                                             <span className="status-pill partial-payment">Partial Payment</span>
                                         </td>
-                                        <td>{b.student_contact || 'N/A'}</td>
-                                        <td style={{ textAlign: 'center' }}>
+                                        <td data-label="Action" style={{ textAlign: 'center' }}>
                                             <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
                                                 <button
                                                     className="mark-paid-icon-btn"
@@ -2051,9 +2164,9 @@ const SalePayment = () => {
                                     <tbody>
                                         {pagedHistory.length > 0 ? pagedHistory.map((txn, idx) => (
                                             <tr key={txn.id} className={idx % 2 === 1 ? 'row-alt' : ''}>
-                                                <td className="txn-id">{txn.id}</td>
-                                                <td className="st-name">{txn.student}</td>
-                                                <td className="course-name" title={txn.courseFull || txn.course}>
+                                                <td data-label="Transaction ID" className="txn-id">{txn.id}</td>
+                                                <td data-label="Student Name" className="st-name">{txn.student}</td>
+                                                <td data-label="Course" className="course-name" title={txn.courseFull || txn.course}>
                                                     <div>{txn.course}</div>
                                                     {txn.courseCount > 1 && (
                                                         <div style={{ fontSize: '11px', color: 'var(--text-secondary, #64748b)', marginTop: '2px' }}>
@@ -2061,20 +2174,20 @@ const SalePayment = () => {
                                                         </div>
                                                     )}
                                                 </td>
-                                                <td style={{ fontSize: '12px', color: 'var(--text-secondary, #64748b)' }}>{txn.branch || '—'}</td>
-                                                <td className="date">{txn.date}</td>
-                                                <td>
+                                                <td data-label="Branch" style={{ fontSize: '12px', color: 'var(--text-secondary, #64748b)' }}>{txn.branch || '—'}</td>
+                                                <td data-label="Date" className="date">{txn.date}</td>
+                                                <td data-label="Method">
                                                     <span className={`method-tag ${txn.method.toLowerCase().replace(' ', '-')}`}>
                                                         {txn.method}
                                                     </span>
                                                 </td>
-                                                <td className="amount">{txn.amount}</td>
-                                                <td>
+                                                <td data-label="Amount" className="amount">{txn.amount}</td>
+                                                <td data-label="Status">
                                                     <span className={`status-pill ${txn.statusKey}`}>
                                                         {txn.status}
                                                     </span>
                                                 </td>
-                                                <td style={{ textAlign: 'center' }}>
+                                                <td data-label="Receipt" style={{ textAlign: 'center' }}>
                                                     <button className="receipt-btn" onClick={() => handlePrintReceipt(txn)} title="Print Receipt">
                                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9V2h12v7"></path><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                                                     </button>
