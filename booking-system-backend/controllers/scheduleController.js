@@ -59,16 +59,17 @@ const extractSecondDaySlotIdsFromNotes = (notes) => {
   return [...new Set(secondDayIds.filter(Boolean).map((id) => Number(id)).filter((id) => Number.isFinite(id)))];
 };
 
-const getGlobalB1B2BookedCount = async (client, date, excludeStudentId = null) => {
+const getGlobalB1B2BookedCount = async (client, date, branchId, excludeStudentId = null) => {
   const db = client && typeof client.query === 'function' ? client : pool;
   const enrolledResult = await db.query(
     `SELECT COUNT(DISTINCT se.student_id) AS booked_count
        FROM schedule_enrollments se
        JOIN schedule_slots ss ON ss.id = se.slot_id
       WHERE ss.date = $1
+        AND ss.branch_id = $2
         AND (ss.course_type ILIKE '%B1%' OR ss.course_type ILIKE '%B2%' OR ss.course_type ILIKE '%VAN%' OR ss.course_type ILIKE '%L300%')
         AND se.enrollment_status NOT IN ('cancelled', 'no-show')`,
-    [date]
+    [date, branchId]
   );
 
   const enrolledCount = Number(enrolledResult.rows[0]?.booked_count || 0);
@@ -77,7 +78,9 @@ const getGlobalB1B2BookedCount = async (client, date, excludeStudentId = null) =
     `SELECT user_id, notes
        FROM bookings
       WHERE LOWER(COALESCE(status, '')) = 'pending'
-        AND created_at >= NOW() - INTERVAL '20 minutes'`
+        AND branch_id = $1
+        AND created_at >= NOW() - INTERVAL '20 minutes'`,
+    [branchId]
   );
 
   const pendingSlotIds = [...new Set(
@@ -103,7 +106,9 @@ const getGlobalB1B2BookedCount = async (client, date, excludeStudentId = null) =
       const hasMatchingB1B2Slot = slotIds.some((slotId) => {
         const meta = slotMetaById.get(Number(slotId));
         if (!meta) return false;
-        return String(meta.date) === String(date) && isB1B2CourseType(meta.course_type);
+        return String(meta.date) === String(date) 
+          && isB1B2CourseType(meta.course_type)
+          && Number(meta.branch_id || 0) === Number(branchId || 0);
       });
       if (hasMatchingB1B2Slot) {
         pendingHolders.add(String(row.user_id));
@@ -114,7 +119,9 @@ const getGlobalB1B2BookedCount = async (client, date, excludeStudentId = null) =
   const activeBookings = await db.query(
     `SELECT user_id, notes
        FROM bookings
-      WHERE LOWER(COALESCE(status, '')) IN ('pending', 'partial_payment', 'paid', 'confirmed', 'completed')`
+      WHERE branch_id = $1
+        AND LOWER(COALESCE(status, '')) IN ('pending', 'partial_payment', 'paid', 'confirmed', 'completed')`,
+    [branchId]
   );
 
   const secondDaySlotsByUser = [];
@@ -139,17 +146,18 @@ const getGlobalB1B2BookedCount = async (client, date, excludeStudentId = null) =
       secondDayMetaById.set(Number(row.id), row);
     });
 
-    const hasSecondDayLock = secondDaySlotsByUser.some((entry) => {
-      return entry.slotIds.some((slotId) => {
+    secondDaySlotsByUser.forEach((entry) => {
+      const hasSecondaryB1B2OnDate = entry.slotIds.some((slotId) => {
         const meta = secondDayMetaById.get(Number(slotId));
         if (!meta) return false;
-        return String(meta.date) === String(date) && isB1B2CourseType(meta.course_type);
+        return String(meta.date) === String(date) 
+          && isB1B2CourseType(meta.course_type)
+          && Number(meta.branch_id || 0) === Number(branchId || 0);
       });
+      if (hasSecondaryB1B2OnDate) {
+        pendingHolders.add(String(entry.userId));
+      }
     });
-
-    if (hasSecondDayLock) {
-      return GLOBAL_B1B2_DAILY_CAPACITY;
-    }
   }
 
   return enrolledCount + pendingHolders.size;
@@ -238,6 +246,7 @@ const getSlotsByDate = async (req, res) => {
                 FROM schedule_enrollments se2
                 JOIN schedule_slots other ON other.id = se2.slot_id
                 WHERE other.date = ss.date
+                  AND other.branch_id = ss.branch_id
                   AND (other.course_type ILIKE '%B1%' OR other.course_type ILIKE '%B2%' OR other.course_type ILIKE '%VAN%' OR other.course_type ILIKE '%L300%')
                   AND se2.enrollment_status NOT IN ('cancelled', 'no-show')
               )
@@ -312,7 +321,12 @@ const getSlotsByDate = async (req, res) => {
 
     const engagedByDate = new Map();
     for (const slotDate of b1b2Dates) {
-      const engaged = await getGlobalB1B2BookedCount(pool, slotDate);
+      // Use effectiveBranchId if available, otherwise we might have to fallback to slot.branch_id 
+      // but since we are within a normalized loop for the current request's results, 
+      // they are usually for the same branch or filtered globally.
+      // We'll use the specific branch_id from the first slot found for that date if effectiveBranchId isn't set (Super Admin view).
+      const branchIdToUse = effectiveBranchId || slots.find(s => s.date === slotDate)?.branch_id;
+      const engaged = await getGlobalB1B2BookedCount(pool, slotDate, branchIdToUse);
       engagedByDate.set(slotDate, engaged);
     }
 

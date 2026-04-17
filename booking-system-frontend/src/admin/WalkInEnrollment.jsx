@@ -1026,31 +1026,45 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 const t = (courseType || '').toLowerCase();
                 const n = (courseName || '').toLowerCase();
 
-                // Categorize the course based on name and type
-                const isMoto = t.includes('motorcycle') || t.includes('moto') || n.includes('motorcycle');
-                const isTricycle = t.includes('tricycle') || t.includes('v1') || n.includes('tricycle');
-                const isB1B2 = t.includes('b1') || t.includes('b2') || t.includes('van') || t.includes('l300')
-                    || n.includes('b1') || n.includes('b2') || n.includes('van') || n.includes('l300');
+                // Categorize based on specific part type (t) first.
+                // Fall back to bundle name (n) only if (t) doesn't have vehicle keywords.
+                const tHasMoto = t.includes('motorcycle') || t.includes('moto') || t.includes('motor');
+                const tHasTricycle = t.includes('tricycle') || t.includes('v1') || t.includes('a1');
+                const tHasB1B2 = t.includes('b1') || t.includes('b2') || t.includes('van') || t.includes('l300');
+                const tHasCar = t.includes('car');
+                const tHasAnyVehicle = tHasMoto || tHasTricycle || tHasB1B2 || tHasCar;
 
-                const reqAT = t.includes('automatic') || t.includes('(at)') || n.includes('automatic') || n.includes('(at)');
-                const reqMT = t.includes('manual') || t.includes('(mt)') || n.includes('manual') || n.includes('(mt)');
+                const isMoto = tHasMoto || (!tHasAnyVehicle && n.includes('motorcycle'));
+                const isTricycle = tHasTricycle || (!tHasAnyVehicle && (n.includes('tricycle') || n.includes('v1') || n.includes('a1')));
+                const isB1B2 = tHasB1B2 || (!tHasAnyVehicle && (n.includes('b1') || n.includes('b2') || n.includes('van') || n.includes('l300')));
+
+                const tHasAT = t.includes('automatic') || t.includes('(at)');
+                const tHasMT = t.includes('manual') || t.includes('(mt)');
+                const tHasAnyTX = tHasAT || tHasMT;
+
+                const reqAT = tHasAT || (!tHasAnyTX && (n.includes('automatic') || n.includes('(at)')));
+                const reqMT = tHasMT || (!tHasAnyTX && (n.includes('manual') || n.includes('(mt)')));
 
                 // Filter PDC slots by category first
                 return pdcSlots.some(s => {
                     if (!isSlotOpen(s)) return false;
                     const ct = (s.course_type || '').toLowerCase();
                     const st = (s.transmission || '').toLowerCase();
+                    const isUniversalTx = st === 'both' || st === 'any' || st === 'all' || !st;
 
                     // Check transmission strictly if a specific one is requested
-                    if (reqAT && !st.includes('at') && !st.includes('automatic')) return false;
-                    if (reqMT && !st.includes('mt') && !st.includes('manual')) return false;
+                    if (reqAT && !st.includes('at') && !st.includes('automatic') && !isUniversalTx) return false;
+                    if (reqMT && !st.includes('mt') && !st.includes('manual') && !isUniversalTx) return false;
 
                     if (!ct) return true;
-                    if (isTricycle) return ct.includes('tricycle');
+                    if (isTricycle) return ct.includes('tricycle') || ct.includes('v1') || ct.includes('a1');
                     if (isB1B2) return ct.includes('b1') || ct.includes('b2') || ct.includes('van') || ct.includes('l300');
-                    if (isMoto) return ct.includes('motorcycle') || ct.includes('moto');
-                    // Generic Car
-                    return !ct.includes('motorcycle') && !ct.includes('moto') && !ct.includes('tricycle') && !ct.includes('b1') && !ct.includes('b2');
+                    if (isMoto) return ct.includes('motorcycle') || ct.includes('moto') || ct.includes('motor');
+                    
+                    // Generic Car (default)
+                    return !ct.includes('motorcycle') && !ct.includes('moto') && !ct.includes('motor') && 
+                           !ct.includes('tricycle') && !ct.includes('v1') && !ct.includes('a1') &&
+                           !ct.includes('b1') && !ct.includes('b2') && !ct.includes('van') && !ct.includes('l300');
                 });
             };
             const avail = {};
@@ -1108,14 +1122,21 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             const courseName = (formData.course?.name || '').toLowerCase();
             const checkPdc = (type) => {
                 const t = (type || '').toLowerCase();
-                // Also check course name to handle courses with ambiguous course_type
-                // (e.g. Motorcycle PDC course saved with course_type='Manual')
-                const isMoto = t.includes('motorcycle') || t.includes('moto') || courseName.includes('motorcycle');
-                const isTricycle = t.includes('tricycle') || t.includes('v1') || courseName.includes('tricycle');
-                const isB1B2 = t.includes('b1') || t.includes('b2') || t.includes('van') || t.includes('l300')
-                    || courseName.includes('b1') || courseName.includes('b2') || courseName.includes('van') || courseName.includes('l300');
+                const cn = (formData.course?.name || '').toLowerCase();
+                
+                // Categorization logic same as hasPdcSlot
+                const tHasMoto = t.includes('motorcycle') || t.includes('moto') || t.includes('motor');
+                const tHasTricycle = t.includes('tricycle') || t.includes('v1') || t.includes('a1');
+                const tHasB1B2 = t.includes('b1') || t.includes('b2') || t.includes('van') || t.includes('l300');
+                const tHasCar = t.includes('car');
+                const tHasAnyVehicle = tHasMoto || tHasTricycle || tHasB1B2 || tHasCar;
+
+                const isMoto = tHasMoto || (!tHasAnyVehicle && cn.includes('motorcycle'));
+                const isTricycle = tHasTricycle || (!tHasAnyVehicle && (cn.includes('tricycle') || cn.includes('v1') || cn.includes('a1')));
+                const isB1B2 = tHasB1B2 || (!tHasAnyVehicle && (cn.includes('b1') || cn.includes('b2') || cn.includes('van') || cn.includes('l300')));
+
                 if (isTricycle)
-                    return pdcSlots.some(s => isSlotOpen(s) && (s.course_type || '').toLowerCase().includes('tricycle'));
+                    return pdcSlots.some(s => isSlotOpen(s) && ((s.course_type || '').toLowerCase().includes('tricycle') || (s.course_type || '').toLowerCase().includes('v1') || (s.course_type || '').toLowerCase().includes('a1')));
                 if (isB1B2)
                     return pdcSlots.some(s => {
                         if (!isSlotOpen(s)) return false;
@@ -1123,22 +1144,23 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         return ct.includes('b1') || ct.includes('b2') || ct.includes('van') || ct.includes('l300');
                     });
                 if (isMoto)
-                    return pdcSlots.some(s => isSlotOpen(s) && (s.course_type || '').toLowerCase().includes('motorcycle'));
+                    return pdcSlots.some(s => isSlotOpen(s) && ((s.course_type || '').toLowerCase().includes('motorcycle') || (s.course_type || '').toLowerCase().includes('moto') || (s.course_type || '').toLowerCase().includes('motor')));
+                
                 if (t === 'carat' || t.includes('automatic'))
                     return pdcSlots.some(s => {
                         if (!isSlotOpen(s)) return false;
                         const ct = (s.course_type || '').toLowerCase();
-                        if (ct.includes('motorcycle') || ct.includes('tricycle') || ct.includes('b1') || ct.includes('b2')) return false;
+                        if (ct.includes('motorcycle') || ct.includes('motor') || ct.includes('tricycle') || ct.includes('v1') || ct.includes('b1') || ct.includes('b2')) return false;
                         const tx = (s.transmission || '').toLowerCase();
-                        return tx.includes('automatic') || tx === 'at';
+                        return tx.includes('automatic') || tx === 'at' || tx === 'both' || tx === 'any' || tx === 'all' || !tx;
                     });
                 if (t === 'carmt' || t === 'car' || t.includes('manual'))
                     return pdcSlots.some(s => {
                         if (!isSlotOpen(s)) return false;
                         const ct = (s.course_type || '').toLowerCase();
-                        if (ct.includes('motorcycle') || ct.includes('tricycle') || ct.includes('b1') || ct.includes('b2')) return false;
+                        if (ct.includes('motorcycle') || ct.includes('motor') || ct.includes('tricycle') || ct.includes('v1') || ct.includes('b1') || ct.includes('b2')) return false;
                         const tx = (s.transmission || '').toLowerCase();
-                        return tx.includes('manual') || tx === 'mt';
+                        return tx.includes('manual') || tx === 'mt' || tx === 'both' || tx === 'any' || tx === 'all' || !tx;
                     });
                 return false;
             };
