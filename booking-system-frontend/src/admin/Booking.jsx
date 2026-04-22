@@ -460,6 +460,8 @@ const buildPaymentBreakdown = (booking) => {
     const courseSubtotal = courseLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
     const addonsSubtotal = addonLines.reduce((sum, line) => sum + Number(line.price || 0), 0);
     const subtotal = courseSubtotal + addonsSubtotal;
+    const convenienceFee = Math.max(0, Number(booking?.convenienceFee || 0));
+    const promoDiscount = Math.max(0, Number(booking?.promoDiscount || 0));
     const saturdaySurcharge = Math.max(0, Number(parseNotesJson(booking?.rawNotes || booking?.notes || '')?.saturdaySurcharge || 0));
     const grandTotal = Math.max(0, subtotal + convenienceFee + saturdaySurcharge - promoDiscount);
 
