@@ -251,10 +251,13 @@ function Header({ currentPage, onNavigate, cartItemCount = 0, onCartClick, isLog
             ))}
             <li>
               <button
-                onClick={handleBookNowClick}
-                className="w-full px-4 py-3 bg-[#F3B74C] text-[#2157da] font-semibold rounded-lg hover:bg-[#e1a63b] transition-colors"
+                onClick={isLoggedIn ? onLogout : handleBookNowClick}
+                className={`w-full px-4 py-3 font-semibold rounded-lg transition-colors ${isLoggedIn
+                  ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                  : 'bg-[#F3B74C] text-[#2157da] hover:bg-[#e1a63b]'
+                  }`}
               >
-                Enroll Now
+                {isLoggedIn ? 'Logout' : 'Sign In'}
               </button>
             </li>
           </ul>
