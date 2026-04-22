@@ -1334,8 +1334,8 @@ const Booking = () => {
                                 promoDiscount: n.promoDiscount || 0, 
                                 convenienceFee: isWalkInBooking ? 0 : (n.convenienceFee || 0)
                             };
-                            // If total is provided in notes, use it
-                            if (n.totalAmount) fresh.total_amount = n.totalAmount;
+                            // If total is provided in notes, we keep it in notes for assessment calculation
+                            // but we do NOT overwrite fresh.total_amount which represents the actual amount paid.
                         } catch(e) {}
                     } else if (total === 3274.5) {
                         fin = {
