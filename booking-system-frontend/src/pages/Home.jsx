@@ -150,18 +150,18 @@ function Home({ onNavigate, isLoggedIn }) {
   return (
     <div className="w-full">
       {/* Hero Carousel Section */}
-      <section className="relative w-full h-[400px] sm:h-[500px] md:h-[600px] lg:h-[700px] overflow-hidden bg-gradient-to-br from-[#2157da] to-[#1a3a8a]">
+      <section className="relative w-full aspect-[2.4/1] sm:aspect-auto sm:h-[450px] md:h-[550px] lg:h-[650px] xl:h-[750px] overflow-hidden">
         {/* Slides */}
         {slides.map((slide, index) => (
           <div
             key={index}
-            className={`absolute inset-0 transition-opacity duration-1000 ${index === currentSlide ? 'opacity-100 z-10' : 'opacity-0 z-0'
+            className={`absolute inset-0 transition-all duration-1000 ease-in-out ${index === currentSlide ? 'opacity-100 scale-100 z-10' : 'opacity-0 scale-105 z-0'
               }`}
           >
             <img
               src={slide.src}
               alt={slide.alt}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover object-center"
               onLoad={() => console.log(`Image ${index + 1} loaded successfully`)}
               onError={(e) => {
                 console.error(`Failed to load image: ${slide.src}`)

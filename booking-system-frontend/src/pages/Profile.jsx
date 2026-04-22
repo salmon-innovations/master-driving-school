@@ -1444,7 +1444,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
             )}
           </div>
           {!rescheduleFeeModal.loading && rescheduleFeeModal.qrStatus === 'pending' && (
-            <div className="px-6 pb-5">
+            <div className="px-6 pb-5 flex flex-col gap-2">
               <button
                 onClick={() => { clearInterval(reschedulePollRef.current); setRescheduleFeeModal(null) }}
                 className="w-full py-2.5 rounded-xl border-2 border-gray-200 text-gray-500 font-bold text-sm hover:bg-gray-50"
@@ -1453,6 +1453,7 @@ function Profile({ onNavigate, setIsLoggedIn }) {
               </button>
             </div>
           )}
+
         </div>
       </div>
     )}

@@ -15,23 +15,35 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
   }
 
   const getPdcScheduleEntries = () => {
-    if (!scheduleSelection?.pdcSelections) {
-      if (scheduleSelection?.pdcDate) {
-        return [{
-          label: 'PDC Schedule',
-          date1: scheduleSelection.pdcDate,
-          date2: scheduleSelection.pdcDate2 || null,
-          time1: scheduleSelection.pdcSlotDetails?.time_range || scheduleSelection.pdcSlotDetails?.time || 'N/A',
-          time2: scheduleSelection.pdcSlotDetails2?.time_range || scheduleSelection.pdcSlotDetails2?.time || null,
-        }]
-      }
-      return []
+    // If we have multiple selections (typically from a promo bundle or multi-item checkout),
+    // prioritize showing each selection from the pdcSelections payload.
+    if (scheduleSelection?.pdcSelections && Object.keys(scheduleSelection.pdcSelections).length > 0) {
+      return Object.values(scheduleSelection.pdcSelections).map(sel => ({
+        label: (sel.courseName || 'PDC Schedule').replace(/\*REQUIRED FOR STUDENT PERMIT/g, '').trim(),
+        date1: sel.pdcDate || sel.date || null,
+        date2: sel.pdcDate2 || sel.date2 || null,
+        time1: sel.pdcSlotDetails?.time || sel.pdcSlotDetails?.time_range || 'N/A',
+        time2: sel.pdcSlotDetails2?.time || sel.pdcSlotDetails2?.time_range || null,
+      }))
     }
 
+    // Fallback for single PDC course (old flow or simple checkout)
+    if (scheduleSelection?.pdcDate) {
+      return [{
+        label: 'PDC Schedule',
+        date1: scheduleSelection.pdcDate,
+        date2: scheduleSelection.pdcDate2 || null,
+        time1: scheduleSelection.pdcSlotDetails?.time_range || scheduleSelection.pdcSlotDetails?.time || 'N/A',
+        time2: scheduleSelection.pdcSlotDetails2?.time_range || scheduleSelection.pdcSlotDetails2?.time || null,
+      }]
+    }
+
+    // Otherwise, if there are individual PDC items in the cart, we look for them.
+    // (This part is mostly legacy but kept for safety).
     const pdcCartItems = activeCart.filter(item => (item?.category || '').toLowerCase() === 'pdc' || (item?.name || '').toLowerCase().includes('pdc'))
     const entries = pdcCartItems.map(item => {
       const key = getPdcSelectionKey(item)
-      const sel = scheduleSelection.pdcSelections?.[key] || scheduleSelection.pdcSelections?.[item.id]
+      const sel = scheduleSelection?.pdcSelections?.[key] || scheduleSelection?.pdcSelections?.[item.id]
       if (!sel) return null
       return {
         label: item.name || 'PDC Schedule',
@@ -136,15 +148,15 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
 
     const advFee = parseFloat(item.addonsConfig?.convenienceFee || 25);
 
-    const finalItemPrice = calcBasePrice + reviewerPrice + vehicleTipsPrice + customAddonsPriceTotal + advFee;
+    const finalItemPrice = calcBasePrice + customAddonsPriceTotal;
     
     return {
       calcBasePrice,
-
       reviewerPrice,
       vehicleTipsPrice,
       customAddonsPriceTotal,
       advFee,
+      calcDiscountRate,
       finalItemPrice
     };
   };
@@ -155,40 +167,97 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     let vehicleTipsTotal = 0;
     let customAddonsTotal = 0;
     let convenienceTotal = 0;
-    let discountTotal = 0;
     let subtotal = 0;
+    let hasReviewer = false;
+    let hasVehicleTips = false;
+    let highestIndividualDiscount = 0;
 
     activeCart.forEach(item => {
+      if (item.selected === false) return;
       const totals = calculateItemTotals(item);
       const qty = item.quantity || 1;
       baseCoursePriceTotal += totals.calcBasePrice * qty;
-      reviewerTotal += totals.reviewerPrice * qty;
-      vehicleTipsTotal += totals.vehicleTipsPrice * qty;
       customAddonsTotal += totals.customAddonsPriceTotal * qty;
-      convenienceTotal += totals.advFee * qty;
       subtotal += totals.finalItemPrice * qty;
+      
+      if (item.selectedAddons?.reviewer) hasReviewer = true;
+      if (item.selectedAddons?.vehicleTips) hasVehicleTips = true;
+
+      // Track the highest discount rate found among the items/types
+      if (totals.calcDiscountRate > highestIndividualDiscount) {
+        highestIndividualDiscount = totals.calcDiscountRate;
+      }
     });
+
+    // Apply fixed flat per-transaction fees
+    if (activeCart.length > 0) {
+      const firstItem = activeCart[0];
+      
+      // 1. Convenience Fee
+      convenienceTotal = parseFloat(firstItem.addonsConfig?.convenienceFee || 25);
+      subtotal += convenienceTotal;
+
+      // 2. Reviewer Fee
+      if (hasReviewer) {
+        reviewerTotal = parseFloat(firstItem.addonsConfig?.reviewer || 30);
+        subtotal += reviewerTotal;
+      }
+
+      // 3. Vehicle Tips Fee
+      if (hasVehicleTips) {
+        vehicleTipsTotal = parseFloat(firstItem.addonsConfig?.vehicleTips || 20);
+        subtotal += vehicleTipsTotal;
+      }
+    }
+
+    // Calculate Saturday Surcharge (₱150 per Saturday for PDC)
+    let saturdaySurcharge = 0;
+    if (!isOnlineTdcNoSchedule) {
+      const pdcEntries = getPdcScheduleEntries();
+      pdcEntries.forEach(entry => {
+        if (entry.date1) {
+          const d1 = new Date(entry.date1);
+          if (d1.getDay() === 6) saturdaySurcharge += 150;
+        }
+        if (entry.date2) {
+          const d2 = new Date(entry.date2);
+          if (d2.getDay() === 6) saturdaySurcharge += 150;
+        }
+      });
+    }
+
+    const hasPromo = activeCart.filter(item => item.selected !== false).some(item => {
+      const cat = (item.category || '').toLowerCase();
+      const n = (item.name || '').toLowerCase();
+      const isBundleKeyword = cat === 'promo' || n.includes('promo') || n.includes('bundle');
+      const isCombinedCourse = (n.includes('tdc') && n.includes('pdc')) || (cat.includes('tdc') && cat.includes('pdc'));
+      return isBundleKeyword || isCombinedCourse;
+    });
+    const isMultiCourse = activeCart.filter(item => item.selected !== false).length > 1;
     
-    const highestDiscount = activeCart.reduce((max, item) => {
-      const discount = parseFloat(item.discount || 0);
-      return discount > max ? discount : max;
-    }, 0);
+    // 3% Multi-course discount applies ONLY if NO promo bundle is in cart
+    const multiCourseDiscountRate = (isMultiCourse && !hasPromo) ? 3 : 0;
     
-    const hasDiscount = highestDiscount > 0;
-    const discountPercent = highestDiscount;
-    const discountValue = hasDiscount ? Number((subtotal * (discountPercent / 100)).toFixed(2)) : 0;
-    const finalTotal = Number((subtotal - discountValue).toFixed(2));
+    // Use the higher of individual item discount or the multi-course discount
+    const finalDiscountPercent = Math.max(highestIndividualDiscount, multiCourseDiscountRate);
+    const isMultiCourseApplied = finalDiscountPercent === multiCourseDiscountRate && multiCourseDiscountRate > highestIndividualDiscount;
+    const hasDiscount = finalDiscountPercent > 0;
+    
+    const discountValue = hasDiscount ? Number((subtotal * (finalDiscountPercent / 100)).toFixed(2)) : 0;
+    const finalTotal = Number((subtotal + saturdaySurcharge - discountValue).toFixed(2));
 
     return { 
       baseCoursePriceTotal, 
       reviewerTotal, 
       vehicleTipsTotal, 
-      customAddonsTotal,
+      customAddonsTotal, 
       convenienceTotal, 
+      saturdaySurcharge,
       subtotal, 
       hasDiscount, 
-      discountPercent,
+      discountPercent: finalDiscountPercent, 
       discountValue, 
+      isMultiCourseApplied, 
       finalTotal 
     };
   };
@@ -291,17 +360,15 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       pollRef.current = null
     }
 
-    // If student manually cancels, notify server so booking is marked Cancelled instead of Pending
-    if (reason === 'cancelled' && bookingId) {
-      try {
-        await bookingsAPI.updateStatus(bookingId, 'Cancelled');
-      } catch (err) {
-        console.warn('Failed to mark booking as cancelled in DB:', err);
-      }
-    }
+    // Security/UX Hardening: We no longer immediately cancel the booking via API if the user 
+    // simply clicks "Cancel Payment". The backend cleanup task will handle auto-cancellation 
+    // after 20 minutes. This allows students a grace period to resume or for the gateway 
+    // to potentially reconcile a late success.
 
     setQrStatus('failed')
-    setStarpayQR(null)
+    // Note: We don't wipe starpayQR here anymore so that the "Return Home" handler 
+    // on the failure screen can still access the bookingId for cancellation.
+    // It will be wiped if they click "Try Payment Again".
     setQrExpiresAt(null)
     setIsProcessing(false)
     setPaymentFailReason(reason)
@@ -517,6 +584,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         addonsDetailed: addonsDetailedPayload,
         convenienceFee: totalsData.convenienceTotal,
         subtotal: totalsData.subtotal,
+        isManualBundle: !!totalsData.isMultiCourseApplied,
         promoDiscount: totalsData.discountValue,
         promoPct: totalsData.discountPercent,
         totalAmount: totalsData.finalTotal,
@@ -526,13 +594,12 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       const codeUrl = paymentResponse?.codeUrl
       const bookingId = paymentResponse?.bookingId
 
-      if (!msgId || !codeUrl) {
-        throw new Error('Failed to initialize StarPay QR payment.')
-      }
+
 
       setStarpayQR({ codeUrl, msgId, bookingId, amount: finalAmount })
       setQrStatus('pending')
       setIsProcessing(false)
+
 
       // Stop any previous poll session
       pollActiveRef.current = false
@@ -702,13 +769,21 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                 })}
               </div>
 
-              {/* Convenience Fees & Bundle Discount */}
-              {totalsData.hasDiscount && totalsData.discountValue > 0 && (
+              {/* Saturday Surcharge & Bundle Discount */}
+              {(totalsData.saturdaySurcharge > 0 || (totalsData.hasDiscount && totalsData.discountValue > 0)) && (
                 <div className="mt-4 pt-4 border-t border-slate-200 space-y-2">
-                  <div className="flex justify-between items-center text-sm text-red-500 font-semibold bg-red-50 p-2 rounded-lg -mx-2 px-2">
-                    <span>Discount (-{totalsData.discountPercent}%)</span>
-                    <span>-₱{totalsData.discountValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
+                  {totalsData.saturdaySurcharge > 0 && (
+                    <div className="flex justify-between items-center text-sm text-slate-600 font-medium">
+                      <span>Saturday Surcharge</span>
+                      <span>+₱{totalsData.saturdaySurcharge.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  {totalsData.hasDiscount && totalsData.discountValue > 0 && (
+                    <div className="flex justify-between items-center text-sm text-red-500 font-semibold bg-red-50 p-2 rounded-lg -mx-2 px-2">
+                      <span>Discount (-{totalsData.discountPercent}%)</span>
+                      <span>-₱{totalsData.discountValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -828,9 +903,23 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
 
             <div className="w-full flex flex-col sm:flex-row gap-4">
               <button
-                onClick={() => {
+                onClick={async () => {
+                  const bId = starpayQR?.bookingId;
+                  if (bId) {
+                      try {
+                          await bookingsAPI.updateStatus(bId, 'Cancelled');
+                      } catch (err) {
+                          if (err.message && err.message.includes('Cannot cancel a booking that is currently')) {
+                              showNotification('Great news! Your payment was actually confirmed. Redirecting...', 'success');
+                              setCart([]);
+                              onNavigate('profile');
+                              return;
+                          }
+                      }
+                  }
                   setShowPaymentFailed(false)
                   setPaymentFailReason('cancelled')
+                  setStarpayQR(null)
                   setQrStatus('pending')
                 }}
                 className="flex-1 bg-gradient-to-r from-[#2157da] to-[#1e4ebf] text-white font-bold py-3.5 px-6 rounded-xl hover:from-[#1e4ebf] hover:to-[#1a45ab] transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
@@ -839,7 +928,34 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
               </button>
 
               <button
-                onClick={() => onNavigate('home')}
+                onClick={async () => {
+                  const bId = starpayQR?.bookingId;
+                  
+                  if (!bId) {
+                      setCart([])
+                      onNavigate('home');
+                  } else {
+                    try {
+                        await bookingsAPI.updateStatus(bId, 'Cancelled');
+                        // No success notification here to avoid extra popups before navigation
+                        setCart([]);
+                        onNavigate('home');
+                    } catch (err) {
+                        console.warn('Failed to cleanup booking on navigation:', err);
+                        // If it fails with 400 because it's no longer pending (e.g. partial_payment/paid),
+                        // it means the webhook successfully processed it while we were waiting!
+                        if (err.message && err.message.includes('Cannot cancel a booking that is currently')) {
+                            showNotification('Great news! Your payment was confirmed in the background.', 'success');
+                            setCart([]);
+                            onNavigate('profile');
+                        } else {
+                            showNotification('Note: Manual cancellation failed. It will be auto-released later.', 'info');
+                            setCart([]);
+                            onNavigate('home');
+                        }
+                    }
+                  }
+                }}
                 className="flex-1 bg-white border-2 border-slate-200 text-slate-700 font-bold py-3.5 px-6 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95 flex items-center justify-center gap-2"
               >
                 Return to Home
@@ -1118,9 +1234,9 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                   <div className="p-3 sm:p-4 space-y-3">
                     {/* Branch */}
                     {preSelectedBranch && (
-                      <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-white/10">
-                        <span className="text-lg shrink-0">📍</span>
-                        <div className="min-w-0">
+                      <div className="relative flex flex-col items-center justify-center p-3 bg-white/5 rounded-xl border border-white/10 min-h-[56px]">
+                        <span className="absolute left-4 text-base sm:text-lg">📍</span>
+                        <div className="text-center w-full px-8">
                           <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-0.5">Branch</p>
                           <p className="text-xs font-bold text-white truncate">{preSelectedBranch.name}</p>
                         </div>
@@ -1279,7 +1395,9 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                           <div key={idx} className="pb-2 border-b border-white/10 last:border-0 last:pb-0">
                             <div className="flex justify-between items-center gap-2 mb-0.5">
                               <div className="flex-1 min-w-0">
-                                <p className="text-[11px] font-bold text-white/95 mb-0.5 leading-snug truncate">{item.name}</p>
+                                <p className="text-[11px] font-bold text-white/95 mb-0.5 leading-snug truncate">
+                                  {item.name?.replace(/\*REQUIRED FOR STUDENT PERMIT/g, '').trim()}
+                                </p>
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <span className="text-[10px] text-white/40">{item.duration} × {item.quantity}</span>
                                   {item.type && item.type !== 'standard' && (
@@ -1331,10 +1449,12 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                         <span className="font-semibold">Subtotal</span>
                         <span className="font-bold">₱{baseSubtotal.toLocaleString()}</span>
                       </div>
-                      {hasBundleDiscount && (
+                      {hasDiscount && (
                         <div className="flex justify-between text-xs text-green-400 bg-green-500/10 px-2 py-1.5 -mx-2 rounded">
-                          <span className="font-bold">Bundle Discount ({totalsData.promoBundleDiscountPercent}% OFF)</span>
-                          <span className="font-bold">- ₱{bundleDiscountValue.toLocaleString()}</span>
+                          <span className="font-bold">
+                            {totalsData.isMultiCourseApplied ? 'Multi-Course Discount' : 'Discount'} ({totalsData.discountPercent}% OFF)
+                          </span>
+                          <span className="font-bold">- ₱{totalsData.discountValue.toLocaleString()}</span>
                         </div>
                       )}
                       {subtotal !== baseSubtotal && (
@@ -1574,7 +1694,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
             </div>
 
             {qrStatus === 'pending' && (
-              <div className="px-6 pb-5">
+              <div className="px-6 pb-5 flex flex-col gap-2">
                 <button
                   onClick={() => {
                     handlePaymentFailure('cancelled')
@@ -1585,6 +1705,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                 </button>
               </div>
             )}
+
           </div>
         </div>
       )}

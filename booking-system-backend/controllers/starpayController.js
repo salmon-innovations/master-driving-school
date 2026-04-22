@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const { bustCache } = require('../config/db');
 const { createRepayment, queryRepayment, verifySignature } = require('../utils/starpayService');
 const { sendEnrollmentEmail, sendAddonsEmail } = require('../utils/emailService');
+const { calculateSaturdaySurcharge } = require('../utils/financeUtils');
 
 // Short-lived in-memory set of msgIds fulfilled in the last 30 seconds.
 // Lets the very first poll after fulfillment short-circuit without querying StarPay.
@@ -197,132 +198,6 @@ const initiatePayment = async (req, res) => {
         promoPct = 0
     } = req.body;
 
-    // TEST MODE: skip all DB writes and send enrollment email only.
-    if (req.body?.emailOnlyTest) {
-        try {
-            const [userRes, courseRes, slotRes] = await Promise.all([
-                pool.query(
-                    `SELECT first_name, last_name, email FROM users WHERE id = $1`,
-                    [userId]
-                ),
-                pool.query(
-                    `SELECT c.name AS course_name, br.name AS branch_name, br.address AS branch_address
-                       FROM courses c
-                       LEFT JOIN branches br ON br.id = $2
-                      WHERE c.id = $1`,
-                    [courseId, branchId || null]
-                ),
-                pool.query(
-                    `SELECT id, date, end_date, session, time_range FROM schedule_slots WHERE id = ANY($1::int[])`,
-                    [[...new Set([scheduleSlotId, scheduleSlotId2].filter(Boolean).map(Number))]]
-                ),
-            ]);
-
-            const user = userRes.rows[0];
-            if (!user?.email) {
-                return res.status(400).json({ success: false, message: 'No email found for this user account.' });
-            }
-
-            const courseRow = courseRes.rows[0] || {};
-            const slotLookup = (slotRes.rows || []).reduce((acc, row) => {
-                acc[row.id] = row;
-                return acc;
-            }, {});
-
-            const pdcSelMap = pdcSelections || {};
-            const pdcSlotIds = [];
-            Object.values(pdcSelMap).forEach((sel) => {
-                if (sel?.pdcSlot) pdcSlotIds.push(sel.pdcSlot);
-                if (sel?.pdcSlot2) pdcSlotIds.push(sel.pdcSlot2);
-                if (sel?.slot) pdcSlotIds.push(sel.slot);
-                if (sel?.slot2) pdcSlotIds.push(sel.slot2);
-            });
-
-            let pdcSlotLookup = {};
-            if (pdcSlotIds.length) {
-                const { rows: pdcRows } = await pool.query(
-                    `SELECT id, session, time_range FROM schedule_slots WHERE id = ANY($1::int[])`,
-                    [[...new Set(pdcSlotIds.map(Number))]]
-                );
-                pdcSlotLookup = pdcRows.reduce((acc, row) => {
-                    acc[row.id] = row;
-                    return acc;
-                }, {});
-            }
-
-            const pdcSchedules = Object.values(pdcSelMap).map((sel) => {
-                const slot1 = pdcSlotLookup[sel?.pdcSlot || sel?.slot] || {};
-                const slot2 = pdcSlotLookup[sel?.pdcSlot2 || sel?.slot2] || {};
-                return {
-                    label: sel?.label || sel?.courseName || 'PDC',
-                    courseName: sel?.courseName || 'PDC',
-                    courseType: sel?.courseType || sel?.courseTypeDetailed || '',
-                    transmission: sel?.transmission || null,
-                    scheduleDate: sel?.pdcDate || sel?.date || null,
-                    scheduleSession: slot1.session || sel?.pdcSlotDetails?.session || sel?.slot?.session || null,
-                    scheduleTime: slot1.time_range || sel?.pdcSlotDetails?.time || sel?.pdcSlotDetails?.time_range || sel?.slot?.time_range || null,
-                    scheduleDate2: sel?.pdcDate2 || sel?.date2 || null,
-                    scheduleSession2: slot2.session || sel?.pdcSlotDetails2?.session || sel?.slot2?.session || null,
-                    scheduleTime2: slot2.time_range || sel?.pdcSlotDetails2?.time || sel?.pdcSlotDetails2?.time_range || sel?.slot2?.time_range || null,
-                };
-            }).filter((s) => s.scheduleDate);
-
-            const primarySlot = slotLookup[Number(scheduleSlotId)] || {};
-            const secondarySlot = slotLookup[Number(scheduleSlotId2)] || {};
-
-            await sendEnrollmentEmail(user.email, user.first_name || 'Student', user.last_name || '', {
-                bookingId: Number(req.body.bookingId || 0) || null,
-                courseName: courseName || courseRow.course_name || `${courseCategory || ''} ${courseType || ''}`.trim() || 'N/A',
-                courseList: Array.isArray(courseList) ? courseList : [],
-                addonsDetailed: Array.isArray(req.body.addonsDetailed) ? req.body.addonsDetailed : [],
-                courseCategory,
-                courseType,
-                courseTypePdc,
-                courseTypeTdc,
-                subtotal: req.body.subtotal || 0,
-                promoDiscount: req.body.promoDiscount || 0,
-                promoPct: req.body.promoPct || 0,
-                convenienceFee: req.body.convenienceFee || 0,
-                totalAmount: req.body.totalAmount || req.body.finalTotal || req.body.grandTotal || 0,
-                tdcLabel: (() => {
-                    const explicit = String(tdcScheduleLabel || '').trim();
-                    if (explicit) return explicit;
-                    const ct = String(courseType || '').toUpperCase();
-                    if (ct.includes('ONLINE')) return 'TDC Online';
-                    if (ct.includes('F2F') || ct.includes('FACE TO FACE')) return 'TDC F2F';
-                    return 'TDC';
-                })(),
-                branchName: branchName || courseRow.branch_name || 'N/A',
-                branchAddress: branchAddress || courseRow.branch_address || '',
-                scheduleDate: scheduleDate || primarySlot.date || null,
-                scheduleSession: scheduleSession || primarySlot.session || null,
-                scheduleTime: scheduleTime || primarySlot.time_range || 'N/A',
-                scheduleDate2: scheduleDate2 || secondarySlot.date || (primarySlot.end_date && primarySlot.end_date !== primarySlot.date ? primarySlot.end_date : null),
-                scheduleSession2: scheduleSession2 || secondarySlot.session || null,
-                scheduleTime2: scheduleTime2 || secondarySlot.time_range || null,
-                pdcSchedules,
-                pdcScheduleLockedUntilCompletion: !!req.body.pdcScheduleLockedUntilCompletion,
-                pdcScheduleLockReason: req.body.pdcScheduleLockReason || null,
-                paymentMethod: 'StarPay (Email Test)',
-                amountPaid: amount || 0,
-                paymentStatus: paymentType,
-            }, req.body.hasReviewer, req.body.hasVehicleTips);
-
-            return res.json({
-                success: true,
-                emailOnlyTest: true,
-                message: `Email test sent to ${user.email}. No database changes were made.`,
-                msgId: `TEST${Date.now()}U${userId}`,
-            });
-        } catch (emailErr) {
-            console.error('[StarPay] emailOnlyTest user email failed:', emailErr.message);
-            return res.status(500).json({
-                success: false,
-                message: `Email test failed: ${emailErr.message}`,
-            });
-        }
-    }
-
     if (!courseId || !amount) {
         return res.status(400).json({ success: false, message: 'courseId and amount are required' });
     }
@@ -416,6 +291,14 @@ const initiatePayment = async (req, res) => {
         // Unique message ID = our order reference
         const msgId = `MDS${Date.now()}U${userId}`;
 
+        const pdcSchedulesForSurcharge = Array.isArray(req.body.promoPdcSchedules) ? [...req.body.promoPdcSchedules] : [];
+        if (String(req.body.courseCategory || '').toUpperCase() === 'PDC' && !req.body.isOnlineTdcNoSchedule) {
+          pdcSchedulesForSurcharge.push({
+            scheduleDate: req.body.scheduleDate,
+            scheduleDate2: req.body.scheduleDate2
+          });
+        }
+
         // Store info in notes for webhook/sync logic
         const notesPayload = JSON.stringify({
             source: 'starpay',
@@ -440,13 +323,15 @@ const initiatePayment = async (req, res) => {
             addonsDetailed: Array.isArray(req.body.addonsDetailed) ? req.body.addonsDetailed : [],
             subtotal: req.body.subtotal || 0,
             promoDiscount: req.body.promoDiscount || 0,
-            promoPct: promoPct || 0,
-            convenienceFee: req.body.convenienceFee || 0,
-            totalAmount: req.body.totalAmount || req.body.finalTotal || req.body.grandTotal || 0,
+            promoPct: Number(promoPct || 0),
+            convenienceFee: Number(req.body.convenienceFee || 0),
+            saturdaySurcharge: Number(req.body.saturdaySurcharge || calculateSaturdaySurcharge(pdcSchedulesForSurcharge)),
+            totalAmount: Number(req.body.totalAmount || req.body.finalTotal || req.body.grandTotal || 0),
             initialAmountPaid: Number(amount || 0),
+            isManualBundle: !!req.body.isManualBundle,
             paymentType,
-            hasReviewer: req.body.hasReviewer || false,
-            hasVehicleTips: req.body.hasVehicleTips || false,
+            hasReviewer: !!req.body.hasReviewer,
+            hasVehicleTips: !!req.body.hasVehicleTips,
         });
 
         // Insert pending booking (slots are already decremented!)
@@ -461,34 +346,6 @@ const initiatePayment = async (req, res) => {
         const bookingId = rows[0].id;
 
         await client.query('COMMIT');
-
-        // TEST MODE: save payment locally as paid without calling StarPay.
-        if (req.body?.localDbTest) {
-            const testOrderNo = `LOCAL${Date.now()}U${userId}`;
-            const fulfilledBookingId = await fulfillBookingPayment(msgId, Math.round(parseFloat(amount || 0) * 100), testOrderNo);
-            if (!fulfilledBookingId && bookingId) {
-                await pool.query(
-                    `UPDATE bookings
-                        SET status = CASE
-                                      WHEN LOWER(COALESCE(payment_type, '')) ~ 'down[\\s-]*payment' THEN 'partial_payment'
-                                      ELSE 'paid'
-                                    END,
-                            total_amount = COALESCE($2, total_amount),
-                            updated_at = CURRENT_TIMESTAMP
-                      WHERE id = $1 AND status = 'pending'`,
-                    [bookingId, parseFloat(amount || 0)]
-                );
-            }
-            return res.json({
-                success: true,
-                localDbTest: true,
-                msgId,
-                bookingId,
-                trxState: 'SUCCESS',
-                orderNo: testOrderNo,
-                message: 'Local DB test payment saved successfully. StarPay gateway was skipped.',
-            });
-        }
 
         // Build callback URL
         const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
@@ -547,6 +404,7 @@ const initiatePayment = async (req, res) => {
    Called by both webhook and checkStatus fallback.
   ───────────────────────────────────────────────────────────────────── */
 const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) => {
+    console.log(`[StarPay] Fulfilling booking for transaction ${originalMsgId}. Test Mode: ${orderNo?.startsWith('TEST-')}`);
     const amountPhp = (trxAmountCentavos / 100).toFixed(2);
 
         // Mark booking based on payment type:
@@ -569,6 +427,7 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
     if (!rows.length) return null;
 
     const { id: bookingId, user_id: studentId, notes } = rows[0];
+    console.log(`[StarPay] Booking ${bookingId} status updated to fulfilled.`);
 
     // Enroll student in schedule slots stored in notes
     try {
@@ -664,20 +523,34 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
 
                 const d = detailsRows[0] || {};
                 if (d.email) {
-                    sendEnrollmentEmail(d.email, d.first_name || 'Student', d.last_name || '', {
-                        bookingId,
-                        courseName: d.course_name || 'N/A',
-                        courseList: Array.isArray(meta.courseList) ? meta.courseList : [],
-                        addonsDetailed: Array.isArray(meta.addonsDetailed) ? meta.addonsDetailed : [],
-                        courseCategory: d.course_category || null,
-                        courseType: d.course_type || null,
-                        courseTypePdc: meta.courseTypePdc || null,
-                        courseTypeTdc: meta.courseTypeTdc || null,
-                        subtotal: meta.subtotal || 0,
-                        promoDiscount: meta.promoDiscount || 0,
-                        promoPct: meta.promoPct || 0,
-                        convenienceFee: meta.convenienceFee || 0,
-                        totalAmount: meta.totalAmount || 0,
+                        console.log(`[StarPay] Triggering enrollment email to: ${d.email} for student ${d.first_name}`);
+                        // Dynamic 3% Multi-course discount fallback
+                        const isManualBundle = !!meta.isManualBundle;
+                        
+                        let effectivePromo = Number(meta.promoDiscount || 0);
+                        let effectivePromoPct = Number(meta.promoPct || 0);
+                        
+                        if (effectivePromo === 0 && isManualBundle) {
+                            const subtotalForDynamic = Number(meta.subtotal || 0);
+                            effectivePromo = Number((subtotalForDynamic * 0.03).toFixed(2));
+                            effectivePromoPct = 3;
+                        }
+
+                        sendEnrollmentEmail(d.email, d.first_name || 'Student', d.last_name || '', {
+                            bookingId,
+                            courseName: d.course_name || 'N/A',
+                            courseList: courseList,
+                            addonsDetailed: Array.isArray(meta.addonsDetailed) ? meta.addonsDetailed : [],
+                            courseCategory: d.course_category || null,
+                            courseType: d.course_type || null,
+                            courseTypePdc: meta.courseTypePdc || null,
+                            courseTypeTdc: meta.courseTypeTdc || null,
+                            subtotal: Number(meta.subtotal || 0),
+                            promoDiscount: effectivePromo,
+                            promoPct: effectivePromoPct,
+                            isManualBundle: isManualBundle,
+                            convenienceFee: Number(meta.convenienceFee || 0),
+                            totalAmount: Number(meta.totalAmount || meta.grandTotal || meta.finalTotal || 0),
                         tdcLabel: (() => {
                             const explicit = String(meta.tdcScheduleLabel || '').trim();
                             if (explicit) return explicit;
@@ -1067,4 +940,10 @@ const initiateRescheduleFeePayment = async (req, res) => {
     }
 };
 
-module.exports = { initiatePayment, handleWebhook, checkStatus, initiateRescheduleFeePayment };
+module.exports = { 
+    initiatePayment, 
+    handleWebhook, 
+    checkStatus, 
+    initiateRescheduleFeePayment
+};
+

@@ -6,8 +6,42 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
   const { showNotification } = useNotification()
   const [availabilityLoading, setAvailabilityLoading] = useState(false)
   const [hasAvailableSlots, setHasAvailableSlots] = useState(true)
+
   const getCartItemKey = (item) => `${item.id}::${String(item.type || 'online')}`
-  const primaryCourse = cart[0]
+  
+  const toggleSelectItem = (item) => {
+    const targetKey = getCartItemKey(item)
+    const isPromo = String(item.category || '').toLowerCase() === 'promo'
+    const isCurrentSelected = !!item.selected
+
+    setCart(prevCart => {
+      return prevCart.map(ci => {
+        const ciKey = getCartItemKey(ci)
+        if (ciKey === targetKey) {
+          // If we are selecting a promo, deselect everything else
+          if (!isCurrentSelected && isPromo) {
+             return { ...ci, selected: true }
+          }
+          // Regular toggle
+          return { ...ci, selected: !isCurrentSelected }
+        } else {
+          // If we are selecting a promo (targetKey), all other items must be deselected
+          if (!isCurrentSelected && isPromo) {
+            return { ...ci, selected: false }
+          }
+          // If we are selecting a regular item (targetKey), deselect any existing promos
+          if (!isCurrentSelected && !isPromo) {
+            if (String(ci.category || '').toLowerCase() === 'promo') {
+              return { ...ci, selected: false }
+            }
+          }
+          return ci
+        }
+      })
+    })
+  }
+
+  const primaryCourse = cart.find(i => i.selected) || cart[0]
   const primaryIsTdc = !!primaryCourse && (
     primaryCourse.category === 'TDC' ||
     (primaryCourse.name || '').toLowerCase().includes('tdc') ||
@@ -15,77 +49,136 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
   )
   const primaryIsOnlineTdc = primaryIsTdc && String(primaryCourse?.type || '').toLowerCase() === 'online'
 
-  // Check availability for the first cart item whenever cart or branch changes
+  // Check availability for all selected items whenever cart or branch changes
   useEffect(() => {
-    if (!preSelectedBranch || cart.length === 0) {
+    const selectedItems = cart.filter(i => i.selected)
+    if (!preSelectedBranch || selectedItems.length === 0) {
       setHasAvailableSlots(true)
       return
     }
-    const primaryCourse = cart[0]
+
     const checkAvailability = async () => {
       setAvailabilityLoading(true)
-      setHasAvailableSlots(true)
+      setHasAvailableSlots(true) // assume true until we find a missing component
+
       try {
-        const name = (primaryCourse.name || '').toLowerCase()
-        const shortName = (primaryCourse.shortName || '').toLowerCase()
-        const category = primaryCourse.category || ''
-        const selectedType = String(primaryCourse.type || '').toLowerCase()
-        const isTDC = category === 'TDC' || name.includes('tdc') || shortName.includes('tdc')
-        const isOnlineTdc = isTDC && (selectedType.includes('online') || selectedType.includes('otdc') || name.includes('otdc'))
+        const branchId = preSelectedBranch.id
         
-        if (isOnlineTdc) {
-          setHasAvailableSlots(true)
-          setAvailabilityLoading(false)
-          return
-        }
-
-        const slotType = isTDC ? 'TDC' : 'PDC'
-        const slots = await schedulesAPI.getSlotsByDate(null, preSelectedBranch.id, slotType)
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
-        const minDate = new Date(today)
-        minDate.setDate(today.getDate() + (isTDC ? 1 : 2))
-        
-        // Token-based course_type matcher
-        const stopWords = new Set(['practical', 'driving', 'course', 'pdc', 'tdc', 'theoretical', 'dc', 'a', 'an', 'the', 'and', 'or', 'for', 'of', 'in', 'to'])
-        const extractTokens = (str) => (str || '').toLowerCase().replace(/[()\[\]{}'"]/g, ' ').split(/[\s\-\/,;|&+]+/).filter(t => t.length >= 2 && !stopWords.has(t))
-        const courseTokens = new Set(extractTokens(name + ' ' + shortName))
-        const courseTypeMatches = (slotCourseType) => {
-          if (!slotCourseType) return true
-          const norm = slotCourseType.toLowerCase().trim()
-          if (norm === 'both' || norm === 'any' || norm === 'all') return true
-          const slotTokens = extractTokens(slotCourseType)
-          if (slotTokens.length === 0) return true
-          return slotTokens.some(t => courseTokens.has(t))
-        }
-
-        const isAT = selectedType.includes('automatic') || selectedType === 'at' || selectedType.includes('auto') || name.includes('automatic') || name.includes('(at)')
-        const isMT = selectedType.includes('manual') || selectedType === 'mt' || name.includes('manual') || name.includes('(mt)')
-
-        const available = Array.isArray(slots) ? slots.filter(s => {
-          const slotDate = new Date((s.date || s.start_date) + 'T00:00:00')
-          if (slotDate < minDate) return false
+        // Helper to check if a list of slots contains a valid future slot for a given course name/type
+        const validateSlotsForCourse = (slots, item, isTDC, minAdvance) => {
+          if (!Array.isArray(slots) || slots.length === 0) return false
           
-          if (isTDC && selectedType && s.course_type && s.course_type.toLowerCase() !== selectedType.toLowerCase()) return false
-          if (!isTDC && !courseTypeMatches(s.course_type)) return false
+          const today = new Date()
+          today.setHours(0, 0, 0, 0)
+          const minDate = new Date(today)
+          minDate.setDate(today.getDate() + minAdvance)
 
-          if (!isTDC) {
-            const tr = (s.transmission || '').toLowerCase()
-            if (isAT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false
-            if (isMT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false
+          const name = (item.name || '').toLowerCase()
+          const shortName = (item.shortName || '').toLowerCase()
+          const selectedType = String(item.type || '').toLowerCase()
+
+          // Token matching
+          const stopWords = new Set(['practical', 'driving', 'course', 'pdc', 'tdc', 'theoretical', 'dc', 'a', 'an', 'the', 'and', 'or', 'for', 'of', 'in', 'to'])
+          const extractTokens = (str) => (str || '').toLowerCase().replace(/[()\[\]{}'"]/g, ' ').split(/[\s\-\/,;|&+]+/).filter(t => t.length >= 2 && !stopWords.has(t))
+          const courseTokens = new Set(extractTokens(name + ' ' + shortName + ' ' + (item.type || '')))
+          
+          const courseTypeMatches = (slotCourseType) => {
+            if (!slotCourseType) return true
+            const norm = slotCourseType.toLowerCase().trim()
+            if (norm === 'both' || norm === 'any' || norm === 'all') return true
+            const slotTokens = extractTokens(slotCourseType)
+            if (slotTokens.length === 0) return true
+            return slotTokens.some(t => courseTokens.has(t))
           }
 
-          return s.available_slots == null || s.available_slots > 0
-        }) : []
-        setHasAvailableSlots(available.length > 0)
-      } catch (e) {
-        setHasAvailableSlots(true) // fail open on error
+          const isAT = selectedType.includes('automatic') || selectedType === 'at' || selectedType.includes('auto') || name.includes('automatic') || name.includes('(at)')
+          const isMT = selectedType.includes('manual') || selectedType === 'mt' || name.includes('manual') || name.includes('(mt)')
+
+          return slots.some(s => {
+            const slotDate = new Date((s.date || s.start_date) + 'T00:00:00')
+            if (slotDate < minDate) return false
+            
+            if (isTDC && selectedType && s.course_type && s.course_type.toLowerCase() !== selectedType.toLowerCase()) {
+              // For F2F TDC, if it's a specific type (e.g. Motorcycle only TDC), it must match
+              if (selectedType !== 'f2f' && selectedType !== 'standard') return false
+            }
+
+            if (!isTDC && !courseTypeMatches(s.course_type)) return false
+
+            if (!isTDC) {
+              const tr = (s.transmission || '').toLowerCase()
+              if (isAT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('auto') && tr !== 'at') return false
+              if (isMT && tr && tr !== 'both' && tr !== 'any' && !tr.includes('manual') && tr !== 'mt') return false
+            }
+
+            return s.available_slots == null || s.available_slots > 0
+          })
+        }
+
+        for (const item of selectedItems) {
+          const isPromo = String(item.category || '').toLowerCase() === 'promo'
+          const name = (item.name || '').toLowerCase()
+          const type = String(item.type || '').toLowerCase()
+          
+          if (isPromo) {
+            // 1. Check TDC if not Online
+            const isOnlineTdc = type.includes('online') || type.includes('otdc') || name.includes('otdc')
+            if (!isOnlineTdc) {
+              const tdcSlots = await schedulesAPI.getSlotsByDate(null, branchId, 'TDC')
+              if (!validateSlotsForCourse(tdcSlots, { ...item, type: 'F2F' }, true, 1)) {
+                setHasAvailableSlots(false)
+                return
+              }
+            }
+
+            // 2. Check PDC Components
+            // Promos usually have type like "Online TDC + Car MT | Motorcycle MT"
+            const plusIndex = type.indexOf('+')
+            if (plusIndex !== -1) {
+              const pdcSection = type.slice(plusIndex + 1).trim()
+              const pdcTracks = pdcSection.split('|').map(t => t.trim()).filter(Boolean)
+              
+              if (pdcTracks.length > 0) {
+                const pdcSlots = await schedulesAPI.getSlotsByDate(null, branchId, 'PDC')
+                for (const track of pdcTracks) {
+                  // We create a virtual "sub-item" to test slots for this specific track
+                  const virtualItem = { 
+                    name: `PDC ${track}`, 
+                    shortName: track, 
+                    type: track 
+                  }
+                  if (!validateSlotsForCourse(pdcSlots, virtualItem, false, 2)) {
+                    setHasAvailableSlots(false)
+                    return
+                  }
+                }
+              }
+            }
+          } else {
+            // Regular Course
+            const isTDC = item.category === 'TDC' || name.includes('tdc')
+            const isOnline = isTDC && (type.includes('online') || type.includes('otdc') || name.includes('otdc'))
+            
+            if (!isOnline) {
+              const slotType = isTDC ? 'TDC' : 'PDC'
+              const slots = await schedulesAPI.getSlotsByDate(null, branchId, slotType)
+              if (!validateSlotsForCourse(slots, item, isTDC, isTDC ? 1 : 2)) {
+                setHasAvailableSlots(false)
+                return
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Availability check failed:", err)
+        setHasAvailableSlots(true) // fail open
       } finally {
         setAvailabilityLoading(false)
       }
     }
+
     checkAvailability()
-  }, [cart.length, preSelectedBranch?.id, cart[0]?.id])
+  }, [cart.some(i => i.selected), preSelectedBranch?.id, cart.filter(i => i.selected).map(i => i.id + i.type).join('')])
 
 
   const removeFromCart = (id, type = 'online') => {
@@ -113,14 +206,17 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
     let calcBasePrice = parseFloat(item.price) || 0;
     let calcDiscountRate = 0;
     
+    const isPromo = String(item.category || '').toLowerCase() === 'promo';
+
     if (item.hasTypeOption && item.typeOptions) {
       const activeType = item.typeOptions.find(opt => opt.value === item.type);
       if (activeType) {
         calcBasePrice = parseFloat(activeType.price) || calcBasePrice;
-        calcDiscountRate = activeType.discount || parseFloat(item.discount) || 0;
+        // Don't apply discount rate for promo bundles as requested
+        calcDiscountRate = isPromo ? 0 : (activeType.discount || parseFloat(item.discount) || 0);
       }
     } else {
-      calcDiscountRate = parseFloat(item.discount) || 0;
+      calcDiscountRate = isPromo ? 0 : (parseFloat(item.discount) || 0);
     }
 
     let calcDiscountValue = 0;
@@ -130,11 +226,15 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
       calcDiscountValue = calcBasePrice * (calcDiscountRate / 100);
     }
 
+    // Note: Reviewer and Vehicle Tips are now charged ONCE per transaction, not per item.
+    // We calculate them here only for UI display purposes if needed.
     const reviewerPrice = item.selectedAddons?.reviewer ? parseFloat(item.addonsConfig?.reviewer || 30) : 0;
     const vehicleTipsPrice = item.selectedAddons?.vehicleTips ? parseFloat(item.addonsConfig?.vehicleTips || 20) : 0;
+    
     const advFee = parseFloat(item.addonsConfig?.convenienceFee || 25);
     
-    const finalItemPrice = calcBasePrice - calcDiscountValue + reviewerPrice + vehicleTipsPrice + advFee;
+    // finalItemPrice now only includes base price and discount
+    const finalItemPrice = calcBasePrice - calcDiscountValue;
 
     return {
       calcBasePrice,
@@ -148,16 +248,47 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
     };
   };
 
+  const calculateGrandTotal = () => {
+    const selectedItems = cart.filter(item => item.selected);
+    if (selectedItems.length === 0) return 0;
+
+    let totalBaseAmount = 0;
+    let hasReviewer = false;
+    let hasVehicleTips = false;
+
+    selectedItems.forEach(item => {
+      const totals = calculateItemTotals(item);
+      totalBaseAmount += totals.finalItemPrice * (item.quantity || 1);
+      if (item.selectedAddons?.reviewer) hasReviewer = true;
+      if (item.selectedAddons?.vehicleTips) hasVehicleTips = true;
+    });
+
+    // Add flat convenience fee per transaction
+    const firstItem = selectedItems[0];
+    const flatFee = parseFloat(firstItem?.addonsConfig?.convenienceFee || 25);
+    
+    const reviewerFee = hasReviewer ? parseFloat(firstItem?.addonsConfig?.reviewer || 30) : 0;
+    const tipsFee = hasVehicleTips ? parseFloat(firstItem?.addonsConfig?.vehicleTips || 20) : 0;
+
+    return totalBaseAmount + flatFee + reviewerFee + tipsFee;
+  };
+
 
   const getTotalItems = () => {
     return cart.reduce((total, item) => total + (Number(item.quantity) || 1), 0)
   }
 
-  const handleItemCheckout = (item) => {
+  const handleCartCheckout = () => {
     if (!preSelectedBranch) {
       showNotification("Please select a branch first from the Branches page", "error")
       setShowCart(false)
       onNavigate('branches')
+      return
+    }
+
+    const selectedItems = cart.filter(item => item.selected);
+    if (selectedItems.length === 0) {
+      showNotification("Please select at least one course to proceed", "error")
       return
     }
 
@@ -172,6 +303,9 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
       localStorage.setItem('postVerifyRedirect', JSON.stringify(payload))
     }
 
+    // Identify primary item for the schedule page selection
+    // If multiple regular courses, the first one is used as trigger
+    const item = selectedItems[0]
     const itemType = String(item.type || 'standard')
     const isItemTdc =
       item.category === 'TDC' ||
@@ -191,6 +325,8 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
       selectedType: itemType,
       addonsConfig: item.addonsConfig,
       selectedAddons: item.selectedAddons,
+      // Pass all selected items as a property if needed, 
+      // though typically Schedule.jsx looks at the 'cart' itself.
     })
 
     if (!isLoggedIn) {
@@ -201,7 +337,7 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
       return
     }
 
-    if (isOnlineTdc) {
+    if (isOnlineTdc && selectedItems.length === 1) {
       setScheduleSelection({
         noScheduleRequired: true,
         isOnlineTdcNoSchedule: true,
@@ -250,23 +386,31 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                       const isItemTdc = item.category === 'TDC' || (item.name || '').toLowerCase().includes('tdc') || (item.shortName || '').toLowerCase().includes('tdc');
                       const isItemOnlineTdc = isItemTdc && String(item.type || '').toLowerCase() === 'online';
                       const qty = Number(item.quantity) || 1;
+                      const isSelected = !!item.selected;
                       
                       return (
-                      <div key={`${item.id}-${item.type}-${index}`} className="bg-gray-50 p-4 rounded-lg">
+                      <div key={`${item.id}-${item.type}-${index}`} className={`p-4 rounded-lg transition-all border ${isSelected ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-transparent'}`}>
                         <div className="flex justify-between items-start mb-2">
-                          <div className="flex-1">
-                            <h3 className="font-semibold text-[#1a2332] text-sm">
-                              {item.name}
-                            </h3>
-                            <p className="text-xs text-gray-500 mt-1">{item.duration}</p>
-                            {item.type && (
-                              <p className="text-xs text-[#2157da] font-medium mt-1 uppercase">{item.type}</p>
-                            )}
-                            {/* Online TDC uses external provider and does not require local schedule selection */}
-                            <div className="flex items-center gap-1 mt-2">
-                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md font-semibold mt-1 inline-block">
-                                {isItemOnlineTdc ? '♾ Online Provider (No Schedule)' : '📅 Schedule Required'}
-                              </span>
+                          <div className="flex gap-3">
+                            <input 
+                              type="checkbox" 
+                              checked={isSelected}
+                              onChange={() => toggleSelectItem(item)}
+                              className="w-5 h-5 mt-1 rounded border-gray-300 text-[#2157da] focus:ring-[#2157da] cursor-pointer"
+                            />
+                            <div className="flex-1">
+                              <h3 className="font-semibold text-[#1a2332] text-sm">
+                                {item.name}
+                              </h3>
+                              <p className="text-xs text-gray-500 mt-1">{item.duration}</p>
+                              {item.type && (
+                                <p className="text-xs text-[#2157da] font-medium mt-1 uppercase">{item.type}</p>
+                              )}
+                              <div className="flex items-center gap-1 mt-2">
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md font-semibold mt-1 inline-block">
+                                  {isItemOnlineTdc ? '♾ Online Provider' : '📅 Schedule Required'}
+                                </span>
+                              </div>
                             </div>
                           </div>
                           <button
@@ -277,52 +421,35 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                           </button>
                         </div>
 
-                          <div className="border-t border-gray-200 mt-3 pt-3 space-y-2 text-sm text-gray-600 font-medium pb-4">
+                          <div className="border-t border-gray-200 mt-3 pt-3 space-y-2 text-sm text-gray-600 font-medium">
                             <div className="flex justify-between items-center gap-2">
                               <span className="text-xs sm:text-sm">Course Price</span>
-                              <span className="font-bold text-gray-900 shrink-0">₱{totals.calcBasePrice.toLocaleString()}</span>
+                              <span className="font-bold text-gray-900 shrink-0">₱{totals.finalItemPrice.toLocaleString()}</span>
                             </div>
                             
-                            {(totals.reviewerPrice > 0 || totals.vehicleTipsPrice > 0) && (
-                              <div className="flex justify-between items-start gap-2">
-                                <div className="flex flex-col">
-                                  <span className="text-xs sm:text-sm">Add-ons</span>
-                                  {totals.reviewerPrice > 0 && <span className="text-[10px] sm:text-xs text-gray-400 ml-2">• Reviewer</span>}
-                                  {totals.vehicleTipsPrice > 0 && <span className="text-[10px] sm:text-xs text-gray-400 ml-2">• Vehicle Tips</span>}
-                                </div>
-                                <div className="flex flex-col items-end shrink-0">
-                                  <span className="font-bold text-gray-900">₱{(totals.reviewerPrice + totals.vehicleTipsPrice).toLocaleString()}</span>
-                                  {totals.reviewerPrice > 0 && <span className="text-[10px] sm:text-xs text-gray-400">₱{totals.reviewerPrice.toLocaleString()}</span>}
-                                  {totals.vehicleTipsPrice > 0 && <span className="text-[10px] sm:text-xs text-gray-400">₱{totals.vehicleTipsPrice.toLocaleString()}</span>}
-                                </div>
+                            {(item.selectedAddons?.reviewer || item.selectedAddons?.vehicleTips) && (
+                              <div className="space-y-1 bg-gray-50/50 p-2 rounded">
+                                <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Add-ons (Charged Once)</span>
+                                {item.selectedAddons?.reviewer && (
+                                  <div className="flex justify-between text-gray-400 text-[10px] italic">
+                                    <span>• Reviewer</span>
+                                    <span>[Accounted]</span>
+                                  </div>
+                                )}
+                                {item.selectedAddons?.vehicleTips && (
+                                  <div className="flex justify-between text-gray-400 text-[10px] italic">
+                                    <span>• Vehicle Tips</span>
+                                    <span>[Accounted]</span>
+                                  </div>
+                                )}
                               </div>
                             )}
                             
-                            <div className="flex justify-between items-center gap-2">
-                              <span className="text-xs sm:text-sm">Convenience Fee</span>
-                              <span className="font-bold text-gray-900 shrink-0">₱{totals.advFee.toLocaleString()}</span>
-                            </div>
-
                             <div className="flex justify-between items-center gap-2 bg-gray-100 rounded p-2 mt-2">
-                              <span className="text-sm font-bold text-gray-800">Total</span>
+                              <span className="text-sm font-bold text-gray-800">Item Total</span>
                               <span className="text-lg font-black text-[#2157da]">₱{(totals.finalItemPrice * qty).toLocaleString()}</span>
                             </div>
                           </div>
-
-                          <button
-                            onClick={() => handleItemCheckout(item)}
-                            disabled={!preSelectedBranch}
-                            className={`w-full py-2.5 rounded-full font-bold transition-all text-sm ${
-                              !preSelectedBranch
-                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                : 'bg-[#2157da] text-white hover:bg-[#1a3a8a] cursor-pointer shadow-sm'
-                            }`}
-                          >
-                            {!preSelectedBranch
-                              ? 'Select Branch First'
-                              : (isItemOnlineTdc ? 'Proceed to Payment' : '📅 Select Schedule')
-                            }
-                          </button>
                         </div>
                       )
                     })}
@@ -344,6 +471,64 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
                       <p className="text-xs text-amber-700">Please select a branch before checkout</p>
                     </div>
                   )}
+
+                  {/* Summary Bar */}
+                  {cart.some(item => item.selected) && (
+                    <div className="border-t-2 border-gray-100 pt-4 mb-6 space-y-3">
+                        {/* Per-transaction Addons Breakdown */}
+                        {cart.some(i => i.selected && i.selectedAddons?.reviewer) && (
+                          <div className="flex justify-between items-center text-gray-600">
+                             <span className="text-sm">Exam Reviewer Fee</span>
+                             <span className="font-bold text-gray-900">₱30</span>
+                          </div>
+                        )}
+                        {cart.some(i => i.selected && i.selectedAddons?.vehicleTips) && (
+                          <div className="flex justify-between items-center text-gray-600">
+                             <span className="text-sm">Vehicle Tips Fee</span>
+                             <span className="font-bold text-gray-900">₱20</span>
+                          </div>
+                        )}
+                        
+                        <div className="flex justify-between items-center text-gray-600">
+                          <span className="text-sm">Convenience Fee</span>
+                          <span className="font-bold text-gray-900">₱25</span>
+                        </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-lg font-bold text-[#1a2332]">Grand Total</span>
+                        <span className="text-2xl font-black text-[#2157da]">₱{calculateGrandTotal().toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {!hasAvailableSlots && !availabilityLoading && cart.some(i => i.selected) && (
+                    <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg animate-pulse">
+                      <p className="text-xs font-bold text-red-600 mb-1 flex items-center gap-1">
+                        <span>❌</span> Slots Unavailable
+                      </p>
+                      <p className="text-[10px] text-red-500 leading-tight">
+                        One or more components of your selected courses are currently fully booked at this branch. Please try another branch or check back later.
+                      </p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleCartCheckout}
+                    disabled={!preSelectedBranch || !cart.some(item => item.selected) || !hasAvailableSlots || availabilityLoading}
+                    className={`w-full py-4 rounded-full font-bold transition-all text-base shadow-lg ${
+                      !preSelectedBranch || !cart.some(item => item.selected) || !hasAvailableSlots || availabilityLoading
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : 'bg-[#2157da] text-white hover:bg-[#1a3a8a] cursor-pointer'
+                    }`}
+                  >
+                    {!preSelectedBranch
+                      ? 'Select Branch First'
+                      : (!cart.some(item => item.selected) 
+                          ? 'Select Courses' 
+                          : (availabilityLoading 
+                              ? 'Checking Slots...' 
+                              : (!hasAvailableSlots ? 'Strictly No Slots' : 'Proceed to Checkout')))
+                    }
+                  </button>
                 </>
               )}
             </div>

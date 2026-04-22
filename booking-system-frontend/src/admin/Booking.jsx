@@ -26,8 +26,17 @@ const parseNotesJson = (rawNotes) => {
 
 const isPromoBooking = (bookingObj, notesJson) => {
     const list = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
-    if (list.some(c => String(c.category).toLowerCase() === 'promo')) return true;
-    if (String(bookingObj?.course_category || bookingObj?.category || bookingObj?.typeCategory || '').toLowerCase() === 'promo') return true;
+    if (list.some(c => {
+        const cat = String(c.category || '').toLowerCase();
+        const name = String(c.name || '').toLowerCase();
+        // Specifically identify Promo category or Promo name. 
+        // We exclude "Manual Bundle" or simple "Bundle" from being treated as a fixed "Promo Package" 
+        // so that multiple course selections can display individual items and the 3% discount.
+        return cat === 'promo' || name.includes('promo');
+    })) return true;
+    const cat = String(bookingObj?.course_category || bookingObj?.category || bookingObj?.typeCategory || '').toLowerCase();
+    const name = String(bookingObj?.course_name || bookingObj?.name || notesJson?.combinedCourseNames || '').toLowerCase();
+    if (cat === 'promo' || name.includes('promo')) return true;
     if (String(notesJson?.courseCategory || '').toLowerCase() === 'promo') return true;
     return false;
 };
@@ -289,7 +298,7 @@ const resolveAssessmentFigures = (booking = {}) => {
         && notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'PDC');
     const fallbackPromoBase = notesCourseTotal + notesAddonTotal + notesConvenience;
     const isNativePromo = isPromoBooking(booking, notesJson);
-    const fallbackPromoDiscount = (!isNativePromo && hasBundleInNotes) ? Number((fallbackPromoBase * 0.03).toFixed(2)) : 0;
+    const fallbackPromoDiscount = 0; // Removed legacy 3% fallback
     const notesPromoDiscount = isNativePromo ? 0 : Math.max(
         0,
         Number(notesJson?.promoDiscount || 0),
@@ -363,13 +372,30 @@ const buildCoursePaymentLines = (booking) => {
             amount: Number(String(booking?.coursePrice || booking?.amount || 0).replace(/[^0-9.]/g, ''))
         }];
     }
-    const sourceCourseItems = Array.isArray(booking?.courseItems) && booking.courseItems.length > 0
+    let sourceCourseItems = Array.isArray(booking?.courseItems) && booking.courseItems.length > 0
         ? booking.courseItems
         : normalizeCourseItems({
             course_name: booking?.fullCourseName || booking?.typeCategory || 'Course',
             course_type: booking?.courseTypeTdc || '',
             course_category: booking?.typeCategory || '',
         }, notesJson);
+
+    // If it's a bundle/promo through other means, hide PDC components
+    const hasBundleKeywords = sourceCourseItems.some(item => {
+        const n = String(item?.name || '').toLowerCase();
+        const c = String(item?.category || '').toLowerCase();
+        return n.includes('bundle') || n.includes('promo') || c.includes('bundle') || c.includes('promo');
+    });
+
+    if (hasBundleKeywords) {
+        sourceCourseItems = sourceCourseItems.filter(item => {
+            const n = String(item?.name || '').toLowerCase();
+            const c = String(item?.category || '').toLowerCase();
+            const isRoot = n.includes('bundle') || n.includes('promo') || c.includes('bundle') || c.includes('promo');
+            const isPdcComp = !isRoot && (n.includes('pdc') || c.includes('pdc'));
+            return !isPdcComp;
+        });
+    }
 
     const noteList = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
     const noteLines = noteList
@@ -433,12 +459,15 @@ const buildPaymentBreakdown = (booking) => {
     const promoDiscount = Math.max(0, Number(booking?.promoDiscount || 0));
     const grandTotal = Math.max(0, subtotal + convenienceFee - promoDiscount);
 
+    const promoPct = Number(booking?.promoPct || 0);
+
     return {
         courseLines,
         addonLines,
         subtotal,
         convenienceFee,
         promoDiscount,
+        promoPct,
         grandTotal,
     };
 };
@@ -547,6 +576,8 @@ const Booking = () => {
         const cacheKey = `admin_bookings_cache_v2_${selectedBranch || 'all'}`;
         let usedCache = false;
 
+        /* Cache disabled for live testing consistency */
+        /*
         try {
             const cachedRaw = sessionStorage.getItem(cacheKey);
             if (cachedRaw) {
@@ -559,11 +590,13 @@ const Booking = () => {
                 }
             }
         } catch (_) {}
+        */
 
         try {
             if (!usedCache) setLoading(true);
             setError(null);
-            const response = await adminAPI.getAllBookings(null, 100, selectedBranch || null);
+            const ts = Date.now();
+            const response = await adminAPI.getAllBookings(null, 100, selectedBranch || null, { params: { _t: ts } });
             if (response.success) {
                 // Transform database fields to match UI expectations
                 const transformedBookings = response.bookings.map(booking => {
@@ -741,6 +774,7 @@ const Booking = () => {
                         addonsDetailed: Array.isArray(notesJson?.addonsDetailed) ? notesJson.addonsDetailed : [],
                         convenienceFee: Math.max(0, Number(notesJson?.convenienceFee || 0)),
                         promoDiscount: Math.max(0, Number(notesJson?.promoDiscount || 0)),
+                        promoPct: Number(notesJson?.promoPct || 0),
                         balanceDue: computeEstimatedBalanceDue(booking),
                         paymentDate: booking.created_at,
                         firstPaymentDate: booking.created_at,
@@ -778,6 +812,7 @@ const Booking = () => {
                                 addonsDetailed: Array.isArray(n.addonsDetailed) ? n.addonsDetailed : b.addonsDetailed,
                                 convenienceFee: Number.isFinite(Number(n.convenienceFee)) ? Math.max(0, Number(n.convenienceFee)) : b.convenienceFee,
                                 promoDiscount: Number.isFinite(Number(n.promoDiscount)) ? Math.max(0, Number(n.promoDiscount)) : b.promoDiscount,
+                                promoPct: Number.isFinite(Number(n.promoPct)) ? Number(n.promoPct) : b.promoPct,
                                 courseTypePdc: n.courseTypePdc || '',
                                 courseTypeTdc: n.courseTypeTdc || b.courseTypeTdc,
                             };
@@ -1020,7 +1055,7 @@ const Booking = () => {
                             </tr>
                         `).join('')}
                         <tr class="total-row">
-                            <td colspan="9" style="text-align:right;">TOTAL AMOUNT</td>
+                            <td colspan="9" style="text-align:right;">TOTAL AMOUNT PAID</td>
                             <td>${toMoney(totalAmount)}</td>
                             <td colspan="2"></td>
                         </tr>
@@ -1312,10 +1347,18 @@ const Booking = () => {
                             legacyBasePrice: 700
                         };
                     } else if (!isPromoBooking(fresh, notesJson) && (fresh.course_name && fresh.course_name.includes('+'))) {
+                        const addonsConfig = {
+                            reviewer: 30,
+                            vehicleTips: 20,
+                            convenienceFee: 25,
+                            promoBundleDiscountPercent: 0,
+                            ...(addonsRes?.config || {}),
+                        };
                         // Fallback calculation for Custom Promo bundles (Dynamic Combos) if not in JSON.
                         // Predefined Promo courses from the DB should NOT get this dynamic 3% discount!
                         const basePrice = fresh.typeCategory === 'TDC + PDC' ? 2850 : Number(fresh.course_price || 0);
-                        const disc = Math.round(basePrice * 0.03 * 100) / 100; // 3%
+                        const promoPct = Number(addonsConfig?.promoBundleDiscountPercent ?? 0);
+                        const disc = Math.round(basePrice * (promoPct / 100) * 100) / 100;
                         fin = {
                             addonsDetailed: (fresh.addons || []).map(a => ({ name: a.name, price: Number(a.price) })),
                             promoDiscount: disc,
@@ -1363,14 +1406,14 @@ const Booking = () => {
                         reviewer: 30,
                         vehicleTips: 20,
                         convenienceFee: 25,
-                        promoBundleDiscountPercent: 3,
+                        promoBundleDiscountPercent: 0,
                         ...(addonsRes?.config || {}),
                     };
                     const reviewerEach = Number(addonsConfig.reviewer || 30);
                     const vehicleTipsEach = Number(addonsConfig.vehicleTips || 20);
                     const convenienceEach = Number(addonsConfig.convenienceFee || 25);
                     const effectiveConvenienceEach = isWalkInBooking ? 0 : convenienceEach;
-                    const promoPct = Number(addonsConfig.promoBundleDiscountPercent || 3);
+                    const promoPct = Number(addonsConfig.promoBundleDiscountPercent ?? 0);
                     const hasReviewer = Boolean(notesJson?.hasReviewer);
                     const hasVehicleTips = Boolean(notesJson?.hasVehicleTips);
                     const courseCount = Math.max(1, pricedCourseItems.length || baseCourseItems.length || 1);
@@ -1449,6 +1492,7 @@ const Booking = () => {
                         addonsDetailed: normalizedAddonsDetailed,
                         convenienceFee: normalizedConvenienceFee,
                         promoDiscount: normalizedPromoDiscount,
+                        promoPct: normalizedPromoDiscount > 0 ? (Number(fin.promoPct || 0) || promoPct) : 0,
                         pdcSchedulesDetailed,
                         courseItems: refreshedCourseItems,
                         courseTypeTdc: resolvedCourseTypeTdc,
@@ -1677,7 +1721,7 @@ const Booking = () => {
                         </tr>
                     `).join('')}
                     <tr class="total-row">
-                        <td colspan="9" style="text-align:right;">TOTAL AMOUNT</td>
+                        <td colspan="9" style="text-align:right;">TOTAL AMOUNT PAID</td>
                         <td>${toMoney(totalAmount)}</td>
                         <td colspan="2"></td>
                     </tr>
@@ -1929,8 +1973,20 @@ const Booking = () => {
                                                 </div>
                                             )}
 
-                                            <div className="bkv2-line-item">
-                                                <span>Net Total</span>
+                                            {paymentBreakdown.promoDiscount > 0 && (
+                                                <div className="bkv2-line-item discount">
+                                                    <span className="text-gray-600">
+                                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="19" y1="5" x2="5" y2="19"/><circle cx="12" cy="12" r="10"/></svg>
+                                                        {(!isPromoBooking(selectedBooking, parseNotesJson(selectedBooking.rawNotes)) && (paymentBreakdown.promoPct === 3 || (selectedBooking.courseItems?.length > 1))) 
+                                                            ? 'Multi-Course Discount (3%)' 
+                                                            : `Discount (${paymentBreakdown.promoPct > 0 ? `${paymentBreakdown.promoPct}%` : '3%'})`}
+                                                    </span>
+                                                    <span className="text-green-600">-{toMoney(paymentBreakdown.promoDiscount)}</span>
+                                                </div>
+                                            )}
+
+                                            <div className="bkv2-line-item total-summary" style={{ borderTop: '1px solid #e2e8f0', marginTop: '4px', paddingTop: '4px', fontWeight: '800' }}>
+                                                <span>Total Assessment</span>
                                                 <span>{toMoney(paymentBreakdown.grandTotal)}</span>
                                             </div>
                                         </>
@@ -1942,7 +1998,7 @@ const Booking = () => {
                                         <span>{toMoney(selectedAssessment.assessed)}</span>
                                     </div>
                                     <div className="bkv2-line-item addon">
-                                        <span>Already Paid</span>
+                                        <span>Total Amount Paid</span>
                                         <span>{toMoney(selectedAssessment.paid)}</span>
                                     </div>
                                     <div className="bkv2-line-item balance">
@@ -2180,7 +2236,7 @@ const Booking = () => {
                                                 <div className="bk-mark-paid-row"><span>Student</span><strong>{markPaidBooking.student}</strong></div>
                                                 <div className="bk-mark-paid-row"><span>Course</span><strong>{markPaidBooking.courseSummary || markPaidBooking.type}</strong></div>
                                                 <div className="bk-mark-paid-row"><span>Total Assessment</span><strong>{toMoney(assessed)}</strong></div>
-                                                <div className="bk-mark-paid-row"><span>Already Paid</span><strong>{toMoney(paid)}</strong></div>
+                                                <div className="bk-mark-paid-row"><span>Total Amount Paid</span><strong>{toMoney(paid)}</strong></div>
                                                 <div className="bk-mark-paid-row highlight"><span>Current Remaining</span><strong>{toMoney(remaining)}</strong></div>
                                             </div>
 
@@ -2441,7 +2497,7 @@ const Booking = () => {
                     {statusFilter !== 'All' && <span className="bk-active-filter">{statusFilter} <button onClick={() => setStatusFilter('All')}>&times;</button></span>}
                 </div>
 
-                <div className="booking-table-wrapper">
+                <div className="admin-table-responsive">
                     <table className="booking-table">
                         <thead><tr><th>ID</th><th>Student</th><th>Branch</th><th>First Payment</th><th>Payment</th><th>Status</th><th>Action</th></tr></thead>
                         <tbody>
@@ -2640,7 +2696,7 @@ const Booking = () => {
                             </div>
                         </div>
 
-                        <div className="bk-history-table-wrap">
+                        <div className="admin-table-responsive">
                             <table className="booking-table bk-history-table">
                                 <thead>
                                     <tr>

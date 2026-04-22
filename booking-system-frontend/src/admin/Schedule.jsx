@@ -175,7 +175,7 @@ const sortSlotsFn = (slotsArr) => {
     });
 };
 
-const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '', navigationTarget = null }) => {
+const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '', currentUserBranchId = null, navigationTarget = null }) => {
     const [todayStudents, setTodayStudents] = React.useState({ data: [], total: 0, date: '' });
     const [scheduleView, setScheduleView] = React.useState('schedule'); // 'schedule' | 'tdc_online' | 'pdc_scheduling' | 'summary' | 'noshow'
     const [noShowStudents, setNoShowStudents] = React.useState({ data: [], loading: false });
@@ -231,7 +231,18 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
     const [editingId, setEditingId] = useState(null);
     const [selectedSlot, setSelectedSlot] = useState(null);
     const [branches, setBranches] = useState([]);
-    const [selectedBranch, setSelectedBranch] = useState('');
+    const [selectedBranch, setSelectedBranch] = useState(String(currentUserBranchId || ''));
+    const [userRole, setUserRole] = useState(currentUserRole || null);
+
+    // Keep state in sync with props from Admin.jsx
+    useEffect(() => {
+        if (currentUserBranchId) {
+            setSelectedBranch(String(currentUserBranchId));
+        }
+        if (currentUserRole) {
+            setUserRole(currentUserRole);
+        }
+    }, [currentUserBranchId, currentUserRole]);
     const [courses, setCourses] = useState([]);
     const normalizedRole = String(currentUserRole || '').toLowerCase();
     const isSuperAdmin = normalizedRole === 'super_admin';
@@ -308,7 +319,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                     hasOnlineTdc,
                     hasPdc,
                 };
-            }).filter((entry) => entry.locked && entry.hasPdc);
+            }).filter((entry) => entry.hasPdc);
 
             setPdcSchedulingQueue({ data: queue, loading: false });
         } catch (error) {
@@ -709,7 +720,14 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         const base = slots.length > 0 ? slots.filter(s => {
             const sStart = s.date;
             const sEnd = s.end_date || s.date;
-            return selectedDate >= sStart && selectedDate <= sEnd;
+            const dateMatch = selectedDate >= sStart && selectedDate <= sEnd;
+            if (!dateMatch) return false;
+            
+            // Frontend safety filter: if a specific branch is selected (required for local admins),
+            // hide any slots that don't match that branch.
+            if (selectedBranch && String(s.branch_id) !== String(selectedBranch)) return false;
+            
+            return true;
         }) : [];
         if (!slotSearch.trim()) return sortSlotsFn(base);
         const q = slotSearch.trim().toLowerCase();
@@ -728,27 +746,26 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         loadSlots();
     }, [viewDate, selectedBranch]);
 
-    const [userRole, setUserRole] = useState(null);
 
     useEffect(() => {
         const fetchBranchesAndProfile = async () => {
             try {
-                // Fetch profile first to determine restrictions
-                const profileRes = await authAPI.getProfile();
-                let role = 'student';
-                let profileBranchId = null;
-
-                if (profileRes.success) {
-                    role = profileRes.user.role;
-                    profileBranchId = profileRes.user.branchId;
-                    setUserRole(role);
-                }
-
-                // Fetch branches
                 const response = await branchesAPI.getAll();
                 let loadedBranches = response.branches || [];
 
                 // Restrict viewing for branch-assigned admins.
+                let profileBranchId = currentUserBranchId;
+                let role = currentUserRole;
+
+                if (!role || !profileBranchId) {
+                    const profileRes = await authAPI.getProfile();
+                    if (profileRes.success) {
+                        role = profileRes.user.role;
+                        profileBranchId = profileRes.user.branchId;
+                        setUserRole(role);
+                    }
+                }
+
                 if (role === 'admin' && profileBranchId) {
                     loadedBranches = loadedBranches.filter(b => String(b.id) === String(profileBranchId));
                     setSelectedBranch(String(profileBranchId));
@@ -878,10 +895,6 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                 setFormData({ ...formData, [name]: value, session: '', time: '', course_type: '', transmission: '' });
             }
         } else if (name === 'course_type') {
-            if (formData.type === 'tdc' && String(value).toLowerCase() === 'online') {
-                showNotification('TDC Online slot creation is disabled. Please use Face-to-Face (F2F).', 'warning');
-                return;
-            }
             const transmissions = getAvailableTransmissions(value);
             const isB1B2Global = formData.type === 'pdc' && isGlobalB1B2Course(value);
             setFormData({
@@ -923,10 +936,6 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                 setAutoData({ ...autoData, [name]: value, session: '', time: '', course_type: '', transmission: '' });
             }
         } else if (name === 'course_type') {
-            if (autoData.type === 'tdc' && String(value).toLowerCase() === 'online') {
-                showNotification('TDC Online slot auto-generation is disabled. Please use Face-to-Face (F2F).', 'warning');
-                return;
-            }
             const transmissions = getAvailableTransmissions(value);
             const isB1B2Global = autoData.type === 'pdc' && isGlobalB1B2Course(value);
             setAutoData({
@@ -944,11 +953,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         e.preventDefault();
         setIsGenerating(true);
         try {
-            if (autoData.type === 'tdc' && String(autoData.course_type).toLowerCase() === 'online') {
-                showNotification('TDC Online slot auto-generation is disabled.', 'error');
-                setIsGenerating(false);
-                return;
-            }
+
 
             if (!autoData.startDate || !autoData.endDate) {
                 showNotification("Please select both start and end dates.", "error");
@@ -1055,10 +1060,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
     const handleSaveSlot = async (e) => {
         e.preventDefault();
         try {
-            if (formData.type === 'tdc' && String(formData.course_type).toLowerCase() === 'online') {
-                showNotification('TDC Online slot creation is disabled.', 'error');
-                return;
-            }
+
 
             const baseCapacity = formData.type === 'pdc' && isGlobalB1B2Course(formData.course_type)
                 ? 2
@@ -1507,21 +1509,33 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
             .catch(() => setSummaryStudentModal(null));
     };
 
-    const handleTdcOnlineMarkComplete = async (bookingId, currentStatus) => {
+    const handleTdcOnlineMarkDone = async (bookingId) => {
         try {
             if (!bookingId) return;
-            if (String(currentStatus || '').toLowerCase() === 'completed') {
-                showNotification('This enrollment is already marked as completed.', 'info');
-                return;
-            }
 
-            await adminAPI.updateBookingStatus(bookingId, 'completed');
-            showNotification('TDC Online enrollment marked as completed.', 'success');
+            // Updated to pass isTdcOnlineOnboarded: true. We don't change the status here, 
+            // unless it's already completed. But usually it's 'paid' or 'in-progress'.
+            // We'll keep the current status as is.
+            await adminAPI.updateBookingStatus(bookingId, null, { isTdcOnlineOnboarded: true });
+            showNotification('TDC Online account setup marked as done.', 'success');
 
-            // Remove it from active OTDC queue and refresh both queues so badges/tables stay accurate.
+            // Dispatch event to Admin.jsx so it marks the notification as read and stops alerts/reminders
+            window.dispatchEvent(new CustomEvent('mds-mark-notification-read', { detail: { id: String(bookingId) } }));
+
+            // Update the local state to reflect the onboarded flag without removing the row
             setTdcOnlineStudents(prev => ({
                 ...prev,
-                data: prev.data.filter((row) => row.booking_id !== bookingId),
+                data: prev.data.map((row) => {
+                    if (row.booking_id === bookingId) {
+                        try {
+                            const currentNotes = row.notes ? JSON.parse(row.notes) : {};
+                            return { ...row, notes: JSON.stringify({ ...currentNotes, tdcOnlineOnboarded: true }) };
+                        } catch (e) {
+                            return { ...row, notes: JSON.stringify({ tdcOnlineOnboarded: true }) };
+                        }
+                    }
+                    return row;
+                }),
             }));
 
             await Promise.all([
@@ -1529,13 +1543,9 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                     .then(res => {
                         const rawData = Array.isArray(res?.data) ? res.data : [];
                         const filtered = rawData.filter(row => {
-                            const isPaidOnline = String(row.payment_method || '').toLowerCase() === 'starpay' || 
-                                               String(row.payment_type || '').toLowerCase() === 'online';
                             const isTdcOnlineOrBundle = /online|otdc|bundle|\+/i.test(row.course_name || '') || 
                                                       /online|otdc/i.test(row.course_type || '');
-                            
-                            if (isPaidOnline && isTdcOnlineOrBundle) return false;
-                            return true;
+                            return isTdcOnlineOrBundle;
                         });
                         setTdcOnlineStudents({ data: filtered, loading: false });
                     })
@@ -1543,21 +1553,45 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                 fetchPdcSchedulingQueue({ branchId: selectedBranch || undefined }),
             ]);
 
+            // Update modal state so the "Mark Done" button disappears
             setSummaryStudentModal(prev => prev ? {
                 ...prev,
                 scheduleInfo: {
                     ...prev.scheduleInfo,
-                    booking_status: 'completed',
-                    status: 'completed',
-                },
-                bookings: Array.isArray(prev.bookings)
-                    ? prev.bookings.map((booking) => (
-                        booking.id === bookingId ? { ...booking, status: 'completed' } : booking
-                    ))
-                    : prev.bookings,
+                    notes: JSON.stringify({
+                        ...parseNotesJson(prev.scheduleInfo?.notes),
+                        tdcOnlineOnboarded: true,
+                    })
+                }
             } : null);
         } catch (err) {
-            showNotification(err?.message || 'Failed to mark TDC Online enrollment as completed.', 'error');
+            showNotification(err?.message || 'Failed to mark TDC Online as done.', 'error');
+        }
+    };
+
+    const handleTdcOnlineMarkComplete = async (bookingId, currentStatus) => {
+        try {
+            if (!bookingId) return;
+            const nextStatus = currentStatus === 'completed' ? 'in-progress' : 'completed';
+            
+            await adminAPI.updateBookingStatus(bookingId, nextStatus);
+            showNotification(`TDC Online student marked as ${nextStatus}!`, 'success');
+
+            // Optionally also mark notification as read if not already
+            window.dispatchEvent(new CustomEvent('mds-mark-notification-read', { detail: { id: String(bookingId) } }));
+
+            setSummaryStudentModal(prev => prev ? {
+                ...prev,
+                scheduleInfo: {
+                    ...prev.scheduleInfo,
+                    booking_status: nextStatus,
+                    status: nextStatus,
+                }
+            } : null);
+            
+            fetchTdcOnlineStudents({ branchId: selectedBranch || undefined });
+        } catch (err) {
+            showNotification(err?.message || 'Failed to update course completion status.', 'error');
         }
     };
 
@@ -1682,15 +1716,20 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                         </span>
                         <span className="tab-label">TDC Online</span>
-                        {!tdcOnlineStudents.loading && tdcOnlineStudents.data.length > 0 && (
-                            <span style={{
-                                marginLeft: '6px',
-                                background: scheduleView === 'tdc_online' ? 'var(--primary-color, #1a56db)' : '#e0e7ff',
-                                color: scheduleView === 'tdc_online' ? '#fff' : 'var(--primary-color, #1a56db)',
-                                borderRadius: '20px', padding: '1px 8px',
-                                fontSize: '0.72rem', fontWeight: 700, lineHeight: '1.5',
-                            }}>{tdcOnlineStudents.data.length}</span>
-                        )}
+                        {(() => {
+                            const badgeCount = tdcOnlineStudents.data.filter(s => {
+                                try { return !(s.notes ? JSON.parse(s.notes) : {}).tdcOnlineOnboarded; } catch(e) { return true }
+                            }).length;
+                            return !tdcOnlineStudents.loading && badgeCount > 0 ? (
+                                <span style={{
+                                    marginLeft: '6px',
+                                    background: scheduleView === 'tdc_online' ? 'var(--primary-color, #1a56db)' : '#e0e7ff',
+                                    color: scheduleView === 'tdc_online' ? '#fff' : 'var(--primary-color, #1a56db)',
+                                    borderRadius: '20px', padding: '1px 8px',
+                                    fontSize: '0.72rem', fontWeight: 700, lineHeight: '1.5',
+                                }}>{badgeCount}</span>
+                            ) : null;
+                        })()}
                     </button>
                 )}
                 {canAccessScheduleTab('pdc_scheduling') && (
@@ -1816,7 +1855,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                             <div className="noshow-empty-text">All students attended their sessions — great news!</div>
                         </div>
                     ) : (
-                        <div className="noshow-table-wrap">
+                        <div className="admin-table-responsive noshow-table-wrap">
                             <table className="noshow-data-table">
                                 <thead>
                                     <tr>
@@ -1917,13 +1956,9 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                     .then(res => {
                                         const rawData = Array.isArray(res?.data) ? res.data : [];
                                         const filtered = rawData.filter(row => {
-                                            const isPaidOnline = String(row.payment_method || '').toLowerCase() === 'starpay' || 
-                                                               String(row.payment_type || '').toLowerCase() === 'online';
                                             const isTdcOnlineOrBundle = /online|otdc|bundle|\+/i.test(row.course_name || '') || 
                                                                       /online|otdc/i.test(row.course_type || '');
-                                            
-                                            if (isPaidOnline && isTdcOnlineOrBundle) return false;
-                                            return true;
+                                            return isTdcOnlineOrBundle;
                                         });
                                         setTdcOnlineStudents({ data: filtered, loading: false });
                                     })
@@ -1970,7 +2005,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                             <div className="noshow-empty-text">New online enrollments will appear here for provider onboarding.</div>
                         </div>
                     ) : (
-                        <div className="table-wrapper">
+                        <div className="admin-table-responsive table-wrapper">
                             <table className="custom-table">
                                 <thead>
                                     <tr>
@@ -2040,7 +2075,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                                         }}
                                                     >
                                                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                                        View
+                                                        View Details
                                                     </button>
                                                 </div>
                                             </td>
@@ -2093,7 +2128,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                             <div className="noshow-empty-text">Students will appear here after OTDC is marked complete.</div>
                         </div>
                     ) : (
-                        <div className="table-wrapper">
+                        <div className="admin-table-responsive table-wrapper">
                             <table className="custom-table">
                                 <thead>
                                     <tr>
@@ -2298,7 +2333,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
                                     {group.course_type} &mdash; {group.students.length} student{group.students.length !== 1 ? 's' : ''}
                                 </div>
-                                <div className="table-wrapper">
+                                <div className="admin-table-responsive table-wrapper">
                                     <table className="custom-table">
                                         <thead>
                                             <tr>
@@ -2600,7 +2635,10 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                     </h4>
                                     {slot.branch_id ? (
                                         <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#64748b', fontWeight: '500' }}>
-                                            📍 {branches.find(b => b.id === slot.branch_id)?.name || 'Unknown Branch'}
+                                            📍 {(() => {
+                                                const b = branches.find(br => String(br.id) === String(slot.branch_id));
+                                                return b ? b.name : (slot.branch_name || 'Unknown Branch');
+                                            })()}
                                         </p>
                                     ) : (
                                         <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#64748b', fontWeight: '500' }}>
@@ -2790,8 +2828,8 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                     <label>Session</label>
                                     <select name="session" value={formData.session} onChange={handleInputChange} required>
                                         <option value="" disabled>-- Select Session --</option>
-                                        <option value="Morning" disabled={formData.type === 'tdc'}>🌅 Morning (08:00 AM – 12:00 PM)</option>
-                                        <option value="Afternoon" disabled={formData.type === 'tdc'}>☀️ Afternoon (01:00 PM – 05:00 PM)</option>
+                                        <option value="Morning">🌅 Morning (08:00 AM – 12:00 PM)</option>
+                                        <option value="Afternoon">☀️ Afternoon (01:00 PM – 05:00 PM)</option>
                                         <option value="Whole Day">🕐 Whole Day (08:00 AM – 05:00 PM)</option>
                                     </select>
                                 </div>
@@ -2804,6 +2842,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                             {formData.type === 'tdc' ? (
                                                 <>
                                                     <option value="F2F">Face-to-Face (F2F)</option>
+                                                    <option value="Online">Online (OTDC)</option>
                                                 </>
                                             ) : (
                                                 courses.filter(c => c.category?.toLowerCase() === formData.type).map(c => (
@@ -2967,7 +3006,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
 
                             {/* Enrolled Students Tab */}
                             {studentModalTab === 'enrolled' && (
-                            <div className="student-table-wrapper" style={{ borderRadius: 0, border: 'none', borderBottom: '1px solid var(--border-color)' }}>
+                            <div className="admin-table-responsive student-table-wrapper" style={{ borderRadius: 0, border: 'none', borderBottom: '1px solid var(--border-color)' }}>
                                     <table className="student-table">
                                         <thead>
                                             <tr>
@@ -3128,7 +3167,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
 
                             {/* Assign Student Tab */}
                             {studentModalTab === 'unassigned' && (
-                                <div className="student-table-wrapper" style={{ borderRadius: 0, border: 'none' }}>
+                                <div className="admin-table-responsive student-table-wrapper" style={{ borderRadius: 0, border: 'none' }}>
                                     {selectedSlot.date !== selectedDate ? (
                                         <div style={{ padding: '40px 24px', textAlign: 'center' }}>
                                             <div style={{ fontSize: '2rem', marginBottom: '12px' }}>⚠️</div>
@@ -3390,8 +3429,8 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                     <label>Session</label>
                                     <select name="session" value={autoData.session} onChange={handleAutoInputChange} required>
                                         <option value="" disabled>-- Select Session --</option>
-                                        <option value="Morning" disabled={autoData.type === 'tdc'}>🌅 Morning (08:00 AM – 12:00 PM)</option>
-                                        <option value="Afternoon" disabled={autoData.type === 'tdc'}>☀️ Afternoon (01:00 PM – 05:00 PM)</option>
+                                        <option value="Morning">🌅 Morning (08:00 AM – 12:00 PM)</option>
+                                        <option value="Afternoon">☀️ Afternoon (01:00 PM – 05:00 PM)</option>
                                         <option value="Whole Day">🕐 Whole Day (08:00 AM – 05:00 PM)</option>
                                     </select>
                                 </div>
@@ -3404,6 +3443,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                             {autoData.type === 'tdc' ? (
                                                 <>
                                                     <option value="F2F">Face-to-Face (F2F)</option>
+                                                    <option value="Online">Online (OTDC)</option>
                                                 </>
                                             ) : (
                                                 courses.filter(c => c.category?.toLowerCase() === autoData.type).map(c => (
@@ -4047,13 +4087,13 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                         {/* ── Quick Actions ── */}
                         {!summaryStudentModal.loading && (() => {
                             const si = summaryStudentModal.scheduleInfo;
-                            const isTdcOnline = si?.source === 'tdc_online';
+                            const isTdcOnline = si?.source === 'tdc_online' || /otdc|online/i.test(si?.course_name || si?.course_type || '');
                             const isNoShow = si?.status === 'no-show';
-                            const isCompleted = (isTdcOnline
-                                ? si?.booking_status
-                                : si?.status) === 'completed';
+                            const isCompleted = (si?.booking_status || si?.status) === 'completed';
                             const feePaid = si?.reschedule_fee_paid;
                             const canReschedule = isNoShow && feePaid;
+                            const notesJson = parseNotesJson(si?.notes);
+                            const isOnboarded = !!notesJson?.tdcOnlineOnboarded;
                             return (
                                 <div style={{
                                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -4063,55 +4103,54 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                 }}>
                                     <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Actions</div>
                                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                                        {isTdcOnline ? (
-                                            <>
-                                                <button
-                                                    onClick={() => handleTdcOnlineMarkComplete(si?.booking_id, si?.booking_status)}
-                                                    disabled={isCompleted}
-                                                    style={{
-                                                        display: 'inline-flex', alignItems: 'center', gap: '6px',
-                                                        padding: '7px 16px', borderRadius: '8px', border: 'none',
-                                                        background: isCompleted ? '#dcfce7' : '#dbeafe',
-                                                        color: isCompleted ? '#166534' : '#1d4ed8',
-                                                        cursor: isCompleted ? 'default' : 'pointer',
-                                                        fontSize: '0.82rem', fontWeight: 700,
-                                                        opacity: isCompleted ? 0.9 : 1,
-                                                    }}
-                                                >
-                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6L9 17l-5-5"/></svg>
-                                                    {isCompleted ? 'Completed' : 'Mark Complete'}
-                                                </button>
-                                            </>
-                                        ) : (
-                                            <>
-                                        {!isNoShow && (
-                                            <>
-                                                <button
-                                                    onClick={() => handleSummaryAttendance(si?.enrollment_id, si?.status)}
-                                                    style={{
-                                                        display: 'inline-flex', alignItems: 'center', gap: '6px',
-                                                        padding: '7px 16px', borderRadius: '8px', border: 'none',
-                                                        background: isCompleted ? '#f1f5f9' : '#dbeafe',
-                                                        color: isCompleted ? '#64748b' : '#1d4ed8',
-                                                        cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700,
-                                                    }}
-                                                >
-                                                    {isCompleted
-                                                        ? <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12l5 5L20 5"/></svg>Undo Complete</>
-                                                        : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6L9 17l-5-5"/></svg>Mark Complete</>}
-                                                </button>
-                                                <button
-                                                    onClick={() => handleSummaryNoShow(si?.enrollment_id, summaryStudentModal.student ? [summaryStudentModal.student.first_name, summaryStudentModal.student.last_name].join(' ') : si?.name)}
-                                                    style={{
-                                                        display: 'inline-flex', alignItems: 'center', gap: '6px',
-                                                        padding: '7px 16px', borderRadius: '8px', border: 'none',
-                                                        background: '#fee2e2', color: '#b91c1c',
-                                                        cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700,
-                                                    }}
-                                                >
-                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                                                    No-Show
-                                                </button>
+                                        {isTdcOnline && !isOnboarded && (
+                                             <button
+                                                 onClick={() => handleTdcOnlineMarkDone(si?.booking_id)}
+                                                 style={{
+                                                     display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                     padding: '7px 16px', borderRadius: '8px', border: 'none',
+                                                     background: '#dcfce7', color: '#166534', cursor: 'pointer',
+                                                     fontSize: '0.82rem', fontWeight: 700,
+                                                 }}
+                                             >
+                                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                 Mark Done
+                                             </button>
+                                         )}
+
+                                         {!isNoShow && (
+                                             <>
+                                                 <button
+                                                     onClick={() => isTdcOnline 
+                                                         ? handleTdcOnlineMarkComplete(si?.booking_id, si?.booking_status || si?.status)
+                                                         : handleSummaryAttendance(si?.enrollment_id, si?.status)
+                                                     }
+                                                     style={{
+                                                         display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                         padding: '7px 16px', borderRadius: '8px', border: 'none',
+                                                         background: isCompleted ? '#f1f5f9' : '#dbeafe',
+                                                         color: isCompleted ? '#64748b' : '#1d4ed8',
+                                                         cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700,
+                                                     }}
+                                                 >
+                                                     {isCompleted
+                                                         ? <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12l5 5L20 5"/></svg>Undo Complete</>
+                                                         : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6L9 17l-5-5"/></svg>Mark Complete</>}
+                                                 </button>
+                                                {!isTdcOnline && (
+                                                    <button
+                                                        onClick={() => handleSummaryNoShow(si?.enrollment_id, summaryStudentModal.student ? [summaryStudentModal.student.first_name, summaryStudentModal.student.last_name].join(' ') : si?.name)}
+                                                        style={{
+                                                            display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                            padding: '7px 16px', borderRadius: '8px', border: 'none',
+                                                            background: '#fee2e2', color: '#b91c1c',
+                                                            cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700,
+                                                        }}
+                                                    >
+                                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                                                        No-Show
+                                                    </button>
+                                                )}
                                             </>
                                         )}
                                         {isNoShow && !feePaid && (
@@ -4129,30 +4168,31 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                                 Mark Fee Paid (₱{si?.type?.toLowerCase() === 'tdc' ? '300' : '1,000'})
                                             </button>
                                         )}
-                                        <button
-                                            onClick={() => canReschedule ? openSummaryReschedulePanel(si?.enrollment_id, summaryStudentModal.student ? [summaryStudentModal.student.first_name, summaryStudentModal.student.last_name].join(' ') : si?.name, si?.slot_id, si?.type, si?.branch_id, si?.course_type, si?.transmission) : null}
-                                            disabled={!canReschedule}
-                                            title={!isNoShow ? 'Student must be marked No-Show first' : !feePaid ? `Student must pay the ₱${si?.type?.toLowerCase() === 'tdc' ? '300' : '1,000'} no-show fee first` : 'Reschedule Student'}
-                                            style={{
-                                                display: 'inline-flex', alignItems: 'center', gap: '6px',
-                                                padding: '7px 16px', borderRadius: '8px', border: 'none',
-                                                background: canReschedule ? '#fef3c7' : '#f1f5f9',
-                                                color: canReschedule ? '#92400e' : '#94a3b8',
-                                                cursor: canReschedule ? 'pointer' : 'not-allowed',
-                                                fontSize: '0.82rem', fontWeight: 700,
-                                                opacity: canReschedule ? 1 : 0.6,
-                                            }}
-                                        >
-                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-                                            Reschedule
-                                            {!canReschedule && (
-                                                <span style={{ fontSize: '0.7rem', fontWeight: 600, marginLeft: '2px' }}>
-                                                    {!isNoShow ? '(No-Show req.)' : '(Fee req.)'}
-                                                </span>
-                                            )}
-                                        </button>
-                                            </>
+                                        {!isTdcOnline && (
+                                            <button
+                                                onClick={() => canReschedule ? openSummaryReschedulePanel(si?.enrollment_id, summaryStudentModal.student ? [summaryStudentModal.student.first_name, summaryStudentModal.student.last_name].join(' ') : si?.name, si?.slot_id, si?.type, si?.branch_id, si?.course_type, si?.transmission) : null}
+                                                disabled={!canReschedule}
+                                                title={!isNoShow ? 'Student must be marked No-Show first' : !feePaid ? `Student must pay the ₱${si?.type?.toLowerCase() === 'tdc' ? '300' : '1,000'} no-show fee first` : 'Reschedule Student'}
+                                                style={{
+                                                    display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                    padding: '7px 16px', borderRadius: '8px', border: 'none',
+                                                    background: canReschedule ? '#fef3c7' : '#f1f5f9',
+                                                    color: canReschedule ? '#92400e' : '#94a3b8',
+                                                    cursor: canReschedule ? 'pointer' : 'not-allowed',
+                                                    fontSize: '0.82rem', fontWeight: 700,
+                                                    opacity: canReschedule ? 1 : 0.6,
+                                                }}
+                                            >
+                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                                                Reschedule
+                                                {!canReschedule && (
+                                                    <span style={{ fontSize: '0.7rem', fontWeight: 600, marginLeft: '2px' }}>
+                                                        {!isNoShow ? '(No-Show req.)' : '(Fee req.)'}
+                                                    </span>
+                                                )}
+                                            </button>
                                         )}
+
                                     </div>
                                 </div>
                             );
@@ -4379,7 +4419,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                     color: 'var(--secondary-text)', fontSize: '0.88rem',
                                 }}>No booking records found.</div>
                             ) : (
-                                <div style={{ borderRadius: '12px', border: '1px solid var(--border-color, #e2e8f0)', overflowX: 'auto' }}>
+                                <div className="admin-table-responsive" style={{ borderRadius: '12px', border: '1px solid var(--border-color, #e2e8f0)' }}>
                                     <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '700px' }}>
                                         <thead>
                                             <tr style={{ background: 'var(--hover-bg, #f8fafc)', borderBottom: '1px solid var(--border-color, #e2e8f0)' }}>

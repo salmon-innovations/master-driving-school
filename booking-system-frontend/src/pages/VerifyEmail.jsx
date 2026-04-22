@@ -124,7 +124,7 @@ function VerifyEmail({ onNavigate, setIsLoggedIn, userEmail }) {
       }
 
       clearPostVerifyRedirect()
-      onNavigate('schedule')
+      onNavigate('branches')
     } catch (error) {
       setError(error.message || 'Invalid verification code')
       setCode(['', '', '', '', '', ''])

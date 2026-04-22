@@ -178,23 +178,9 @@ const resolveBookingAssessment = (booking = {}) => {
 
     const hasBundleInNotes = notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'TDC')
         && notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'PDC');
-    const fallbackPromoBase = notesCourseTotal + notesAddonTotal;
-    const fallbackPromoDiscount = hasBundleInNotes ? Number((fallbackPromoBase * 0.03).toFixed(2)) : 0;
+    const fallbackPromoDiscount = 0; // Removed legacy 3% fallback
     const notesPromoRaw = Number(notesJson?.promoDiscount || booking?.promo_discount || 0);
-    const storedPct = Number(notesJson?.promoPct || 0);
-    
-    let promoDiscount = 0;
-    if (storedPct > 0) {
-        // Recalculate based on stored percentage to avoid corruption from full-price calculations
-        // The percentage applies ONLY to the subtotal (courses + add-ons), NOT the convenience fee
-        promoDiscount = Number(((notesCourseTotal + notesAddonTotal) * (storedPct / 100)).toFixed(2));
-    } else if (notesPromoRaw > 0) {
-        promoDiscount = notesPromoRaw;
-    } else {
-        promoDiscount = fallbackPromoDiscount;
-    }
-    const notesPromoDiscount = Math.max(0, promoDiscount);
-
+    const notesPromoDiscount = Math.max(0, Number(notesJson?.promoDiscount || booking?.promo_discount || 0));
     const notesComputedTotal = Math.max(0, Number((notesCourseTotal + notesAddonTotal + notesConvenience - notesPromoDiscount).toFixed(2)));
 
     const explicitNoteTotals = [
@@ -290,19 +276,22 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
         { price: Number(c?.price || 0), discount: Number(c?.discount || 0) }
     ]));
     
-    const hasBundleInTxn = courseList.some(item => 
-        String(item?.name || '').toLowerCase().includes('bundle') || 
-        String(item?.category || '').toLowerCase().includes('promo')
-    );
+    const hasBundleInTxn = courseList.some(item => {
+        const n = String(item?.name || '').toLowerCase();
+        const c = String(item?.category || '').toLowerCase();
+        return n.includes('bundle') || n.includes('promo') || c.includes('bundle') || c.includes('promo') || (n.includes('tdc') && n.includes('pdc'));
+    });
 
     // Dynamic discount from Course Management
     let appliedDiscountPct = 0;
 
-    const courseLines = courseList.map((item) => {
+    const filteredCourseList = courseList;
+
+    const courseLines = filteredCourseList.map((item) => {
         const rawName = String(item?.name || '').toLowerCase();
         const courseData = byName.get(rawName) || { price: 0, discount: 0 };
         const isComp = hasBundleInTxn && (rawName.includes('tdc') || rawName.includes('pdc'));
-        const isBundleRoot = rawName.includes('bundle') || rawName.includes('promo');
+        const isBundleRoot = rawName.includes('bundle') || rawName.includes('promo') || (rawName.includes('tdc') && rawName.includes('pdc'));
         
         // Track the highest discount found among the selected courses
         if (courseData.discount > appliedDiscountPct) {
@@ -347,22 +336,36 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
     const subtotal = courseSubtotal + reviewerTotal + vehicleTipsTotal;
     
     // Internal discount calculation using the dynamic percentage from Course Management
-    // We prioritize the dynamic percentage from Course Management OR the stored percentage in notes
-    const storedPct = Number(notesJson?.promoPct || 0);
-    const effectivePct = appliedDiscountPct > 0 ? appliedDiscountPct : storedPct;
+    // For Multi-course: If we have > 1 course (or a manual bundle) and NO predefined promo category is involved, apply 3%.
+    // We check for "promo" specifically to identify those special packages.
+    const hasPromoCategory = courseList.some(item => {
+        const c = String(item?.category || '').toLowerCase();
+        const n = String(item?.name || '').toLowerCase();
+        return c.includes('promo') || n.includes('promo');
+    });
 
-    if (effectivePct > 0) {
-        // ALWAYS recalculate if a percentage is available to ensure it applies to the CURRENT subtotal
-        // The percentage applies ONLY to the subtotal (courses + add-ons), NOT the convenience fee
-        promoDiscount = Number((subtotal * (effectivePct / 100)).toFixed(2));
-    } else if (promoDiscount === 0 && hasBundleInTxn) {
-        // Legacy 3% fallback for bundles without explicit percentages
-        promoDiscount = Number((subtotal * 0.03).toFixed(2));
+    const isMultiCourseQualifying = (courseList.length > 1 || courseList.some(c => String(c.name || '').toLowerCase().includes('manual bundle'))) && !hasPromoCategory;
+    const dynamicMultiCourseDiscount = isMultiCourseQualifying ? Number((subtotal * 0.03).toFixed(2)) : 0;
+
+    // Use stored promo discount if available, otherwise fallback to dynamic multi-course calculation
+    let effectivePromoDiscount = promoDiscount;
+    let promoDiscountLabel = 'Discount';
+    
+    if (effectivePromoDiscount === 0 && dynamicMultiCourseDiscount > 0) {
+        effectivePromoDiscount = dynamicMultiCourseDiscount;
     }
 
-    const netTotal = Number((subtotal + convenienceFee - promoDiscount).toFixed(2));
+    if (effectivePromoDiscount > 0) {
+        if (isMultiCourseQualifying) {
+            promoDiscountLabel = 'Multi-Course Discount (3%)';
+        } else if (notesJson?.promoPct) {
+            promoDiscountLabel = `Discount (${notesJson.promoPct}%)`;
+        }
+    }
+
+    const total = Number((subtotal + convenienceFee - effectivePromoDiscount).toFixed(2));
     const remainingBalance = (isDownpayment || getPaymentStatusKey(txn?.status) === 'partial-payment')
-        ? Math.max(0, Number((netTotal - paidAmount).toFixed(2)))
+        ? Math.max(0, Number((total - paidAmount).toFixed(2)))
         : 0;
 
     return {
@@ -370,9 +373,9 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
         addonLines,
         subtotal,
         convenienceFee,
-        promoDiscount,
-        promoPct: appliedDiscountPct, // Pass the percentage back for display
-        netTotal,
+        promoDiscount: effectivePromoDiscount,
+        promoDiscountLabel,
+        total,
         remainingBalance,
     };
 };
@@ -815,7 +818,7 @@ const SalePayment = () => {
             color: 'blue'
         },
         {
-            label: 'Net Revenue',
+            label: 'Total Revenue',
             value: `P ${branchRevenueBreakdown.course.toLocaleString()}`,
             trend: getShare(branchRevenueBreakdown.course),
             color: 'indigo'
@@ -1119,8 +1122,8 @@ const SalePayment = () => {
                         `).join('')}
                         <tr class="total-row">
                             ${isUsers
-                                ? `<td colspan="3" style="text-align:right;">TOTAL AMOUNT DUE</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="2"></td>`
-                                : `<td colspan="8" style="text-align:right;">TOTAL AMOUNT</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="3"></td>`
+                                ? `<td colspan="3" style="text-align:right;">TOTAL DUE</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="2"></td>`
+                                : `<td colspan="8" style="text-align:right;">TOTAL</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="3"></td>`
                             }
                         </tr>
                     </tbody>
@@ -1264,10 +1267,14 @@ const SalePayment = () => {
                     <div class="line"><span>Subtotal</span><span class="line-strong">${toPeso(breakdown.subtotal)}</span></div>
                     <div class="line"><span>Convenience Fee</span><span class="line-strong">${toPeso(breakdown.convenienceFee)}</span></div>
                     ${breakdown.promoDiscount > 0
-                        ? `<div class="line line-discount"><span>Discount (${breakdown.promoPct}%)</span><span class="line-strong">-${toPeso(breakdown.promoDiscount).replace('P ', '')}</span></div>`
+                        ? `<div class="line line-discount"><span>${breakdown.promoDiscountLabel || 'Discount'}</span><span class="line-strong">-${toPeso(breakdown.promoDiscount).replace('P ', '')}</span></div>`
                         : ''
                     }
-                    <div class="line line-total"><span>Net Total</span><span>${toPeso(breakdown.netTotal)}</span></div>
+                    <div class="line line-strong" style="border-top: 2px solid #e2e8f0; margin-top: 4px; padding-top: 8px;">
+                        <span>Total Assessment</span>
+                        <span>${toPeso(breakdown.subtotal + breakdown.convenienceFee - breakdown.promoDiscount)}</span>
+                    </div>
+
                     ${isPartialPayment
                         ? `<div class="line line-remaining"><span>Remaining Balance</span><span>${toPeso(remainingBalanceValue)}</span></div>`
                         : ''
@@ -1395,8 +1402,8 @@ const SalePayment = () => {
                     `).join('')}
                     <tr class="total-row">
                         ${isUsers
-                            ? `<td colspan="3" style="text-align:right;">TOTAL AMOUNT DUE</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="2"></td>`
-                            : `<td colspan="8" style="text-align:right;">TOTAL AMOUNT</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="3"></td>`
+                            ? `<td colspan="3" style="text-align:right;">TOTAL DUE</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="2"></td>`
+                            : `<td colspan="8" style="text-align:right;">TOTAL</td><td>P ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td><td colspan="3"></td>`
                         }
                     </tr>
                     <tr><td colspan="${colCount}" style="height: 15px; background-color: #ffffff;"></td></tr>
@@ -1710,12 +1717,13 @@ const SalePayment = () => {
                         </button>
                     </div>
                 </div>
-                <div className="txn-table-wrapper">
+                <div className="admin-table-responsive txn-table-wrapper">
                     <table className="txn-table recent-txns-table">
                         <thead>
                             <tr>
                                 <th>Transaction ID</th>
                                 <th>Student Name</th>
+                                <th>Course</th>
                                 <th>Date</th>
                                 <th>Method</th>
                                 <th>Amount</th>
@@ -1729,6 +1737,7 @@ const SalePayment = () => {
                                     <tr key={`skel-${i}`}>
                                         <td><div className="sale-skeleton-cell" style={{ width: '100px' }}></div></td>
                                         <td><div className="sale-skeleton-cell" style={{ width: '120px' }}></div></td>
+                                        <td><div className="sale-skeleton-cell" style={{ width: '150px' }}></div></td>
                                         <td><div className="sale-skeleton-cell" style={{ width: '80px' }}></div></td>
                                         <td><div className="sale-skeleton-cell" style={{ width: '70px', borderRadius: '20px' }}></div></td>
                                         <td><div className="sale-skeleton-cell" style={{ width: '80px' }}></div></td>
@@ -1740,6 +1749,7 @@ const SalePayment = () => {
                                 <tr key={txn.id}>
                                     <td data-label="Transaction ID" className="txn-id">{txn.id}</td>
                                     <td data-label="Student Name" className="st-name" style={{ textAlign: 'left' }}>{txn.student}</td>
+                                    <td data-label="Course" className="allow-wrap">{txn.course}</td>
                                     <td data-label="Date">{txn.date}</td>
                                     <td data-label="Method">
                                         <span
@@ -1818,7 +1828,7 @@ const SalePayment = () => {
                             </button>
                         </div>
                     </div>
-                    <div className="txn-table-wrapper">
+                    <div className="admin-table-responsive txn-table-wrapper">
                         <table className="txn-table partial-bookings-table">
                             <thead>
                                 <tr>
@@ -1844,7 +1854,7 @@ const SalePayment = () => {
                                                 {b.student_contact || 'N/A'}
                                             </div>
                                         </td>
-                                        <td data-label="Course">
+                                        <td data-label="Course" className="allow-wrap">
                                             <div>{b.course_summary || b.course_name}</div>
                                             {(Number(b.course_count || 1) > 1) && (
                                                 <div style={{ fontSize: '11px', color: 'var(--text-secondary, #64748b)', marginTop: '2px' }}>
@@ -1944,7 +1954,7 @@ const SalePayment = () => {
                                     <strong>P {assessed.toLocaleString()}</strong>
                                 </div>
                                 <div className="sale-mark-paid-row">
-                                    <span>Already Paid</span>
+                                    <span>Total Amount Paid</span>
                                     <strong>P {paid.toLocaleString()}</strong>
                                 </div>
                                 <div className="sale-mark-paid-row sale-mark-paid-highlight">

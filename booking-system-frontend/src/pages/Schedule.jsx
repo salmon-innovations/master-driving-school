@@ -46,6 +46,59 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
   // Promo Bundle state (category === 'Promo': TDC + PDC bundle)
   const [promoStep, setPromoStep] = useState(1)               // 1 = pick TDC, 2 = pick PDC
 
+  // Flags & Derived State (Must be defined before useEffects that use them)
+  const isTDCCourse = selectedCourse?.type === 'tdc' ||
+    selectedCourse?.category === 'TDC' ||
+    selectedCourse?.name?.toLowerCase().includes('tdc') ||
+    selectedCourse?.shortName?.toLowerCase().includes('tdc')
+
+  const selectedCartItems = useMemo(() => cart.filter(i => i.selected), [cart]);
+  const isMultiStepFlow = 
+    selectedCourse?.category === 'Promo' || 
+    selectedCartItems.length > 1 ||
+    selectedCourse?.fromCartBundle;
+
+  const isPromoCourse = isMultiStepFlow;
+
+  const tdcItemInCart = selectedCartItems.find(i => {
+    const cat = (i.category || '').toLowerCase();
+    const nm = (i.name || '').toLowerCase();
+    return cat === 'tdc' || nm.includes('tdc');
+  });
+
+  const isOnlineTdcNoSchedule = isTDCCourse && !isPromoCourse && String(selectedCourse?.selectedType || courseType || '').toLowerCase() === 'online'
+  
+  const promoCourseTypeRaw = String(selectedCourse?.selectedType || courseType || selectedCourse?.course_type || '')
+  const promoCourseTypeParts = promoCourseTypeRaw.split('+').map((part) => String(part || '').trim()).filter(Boolean)
+  
+  const promoTdcType = useMemo(() => {
+    if (!isPromoCourse) return null;
+    if (tdcItemInCart) {
+      return (String(tdcItemInCart.selectedType || tdcItemInCart.type || 'F2F')).toUpperCase();
+    }
+    return (promoCourseTypeParts[0] || (isTDCCourse ? (String(selectedCourse?.selectedType || courseType || '')) : 'F2F')).toUpperCase();
+  }, [isPromoCourse, tdcItemInCart, promoCourseTypeParts, isTDCCourse, selectedCourse, courseType]);
+  
+  const isPromoTdcOnline = 
+    isPromoCourse && 
+    (promoTdcType === 'ONLINE' || promoTdcType === 'OTDC');
+
+  const promoHasPdcFromType = promoCourseTypeParts.slice(1).some((part) => /pdc/i.test(part))
+  const promoHasPdcFromName = /pdc|otdc\s*\+\s*4\s*pdc|4\s*pdc/i.test(`${selectedCourse?.name || ''} ${selectedCourse?.shortName || ''}`)
+  const promoHasPdcFromSelectedCourseMeta = Array.isArray(selectedCourse?._pdcCourses) && selectedCourse._pdcCourses.length > 0
+  const promoHasPdcFromCart = selectedCartItems.some(i => (i.category || '').toLowerCase() === 'pdc' || (i.name || '').toLowerCase().includes('pdc'));
+
+  const isPromoOnlineTdcLockedBundle = isPromoCourse &&
+    isPromoTdcOnline &&
+    (promoHasPdcFromType || promoHasPdcFromName || promoHasPdcFromSelectedCourseMeta || promoHasPdcFromCart)
+
+  const promoHasTdc = isTDCCourse || selectedCartItems.some(i => {
+    const cat = (i.category || '').toLowerCase();
+    const nm = (i.name || '').toLowerCase();
+    return cat === 'tdc' || nm.includes('tdc');
+  });
+
+
   useEffect(() => {
     const editMode = sessionStorage.getItem('editScheduleTarget');
     if (editMode && scheduleSelection) {
@@ -75,6 +128,15 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
   const [promoTdcRawSlots, setPromoTdcRawSlots] = useState([])
   const [loadingPromoTdc, setLoadingPromoTdc] = useState(false)
   const [promoTdcSlot, setPromoTdcSlot] = useState(null)
+  
+  // Auto-skip TDC step if it's Online TDC OR if there is no TDC in the transaction
+  useEffect(() => {
+    if (isPromoCourse && promoStep === 1) {
+      if (isPromoTdcOnline || !promoHasTdc) {
+        setPromoStep(2);
+      }
+    }
+  }, [isPromoCourse, isPromoTdcOnline, promoHasTdc, promoStep]);
   const [promoPdcCalMonth, setPromoPdcCalMonth] = useState(new Date())
   const [promoPdcDate, setPromoPdcDate] = useState(null)
   const [promoPdcRawSlots, setPromoPdcRawSlots] = useState([])
@@ -94,24 +156,6 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
   const [activePromoPdcCourseId, setActivePromoPdcCourseId] = useState(null)
   const isHydratingPromoPdcRef = useRef(false)
 
-  // Determine which slot type to show based on selected course
-  const isTDCCourse = selectedCourse?.type === 'tdc' ||
-    selectedCourse?.category === 'TDC' ||
-    selectedCourse?.name?.toLowerCase().includes('tdc') ||
-    selectedCourse?.shortName?.toLowerCase().includes('tdc')
-
-  // Promo bundle: separate two-step flow (TDC slot + PDC slot)
-  const isPromoCourse = selectedCourse?.category === 'Promo'
-  const isOnlineTdcNoSchedule = isTDCCourse && !isPromoCourse && String(selectedCourse?.selectedType || courseType || '').toLowerCase() === 'online'
-  const promoCourseTypeRaw = String(selectedCourse?.selectedType || courseType || selectedCourse?.course_type || '')
-  const promoCourseTypeParts = promoCourseTypeRaw.split('+').map((part) => String(part || '').trim()).filter(Boolean)
-  const promoTdcType = isPromoCourse ? (promoCourseTypeParts[0] || 'F2F') : null
-  const promoHasPdcFromType = promoCourseTypeParts.slice(1).some((part) => /pdc/i.test(part))
-  const promoHasPdcFromName = /pdc|otdc\s*\+\s*4\s*pdc|4\s*pdc/i.test(`${selectedCourse?.name || ''} ${selectedCourse?.shortName || ''}`)
-  const promoHasPdcFromSelectedCourseMeta = Array.isArray(selectedCourse?._pdcCourses) && selectedCourse._pdcCourses.length > 0
-  const isPromoOnlineTdcLockedBundle = isPromoCourse &&
-    (String(promoTdcType || '').toUpperCase() === 'ONLINE' || String(promoTdcType || '').toUpperCase() === 'OTDC') &&
-    (promoHasPdcFromType || promoHasPdcFromName || promoHasPdcFromSelectedCourseMeta)
 
   const parsePromoPdcParts = (courseTypeValue) => {
     const raw = String(courseTypeValue || '')
@@ -147,6 +191,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
   const promoPdcCourses = useMemo(() => {
     if (!isPromoCourse) return []
     const cartPdc = cart
+      .filter(item => item.selected)
       .filter(item => {
         const category = String(item?.category || '').toLowerCase()
         const name = String(item?.name || '').toLowerCase()
@@ -249,7 +294,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
   }, [selectedCourse, onNavigate, showNotification])
 
   useEffect(() => {
-    if (!selectedCourse || !isOnlineTdcNoSchedule) return
+    if (!selectedCourse || !isOnlineTdcNoSchedule || isMultiStepFlow) return
 
     const scheduleData = {
       noScheduleRequired: true,
@@ -1343,8 +1388,12 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
                   <span className="text-2xl">📚</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Selected Course</p>
-                  <p className="text-sm font-bold text-gray-900 leading-tight">{selectedCourse.name}</p>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">
+                    {selectedCartItems.length > 1 ? 'Courses in Transaction' : 'Selected Course'}
+                  </p>
+                  <p className="text-sm font-bold text-gray-900 leading-tight">
+                    {selectedCartItems.length > 1 ? `${selectedCartItems.length} Courses Selected` : selectedCourse.name}
+                  </p>
                 </div>
               </div>
             </div>
@@ -1872,20 +1921,26 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
               <div className="flex items-center gap-3 mb-5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4">
                 <span className="text-2xl">🏷️</span>
                 <div className="flex-1 min-w-0 text-center">
-                  <p className="font-black text-amber-900 text-sm">Promo Bundle — 2-Step Schedule</p>
+                  <p className="font-black text-amber-900 text-sm">
+                    {promoHasTdc ? 'Promo Bundle — 2-Step Schedule' : 'PDC Bundle — Schedule Overview'}
+                  </p>
                   <p className="text-xs text-amber-700 mt-0.5">{selectedCourse?.name}</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className={`flex items-center gap-1.5 ${promoStep === 1 || isPromoOnlineTdcLockedBundle ? 'opacity-100' : 'opacity-60'}`}>
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs ${promoTdcSlot ? 'bg-green-500 text-white' : promoStep === 1 || isPromoOnlineTdcLockedBundle ? 'bg-[#2157da] text-white' : 'bg-gray-200 text-gray-500'}`}>
-                      {promoTdcSlot && !isPromoOnlineTdcLockedBundle ? '✓' : '1'}
-                    </div>
-                    <span className="text-xs font-bold text-gray-700 hidden sm:block">TDC</span>
-                  </div>
-                  <div className="w-6 h-0.5 bg-gray-300 rounded" />
+                  {promoHasTdc && (
+                    <>
+                      <div className={`flex items-center gap-1.5 ${promoStep === 1 || isPromoOnlineTdcLockedBundle ? 'opacity-100' : 'opacity-60'}`}>
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs ${promoTdcSlot ? 'bg-green-500 text-white' : promoStep === 1 || isPromoOnlineTdcLockedBundle ? 'bg-[#2157da] text-white' : 'bg-gray-200 text-gray-500'}`}>
+                          {promoTdcSlot && !isPromoOnlineTdcLockedBundle ? '✓' : '1'}
+                        </div>
+                        <span className="text-xs font-bold text-gray-700 hidden sm:block">TDC</span>
+                      </div>
+                      <div className="w-6 h-0.5 bg-gray-300 rounded" />
+                    </>
+                  )}
                   <div className={`flex items-center gap-1.5 ${promoStep === 2 || isPromoOnlineTdcLockedBundle ? 'opacity-100' : 'opacity-60'}`}>
                     <div className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs ${allPdcDone && !isPromoOnlineTdcLockedBundle ? 'bg-green-500 text-white' : promoStep === 2 || isPromoOnlineTdcLockedBundle ? 'bg-[#2157da] text-white' : 'bg-gray-200 text-gray-500'}`}>
-                      {allPdcDone && !isPromoOnlineTdcLockedBundle ? '✓' : '2'}
+                      {allPdcDone && !isPromoOnlineTdcLockedBundle ? '✓' : promoHasTdc ? '2' : '1'}
                     </div>
                     <span className="text-xs font-bold text-gray-700 hidden sm:block">PDC {promoPdcCourses.length > 1 ? `(${pdcDoneCount}/${promoPdcCourses.length})` : ''}</span>
                   </div>
@@ -1913,9 +1968,9 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
                           return (
                             <div key={c._pdcKey} className="flex flex-col pl-3">
                               <span className="text-sm font-bold text-gray-800">{c.name}</span>
-                              <span className="text-xs text-blue-800/80">
+                              <span className="text-xs text-blue-800/80 leading-relaxed max-w-sm">
                                 {courseKind.includes('Car') ? (courseKind.includes('AT') ? 'Automatic' : 'Manual') : (courseTx ? `Motorcycle · ${courseTx}` : 'Motorcycle')}
-                                {' '}· Schedule will be assigned by Admin
+                                {' '}· <span className="font-bold underline">Only the branch manager can set your PDC schedule date</span> because you need to finish your Online TDC before taking your practical courses.
                               </span>
                             </div>
                           );
@@ -2030,6 +2085,48 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
                 <>
                   {promoPdcCourses.length > 1 && (
                     <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-5 sm:p-7 mb-4">
+                      {/* Active Course Schedule Summary Bar */}
+                      {(() => {
+                        const sel = activePromoPdcCourse?._pdcKey ? promoPdcSelections[activePromoPdcCourse._pdcKey] : null;
+                        const isDone = activePromoPdcCourse?._pdcKey && getIsPromoPdcComplete(activePromoPdcCourse._pdcKey);
+                        if (!isDone) return null;
+                        
+                        const d1 = new Date(sel.date);
+                        const d2 = new Date(sel.date2);
+                        const s1 = sel.slotDetails;
+                        const s2 = sel.slotDetails2;
+                        
+                        return (
+                          <div className="bg-green-50 border border-green-200 rounded-2xl p-3 mb-5 flex items-center gap-4">
+                            <div className="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center flex-shrink-0">
+                              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                            </div>
+                            <div className="flex-1 text-center sm:text-left">
+                              <h4 className="text-sm font-black text-green-800">PDC Both Days Selected!</h4>
+                              <p className="text-[10px] sm:text-xs text-green-700 mt-0.5">
+                                <span className="font-bold">Day 1:</span> {s1?.session} · {d1.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                <span className="mx-2 opacity-50">|</span>
+                                <span className="font-bold">Day 2:</span> {s2?.session} · {d2.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              </p>
+                            </div>
+                            <button 
+                              onClick={() => {
+                                const newSels = { ...promoPdcSelections };
+                                delete newSels[activePromoPdcCourse._pdcKey];
+                                setPromoPdcSelections(newSels);
+                                setPromoPdcDate(null);
+                                setPromoPdcSlot(null);
+                                setPromoPdcDate2(null);
+                                setPromoPdcSlot2(null);
+                              }}
+                              className="text-xs font-black text-green-600 hover:text-green-800 underline uppercase tracking-tight"
+                            >
+                              Change
+                            </button>
+                          </div>
+                        );
+                      })()}
+
                       <h3 className="text-base font-black text-gray-900 mb-3">Select PDC Course To Schedule</h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {promoPdcCourses.map((course) => {
@@ -2041,8 +2138,27 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
                               onClick={() => setActivePromoPdcCourseId(course._pdcKey)}
                               className={`p-3 rounded-2xl border-2 text-left transition-all ${isActive ? 'border-[#2157da] bg-blue-50' : 'border-gray-200 bg-white hover:border-[#2157da]'} `}
                             >
-                              <p className={`font-black text-sm ${isActive ? 'text-[#2157da]' : 'text-gray-900'}`}>{course.name}</p>
-                              <p className="text-xs text-gray-500 mt-1">{done ? 'Schedule Complete' : 'Schedule Pending'}</p>
+                              <div className="flex items-center justify-between gap-2">
+                                <p className={`font-black text-sm ${isActive ? 'text-[#2157da]' : 'text-gray-900'}`}>{course.name}</p>
+                                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isActive ? 'bg-[#2157da] text-white' : 'bg-gray-100 text-gray-400'}`}>
+                                  {(() => {
+                                    const kind = getPromoPdcTypeFromItem(course)
+                                    const tx = inferMotorTypeFromItem(course)
+                                    if (kind === 'Tricycle') return 'TRI'
+                                    if (kind === 'B1B2') return 'VAN/L300'
+                                    if (kind === 'Motorcycle') return tx || 'MOTO'
+                                    return tx || (kind.includes('AT') ? 'AT' : 'MT')
+                                  })()}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-1">
+                                <p className="text-xs text-gray-500">{done ? 'Schedule Complete' : 'Schedule Pending'}</p>
+                                {done && (
+                                  <div className="w-3.5 h-3.5 bg-green-500 rounded-full flex items-center justify-center">
+                                    <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" /></svg>
+                                  </div>
+                                )}
+                              </div>
                             </button>
                           )
                         })}
@@ -2102,6 +2218,39 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
                           <p className="text-xs text-gray-500 mt-0.5">{promoPdcSelectingDay2 ? `Pick a different date from the calendar — must match ${promoPdcSlot?.session}` : `${pdcTypeLabel} — pick a date from the calendar`}</p>
                         </div>
                       </div>
+
+                      {/* ---- PDC Day 1 selected banner (half-day) - MOVED TO TOP ---- */}
+                      {promoPdcSlot && isHalfDay(promoPdcSlot.session) && !promoPdcSlot2 && (
+                        <div className="bg-blue-50 border-2 border-[#2157da] rounded-2xl p-4 mb-6 flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+                          <div className="w-10 h-10 bg-[#2157da] rounded-xl flex items-center justify-center flex-shrink-0">
+                            <span className="text-white font-black text-sm">1</span>
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-black text-[#2157da] text-sm">PDC Day 1 Selected — {promoPdcSlot.session} · {promoPdcSlot.time_range}</p>
+                            <p className="text-xs text-blue-600 mt-0.5">{promoPdcSlot.session} sessions require 2 days. Pick a different date above for <strong>Day 2</strong>.</p>
+                          </div>
+                          <button onClick={() => { setPromoPdcSlot(null); setPromoPdcSlot2(null); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]) }}
+                            className="text-xs text-[#2157da] underline hover:no-underline font-bold flex-shrink-0">Change Day 1</button>
+                        </div>
+                      )}
+
+                      {/* ---- PDC Day 2 complete banner - MOVED TO TOP ---- */}
+                      {promoPdcSlot && promoPdcSlot2 && (
+                        <div className="bg-green-50 border-2 border-green-500 rounded-2xl p-4 mb-6 flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+                          <div className="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center flex-shrink-0">
+                            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-black text-green-800 text-sm">PDC Both Days Selected!</p>
+                            <p className="text-xs text-green-700 mt-0.5">
+                              Day 1: {promoPdcSlot.session} · {new Date(promoPdcDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} &nbsp;|&nbsp;
+                              Day 2: {promoPdcSlot2.session} · {new Date(promoPdcDate2).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </p>
+                          </div>
+                          <button onClick={() => { setPromoPdcSlot(null); setPromoPdcSlot2(null); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]) }}
+                            className="text-xs text-green-700 underline hover:no-underline font-bold flex-shrink-0">Change</button>
+                        </div>
+                      )}
 
                       <div className="flex items-center justify-between mb-6">
                         <button onClick={() => setPromoPdcCalMonth(new Date(promoPdcCalMonth.getFullYear(), promoPdcCalMonth.getMonth() - 1))} className="w-10 h-10 flex items-center justify-center rounded-xl border border-gray-200 hover:border-[#2157da] hover:bg-blue-50 transition-all">
@@ -2442,38 +2591,6 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
                     </div>
                   )}
 
-                  {/* ---- PDC Day 1 selected banner (half-day) ---- */}
-                  {promoPdcSlot && isHalfDay(promoPdcSlot.session) && !promoPdcSlot2 && (
-                    <div className="bg-blue-50 border-2 border-[#2157da] rounded-2xl p-4 mb-4 flex items-center gap-3">
-                      <div className="w-10 h-10 bg-[#2157da] rounded-xl flex items-center justify-center flex-shrink-0">
-                        <span className="text-white font-black text-sm">1</span>
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-black text-[#2157da] text-sm">PDC Day 1 Selected — {promoPdcSlot.session} · {promoPdcSlot.time_range}</p>
-                        <p className="text-xs text-blue-600 mt-0.5">{promoPdcSlot.session} sessions require 2 days. Pick a different date above for <strong>Day 2</strong>.</p>
-                      </div>
-                      <button onClick={() => { setPromoPdcSlot(null); setPromoPdcSlot2(null); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]) }}
-                        className="text-xs text-[#2157da] underline hover:no-underline font-bold flex-shrink-0">Change Day 1</button>
-                    </div>
-                  )}
-
-                  {/* ---- PDC Day 2 complete banner ---- */}
-                  {promoPdcSlot && promoPdcSlot2 && (
-                    <div className="bg-green-50 border-2 border-green-500 rounded-2xl p-4 mb-4 flex items-center gap-3">
-                      <div className="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center flex-shrink-0">
-                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-black text-green-800 text-sm">PDC Both Days Selected!</p>
-                        <p className="text-xs text-green-700 mt-0.5">
-                          Day 1: {promoPdcSlot.session} · {new Date(promoPdcDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} &nbsp;|&nbsp;
-                          Day 2: {promoPdcSlot2.session} · {new Date(promoPdcDate2).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        </p>
-                      </div>
-                      <button onClick={() => { setPromoPdcSlot(null); setPromoPdcSlot2(null); setPromoPdcSelectingDay2(false); setPromoPdcDate2(null); setPromoPdcRawSlots2([]) }}
-                        className="text-xs text-green-700 underline hover:no-underline font-bold flex-shrink-0">Change</button>
-                    </div>
-                  )}
 
                   {/* PDC Day 2 Slots */}
                   {promoPdcSelectingDay2 && !promoPdcSlot2 && promoPdcDate2 && (
@@ -2692,12 +2809,14 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
                     </button>
                     <button
                       onClick={handleProceedToPayment}
-                      disabled={promoPdcCourses.length > 0 ? promoPdcCourses.some(c => !getIsPromoPdcComplete(c._pdcKey)) : (!promoPdcSlot || (isHalfDay(promoPdcSlot?.session) && !promoPdcSlot2))}
-                      className={`flex-1 py-4 rounded-2xl font-black text-base transition-all flex items-center justify-center gap-2 ${((promoPdcCourses.length > 0 ? promoPdcCourses.every(c => getIsPromoPdcComplete(c._pdcKey)) : (promoPdcSlot && (!isHalfDay(promoPdcSlot?.session) || promoPdcSlot2)))) ? 'bg-gradient-to-r from-[#2157da] to-[#1a3a8a] text-white hover:shadow-2xl hover:shadow-blue-500/40 hover:scale-105 active:scale-100' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                      disabled={isPromoOnlineTdcLockedBundle ? false : (promoPdcCourses.length > 0 ? promoPdcCourses.some(c => !getIsPromoPdcComplete(c._pdcKey)) : (!promoPdcSlot || (isHalfDay(promoPdcSlot?.session) && !promoPdcSlot2)))}
+                      className={`flex-1 py-4 rounded-2xl font-black text-base transition-all flex items-center justify-center gap-2 ${(isPromoOnlineTdcLockedBundle || (promoPdcCourses.length > 0 ? promoPdcCourses.every(c => getIsPromoPdcComplete(c._pdcKey)) : (promoPdcSlot && (!isHalfDay(promoPdcSlot?.session) || promoPdcSlot2)))) ? 'bg-gradient-to-r from-[#2157da] to-[#1a3a8a] text-white hover:shadow-2xl hover:shadow-blue-500/40 hover:scale-105 active:scale-100' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
                     >
-                      {(promoPdcCourses.length > 0 ? promoPdcCourses.every(c => getIsPromoPdcComplete(c._pdcKey)) : (promoPdcSlot && (!isHalfDay(promoPdcSlot?.session) || promoPdcSlot2)))
-                        ? <><span>Proceed to Payment</span><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg></>
-                        : isHalfDay(promoPdcSlot?.session) ? 'Select PDC Day 2 to Continue' : 'Select PDC Slot to Continue'
+                      {isPromoOnlineTdcLockedBundle
+                        ? <><span>Proceed to Enrollment</span><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg></>
+                        : (promoPdcCourses.length > 0 ? promoPdcCourses.every(c => getIsPromoPdcComplete(c._pdcKey)) : (promoPdcSlot && (!isHalfDay(promoPdcSlot?.session) || promoPdcSlot2)))
+                          ? <><span>Proceed to Payment</span><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg></>
+                          : isHalfDay(promoPdcSlot?.session) ? 'Select PDC Day 2 to Continue' : 'Select PDC Slot to Continue'
                       }
                     </button>
                   </>

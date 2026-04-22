@@ -983,7 +983,7 @@ const UserManagement = ({ currentUserPermissions = [], currentUserRole = '' }) =
                         <p style={{ color: 'var(--secondary-text)' }}>Loading users...</p>
                     </div>
                 ) : (
-                    <div className="table-card">
+                    <div className="admin-table-responsive table-card">
                         <table className="user-management-table">
                             <thead>
                                 <tr>

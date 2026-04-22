@@ -7,12 +7,12 @@ export const NotificationProvider = ({ children }) => {
     const [notification, setNotification] = useState(null);
     const timeoutRef = useRef(null);
 
-    const showNotification = useCallback((message, type = 'info', durationMs = 3000) => {
+    const showNotification = useCallback((message, type = 'info', durationMs = 3000, action = null) => {
         if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
         }
 
-        setNotification({ message: normalizeNotificationText(message), type });
+        setNotification({ message: normalizeNotificationText(message), type, action });
 
         timeoutRef.current = setTimeout(() => {
             setNotification(null);
@@ -63,7 +63,20 @@ export const NotificationProvider = ({ children }) => {
                                 </svg>
                             )}
                         </div>
-                        <p className="font-medium">{notification.message}</p>
+                        <div className="flex flex-col">
+                            <p className="font-medium">{notification.message}</p>
+                            {notification.action && (
+                                <button
+                                    onClick={() => {
+                                        notification.action.onClick();
+                                        closeNotification();
+                                    }}
+                                    className="mt-1 text-xs font-bold text-[#2157da] hover:underline text-left"
+                                >
+                                    {notification.action.label}
+                                </button>
+                            )}
+                        </div>
                         <button 
                             onClick={closeNotification}
                             className="ml-4 text-gray-400 hover:text-gray-600 transition-colors"

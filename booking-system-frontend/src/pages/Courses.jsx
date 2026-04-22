@@ -9,7 +9,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   const [selectedCourse, setSelectedCourse] = useState(null)
   const [courseType, setCourseType] = useState('online')
   const [quantity, setQuantity] = useState(1)
-  const [addonsConfig, setAddonsConfig] = useState({ reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 3, customAddons: [] })
+  const [addonsConfig, setAddonsConfig] = useState({ reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 0, customAddons: [] })
   const [selectedAddons, setSelectedAddons] = useState({ reviewer: true, vehicleTips: true, convenienceFee: true })
   const [courses, setCourses] = useState([])
   const [branchContacts, setBranchContacts] = useState([])
@@ -55,7 +55,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
         ]);
 
         if (addonsRes?.success && addonsRes.config) {
-          const config = { reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 3, ...addonsRes.config, customAddons: addonsRes.config.customAddons || [] };
+          const config = { reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 0, ...addonsRes.config, customAddons: addonsRes.config.customAddons || [] };
           setAddonsConfig(config);
           
           const newSelected = { reviewer: true, vehicleTips: true, convenienceFee: true };
@@ -179,7 +179,7 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
       ];
 
     // Determine display name and short name
-    const displayName = course.name || 'Unnamed Course';
+    const displayName = (course.name || 'Unnamed Course').replace(/\*REQUIRED FOR STUDENT PERMIT/g, '').trim();
     const shortName = displayName.includes('(')
       ? displayName.split('(')[0].trim()
       : displayName.split('-')[0].trim();
@@ -302,6 +302,23 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
   const addToCart = (pkg, qty = 1, type = 'online') => {
     const normalizedQty = Math.max(1, Number(qty) || 1)
     const normalizedType = String(type || 'online')
+    const isAddingPromo = String(pkg.category || '').toLowerCase() === 'promo';
+    
+    // Check for exclusivity: Promo bundles cannot be mixed with other courses in the same transaction
+    if (cart.length > 0) {
+      const hasExistingPromo = cart.some(item => String(item.category || '').toLowerCase() === 'promo');
+      
+      if (isAddingPromo) {
+        // Trying to add a promo to a cart that already has items
+        showNotification("Promo bundles cannot be combined with other courses in a single transaction. Please clear your cart first to enroll in this bundle.", "error");
+        return;
+      } else if (hasExistingPromo) {
+        // Trying to add a regular course to a cart that has a promo
+        showNotification("You already have a promo bundle in your cart. Bundles cannot be mixed with other courses. Please clear your cart to select individual regular courses.", "error");
+        return;
+      }
+    }
+
     // Only store lightweight fields — images are base64 blobs that blow localStorage quota
     const cartItem = {
       id: pkg.id,
@@ -548,7 +565,10 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
           pdc: pdcResults.length > 0 ? pdcResults : [{ label: 'PDC', ok: true }] 
         })
         
-        setHasAvailableSlots(isOnlineTdcInBundle || (hasTdc && (pdcResults.length === 0 || pdcResults.every(r => r.ok))))
+        // Fix: Both TDC (if not online) AND all PDC tracks must have slots.
+        const tdcStat = isOnlineTdcInBundle || hasTdc
+        const pdcStat = pdcResults.length === 0 || pdcResults.every(r => r.ok)
+        setHasAvailableSlots(tdcStat && pdcStat)
         return
       }
 
@@ -828,11 +848,15 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
               onClick={() => handleViewCourse(pkg)}
             >
               {pkg.name}
-              {String(pkg.category || '').toUpperCase() !== 'PROMO' && (String(pkg.category || '').toUpperCase() === 'TDC' || (pkg.name || '').toLowerCase().includes('tdc')) ? (
-                <span className="text-[10px] text-gray-500 font-normal ml-2 block sm:inline">*REQUIRED FOR STUDENT PERMIT</span>
-              ) : String(pkg.category || '').toUpperCase() !== 'PROMO' && (String(pkg.category || '').toUpperCase() === 'PDC' || (pkg.name || '').toLowerCase().includes('pdc')) ? (
-                <span className="text-[10px] text-gray-500 font-normal ml-2 block sm:inline">*REQUIRED FOR DRIVERS LICENSE</span>
-              ) : null}
+              {(() => {
+                const cat = String(pkg.category || '').toUpperCase();
+                const nm = (pkg.name || '').toLowerCase();
+                const isPromo = cat === 'PROMO' || nm.includes('promo') || nm.includes('bundle') || nm.includes('package');
+                if (isPromo) return null;
+                if (cat === 'TDC' || nm.includes('tdc')) return <span className="text-[10px] text-gray-500 font-normal ml-2 block sm:inline">*REQUIRED FOR STUDENT PERMIT</span>;
+                if (cat === 'PDC' || nm.includes('pdc')) return <span className="text-[10px] text-gray-500 font-normal ml-2 block sm:inline">*REQUIRED FOR DRIVERS LICENSE</span>;
+                return null;
+              })()}
             </button>
             {pkg.popular && (
               <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3B74C] text-[#2157da] shadow-sm whitespace-nowrap flex-shrink-0 mt-0.5">
@@ -887,11 +911,15 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                           onClick={() => handleViewCourse(pkg)}
                         >
                           {pkg.name}
-                          {String(pkg.category || '').toUpperCase() !== 'PROMO' && (String(pkg.category || '').toUpperCase() === 'TDC' || (pkg.name || '').toLowerCase().includes('tdc')) ? (
-                            <span className="text-[10px] text-gray-500 font-normal ml-2 italic">*REQUIRED FOR STUDENT PERMIT</span>
-                          ) : String(pkg.category || '').toUpperCase() !== 'PROMO' && (String(pkg.category || '').toUpperCase() === 'PDC' || (pkg.name || '').toLowerCase().includes('pdc')) ? (
-                            <span className="text-[10px] text-gray-500 font-normal ml-2 italic">*REQUIRED FOR DRIVERS LICENSE</span>
-                          ) : null}
+                          {(() => {
+                            const cat = String(pkg.category || '').toUpperCase();
+                            const nm = (pkg.name || '').toLowerCase();
+                            const isPromo = cat === 'PROMO' || nm.includes('promo') || nm.includes('bundle') || nm.includes('package');
+                            if (isPromo) return null;
+                            if (cat === 'TDC' || nm.includes('tdc')) return <span className="text-[10px] text-gray-500 font-normal ml-2 italic">*REQUIRED FOR STUDENT PERMIT</span>;
+                            if (cat === 'PDC' || nm.includes('pdc')) return <span className="text-[10px] text-gray-500 font-normal ml-2 italic">*REQUIRED FOR DRIVERS LICENSE</span>;
+                            return null;
+                          })()}
                         </h3>
                       {pkg.popular && (
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3B74C] text-[#2157da] shadow-sm whitespace-nowrap">
@@ -1025,11 +1053,16 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
               <div className="flex flex-wrap items-center gap-3 mb-6">
                 <h1 className="text-2xl sm:text-3xl font-black text-[#2157da]">
                   {selectedCourse.name}
-                  {selectedCourse.category !== 'PROMO' && (selectedCourse.category === 'TDC' || (selectedCourse.name || '').toLowerCase().includes('tdc') || (selectedCourse.shortName || '').toLowerCase().includes('tdc')) ? (
-                    <span className="text-xs sm:text-sm text-gray-500 font-normal ml-3">*REQUIRED FOR STUDENT PERMIT</span>
-                  ) : selectedCourse.category !== 'PROMO' && (selectedCourse.category === 'PDC' || (selectedCourse.name || '').toLowerCase().includes('pdc')) ? (
-                    <span className="text-xs sm:text-sm text-gray-500 font-normal ml-3">*REQUIRED FOR DRIVERS LICENSE</span>
-                  ) : null}
+                  {(() => {
+                    const cat = String(selectedCourse.category || '').toUpperCase();
+                    const nm = (selectedCourse.name || '').toLowerCase();
+                    const snm = (selectedCourse.shortName || '').toLowerCase();
+                    const isPromo = cat === 'PROMO' || nm.includes('promo') || nm.includes('bundle') || nm.includes('package') || snm.includes('promo') || snm.includes('bundle');
+                    if (isPromo) return null;
+                    if (cat === 'TDC' || nm.includes('tdc') || snm.includes('tdc')) return <span className="text-xs sm:text-sm text-gray-500 font-normal ml-3">*REQUIRED FOR STUDENT PERMIT</span>;
+                    if (cat === 'PDC' || nm.includes('pdc') || snm.includes('pdc')) return <span className="text-xs sm:text-sm text-gray-500 font-normal ml-3">*REQUIRED FOR DRIVERS LICENSE</span>;
+                    return null;
+                  })()}
                 </h1>
               </div>
 
@@ -1188,7 +1221,10 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
                     <div>
                       <p className="font-bold text-[#1e40af] text-sm mb-1 uppercase tracking-tight">Online TDC Selected</p>
                       <p className="text-[#1e3a8a] text-[0.8rem] font-medium leading-relaxed">
-                        No branch slot selection is required for Online TDC. You can proceed directly to enrollment.
+                        {(courseType || '').includes('+') 
+                          ? "No branch slot selection is required for the Online TDC portion, but we are still checking availability for the included PDC components."
+                          : "No branch slot selection is required for Online TDC. You can proceed directly to enrollment."
+                        }
                       </p>
                     </div>
                   </div>
@@ -1275,16 +1311,6 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
               <div className="space-y-4 text-sm leading-relaxed">
                 <p className="text-gray-700">{selectedCourse.description}</p>
                 <p className="text-gray-600">{selectedCourse.contact}</p>
-
-                {/* A1 Tricycle Notice */}
-                {selectedCourse && (selectedCourse.name.toLowerCase().includes('a1') || selectedCourse.name.toLowerCase().includes('tricycle')) && (
-                  <div className="bg-blue-50 border-l-4 border-[#2157da] p-4 my-4 rounded-r-md">
-                    <p className="text-[#2157da] font-medium text-sm">
-                      <span className="font-bold mr-1">Note:</span>
-                      For Practical Driving Course (PDC) - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.
-                    </p>
-                  </div>
-                )}
 
                 <p className="text-gray-600">
                   Please be reminded that upon checking out <span className="text-red-600 font-semibold">you agree to our company terms and conditions.</span> To check the available schedule for walk in you may call the numbers below:

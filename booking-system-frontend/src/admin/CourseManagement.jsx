@@ -108,7 +108,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
     const [editingBranchId, setEditingBranchId] = useState('');
     const [activeTab, setActiveTab] = useState('courses');
     const [discountForm, setDiscountForm] = useState({});
-    const [addonsConfig, setAddonsConfig] = useState({ reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 3, customAddons: [] });
+    const [addonsConfig, setAddonsConfig] = useState({ reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 0, customAddons: [] });
     const [addonsLoading, setAddonsLoading] = useState(false);
 
     const normalizedRole = String(currentUserRole || '').toLowerCase();
@@ -162,7 +162,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
         }).catch(() => {});
         adminAPI.getAddonsConfig().then(r => { 
             if (r.success) {
-                setAddonsConfig({ reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 3, ...r.config, customAddons: r.config.customAddons || [] });
+                setAddonsConfig({ reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 0, ...r.config, customAddons: r.config.customAddons || [] });
             }
         }).catch(() => {});
     }, [isBranchScopedUser, currentUserBranchId]);
@@ -542,20 +542,39 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
         return base;
     };
 
+    const getCourseOrder = (pkg) => {
+        const name = (pkg.name || '').toLowerCase();
+        const category = (pkg.category || '').toLowerCase();
+        if (category === 'tdc' || name.includes('theoretical')) return 1;
+        if (name.includes('motorcycle')) return 2;
+        if (name.includes('pdc') && name.includes('car')) return 3;
+        if (name.includes('tricycle') || name.includes('a1')) return 4;
+        if (name.includes('van') || name.includes('b1') || name.includes('b2') || name.includes('l300')) return 5;
+        return 6;
+    };
+
     // Separate regular courses from promo bundle packages
-    const filteredCourses = courses.filter(course =>
-        course.category !== 'Promo' &&
-        course.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-    const filteredPackages = courses.filter(course =>
-        course.category === 'Promo' &&
-        course.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filteredCourses = courses
+        .filter(course =>
+            course.category !== 'Promo' &&
+            course.name.toLowerCase().includes(searchTerm.toLowerCase())
+        )
+        .sort((a, b) => getCourseOrder(a) - getCourseOrder(b));
+
+    const filteredPackages = courses
+        .filter(course =>
+            course.category === 'Promo' &&
+            course.name.toLowerCase().includes(searchTerm.toLowerCase())
+        )
+        .sort((a, b) => getCourseOrder(a) - getCourseOrder(b));
 
     // Active-tab-aware list used by pagination and the discount table
-    const allFilteredCourses = courses.filter(course =>
-        course.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const allFilteredCourses = courses
+        .filter(course =>
+            course.name.toLowerCase().includes(searchTerm.toLowerCase())
+        )
+        .sort((a, b) => getCourseOrder(a) - getCourseOrder(b));
+
     const activeFilteredList = activeTab === 'packages' ? filteredPackages
         : activeTab === 'discounts' ? allFilteredCourses
         : filteredCourses;
@@ -1175,7 +1194,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                         <div className="text-center p-10 text-gray-500">No courses match your search.</div>
                     ) : (
                         <>
-                        <div className="overflow-x-auto">
+                        <div className="admin-table-responsive">
                             <table className="w-full min-w-[800px]">
                                 <thead className="bg-[#f8fafc]">
                                     <tr>
@@ -1332,6 +1351,21 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                     onChange={(e) => setAddonsConfig({...addonsConfig, convenienceFee: e.target.value})}
                                     className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:border-[#2157da] focus:ring-2 focus:ring-blue-100 outline-none transition-all text-gray-800 font-semibold"
                                 />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">
+                                    Promo Bundle Discount (%)
+                                </label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    value={addonsConfig.promoBundleDiscountPercent}
+                                    onChange={(e) => setAddonsConfig({...addonsConfig, promoBundleDiscountPercent: e.target.value})}
+                                    placeholder="3"
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:border-[#2157da] focus:ring-2 focus:ring-blue-100 outline-none transition-all text-gray-800 font-semibold"
+                                />
+                                <p className="text-[10px] text-gray-400 mt-1 font-medium">Applied automatically to custom bundles (TDC + PDC combinations). Set to 0 to disable.</p>
                             </div>
 
                             {/* Custom Add-ons Section */}

@@ -150,9 +150,15 @@ const signRequest = (requestObj, starpayConfig = getDefaultConfig()) => {
  */
 const verifySignature = (rawRequestStr, signature) => {
     const platformPem = loadKey(`starpay_${keyEnv}_platform_public.pem`);
+    
     if (!platformPem) {
-        console.warn('[StarPay] Platform public key missing — skipping signature check');
-        return true; // allow in dev without the key; remove once key is in place
+        const allowInsecure = String(process.env.STARPAY_ALLOW_INSECURE_SIGNATURE || 'false').toLowerCase() === 'true';
+        if (!IS_PROD && allowInsecure) {
+            console.warn('[StarPay] !!! SECURITY WARNING !!! Platform public key missing. Skipping signature check because STARPAY_ALLOW_INSECURE_SIGNATURE is true.');
+            return true;
+        }
+        console.error('[StarPay] CRITICAL ERROR: Platform public key missing (keys/starpay_' + keyEnv + '_platform_public.pem). Unsigned webhook rejected.');
+        return false;
     }
     // Normalise: if an object was passed in accidentally, stringify it
     const dataStr = typeof rawRequestStr === 'string' ? rawRequestStr : JSON.stringify(rawRequestStr);

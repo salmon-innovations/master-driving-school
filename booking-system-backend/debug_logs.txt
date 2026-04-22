@@ -1,0 +1,2 @@
+// Debug logs for status updates
+[2026-04-18T08:51:41.404Z] UPDATE REQ: id=1, userId=3, role=walkin_student, status=Cancelled

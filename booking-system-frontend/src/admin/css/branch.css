@@ -770,8 +770,7 @@
 .cfg-modal-close { width: 32px; height: 32px; min-width: 32px; border: 1px solid rgba(255,255,255,.22); border-radius: 9px; background: rgba(255,255,255,.12); color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; transition: all var(--cfg-transition); flex-shrink: 0; padding: 0; }
 .cfg-modal-close:hover { background: rgba(239,68,68,.75); border-color: transparent; transform: rotate(90deg); }
 .cfg-modal-body { padding: 1.5rem 2rem; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1.1rem; }
-.cfg-modal-body::-webkit-scrollbar { width: 4px; }
-.cfg-modal-body::-webkit-scrollbar-thumb { background: var(--cfg-slate-200); border-radius: 2px; }
+
 .cfg-modal-field { display: flex; flex-direction: column; gap: 6px; }
 .cfg-modal-field label { font-size: .78rem; font-weight: 600; color: var(--cfg-slate-600); }
 .cfg-modal-field input,
@@ -906,7 +905,7 @@
 [data-theme='dark'] .cfg-modal { background: #1e293b; }
 [data-theme='dark'] .cfg-modal-body { background: #1e293b; }
 [data-theme='dark'] .cfg-modal-footer { background: #17233a; border-top-color: #334155; }
-[data-theme='dark'] .cfg-modal-body::-webkit-scrollbar-thumb { background: #334155; }
+
 [data-theme='dark'] .cfg-modal-field input,
 [data-theme='dark'] .cfg-modal-field textarea { background: #0f172a; border-color: #334155; color: #e2e8f0; }
 [data-theme='dark'] .cfg-modal-field input:focus,

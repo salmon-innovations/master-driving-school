@@ -236,7 +236,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
         const existingRedirect = sessionStorage.getItem('postVerifyRedirect') || localStorage.getItem('postVerifyRedirect')
         if (!existingRedirect) {
           const fallbackPayload = {
-            next: 'schedule',
+            next: 'branches',
             source: 'signup',
             isOnlineTdcNoSchedule: false,
             createdAt: Date.now(),

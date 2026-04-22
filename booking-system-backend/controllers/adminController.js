@@ -20,7 +20,7 @@ const {
 
 const EMAIL_CONTENT_PATH = path.join(__dirname, '../config/emailContent.json');
 const ADDONS_CONFIG_PATH = path.join(__dirname, '../config/addonsConfig.json');
-const { parseBookingFinancials } = require('../utils/financeUtils');
+const { parseBookingFinancials, calculateSaturdaySurcharge } = require('../utils/financeUtils');
 
 let permissionsColumnReady = false;
 
@@ -623,12 +623,12 @@ const searchStudents = async (req, res) => {
 const updateBookingStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, isTdcOnlineOnboarded } = req.body;
     const scope = await getUserBranchScope(req.user);
 
-    // Validate status
-    const validStatuses = ['partial_payment', 'paid', 'cancelled', 'completed'];
-    if (!validStatuses.includes(status.toLowerCase())) {
+    // Validate status if provided
+    const validStatuses = ['partial_payment', 'paid', 'cancelled', 'completed', 'confirmed', 'enrolled', 'in-progress'];
+    if (status && !validStatuses.includes(status.toLowerCase())) {
       return res.status(400).json({ error: 'Invalid status' });
     }
 
@@ -640,15 +640,44 @@ const updateBookingStatus = async (req, res) => {
       return res.status(403).json({ error: 'Access denied for this branch booking' });
     }
 
-    const result = await pool.query(
-      `UPDATE bookings SET status = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2
-       RETURNING *`,
-      [status.toLowerCase(), id]
-    );
+    let result;
+    if (status) {
+      result = await pool.query(
+        `UPDATE bookings SET status = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2
+         RETURNING *`,
+        [status.toLowerCase(), id]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT * FROM bookings WHERE id = $1`,
+        [id]
+      );
+    }
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    // Handle TDC Online Onboarding flag in notes
+    if (isTdcOnlineOnboarded) {
+      const booking = result.rows[0];
+      let notesJson = {};
+      try {
+        notesJson = booking.notes && String(booking.notes).startsWith('{') ? JSON.parse(booking.notes) : {};
+      } catch (_) {
+        notesJson = {};
+      }
+      notesJson.tdcOnlineOnboarded = true;
+      notesJson.tdcOnlineOnboardedAt = new Date().toISOString();
+      
+      await pool.query(
+        `UPDATE bookings SET notes = $1 WHERE id = $2`,
+        [JSON.stringify(notesJson), id]
+      );
+      
+      // Refresh local object for response
+      result.rows[0].notes = JSON.stringify(notesJson);
     }
 
     res.json({
@@ -1417,6 +1446,12 @@ const walkInEnrollment = async (req, res) => {
     const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
     const isPromoPdcLocked = !!pdcScheduleLockedUntilCompletion;
 
+    const toAmount = (value) => {
+      if (value == null) return 0;
+      const numeric = Number(String(value).replace(/[^0-9.-]/g, ''));
+      return Number.isFinite(numeric) ? numeric : 0;
+    };
+
     console.log('ðŸ”  Walk-in enrollment received - TDC:', courseType, 'PDC:', courseTypePdc);
 
     // Parse branchId to integer (comes as string from frontend select)
@@ -1465,7 +1500,8 @@ const walkInEnrollment = async (req, res) => {
       }
     }
 
-    const pdcSchedules = Array.isArray(promoPdcSchedules) ? promoPdcSchedules : [];
+    const pdcSchedules = Array.isArray(promoPdcSchedules) ? [...promoPdcSchedules] : [];
+
     const resolvedTdcTypeFromLabel = (() => {
       const src = String(req.body?.tdcScheduleLabel || '').toUpperCase();
       if (src.includes('ONLINE')) return 'ONLINE';
@@ -1480,6 +1516,14 @@ const walkInEnrollment = async (req, res) => {
     const resolvedScheduleDate2 = scheduleDate2 || fallbackPdcDay1?.scheduleDate || null;
     const resolvedPromoPdcSlotId2 = promoPdcSlotId2 || fallbackPdcDay2?.promoPdcSlotId2 || null;
     const resolvedPromoPdcDate2 = promoPdcDate2 || fallbackPdcDay2?.promoPdcDate2 || null;
+
+    // If it's a regular PDC course, add its dates to the list for surcharge calculation
+    if (categoryNorm === 'PDC' && !isOnlineTdcNoSchedule) {
+      pdcSchedules.push({
+        scheduleDate: scheduleDate,
+        scheduleDate2: resolvedScheduleDate2
+      });
+    }
 
     // Pre-flight check: Slot availability (all slots)
     const slotsToCheck = [
@@ -1537,7 +1581,7 @@ const walkInEnrollment = async (req, res) => {
           emergencyContactPerson, emergencyContactNumber, userId
         ]
       );
-      console.log('âœ… Existing user updated:', userId);
+      console.log('✅ Existing user updated:', userId);
     } else {
       isNewUser = true;
       // 2. Generate password and verification code
@@ -1567,7 +1611,7 @@ const walkInEnrollment = async (req, res) => {
         ]
       );
       userId = userResult.rows[0].id;
-      console.log('âœ… User created:', userId);
+      console.log('✅ User created:', userId);
     }
 
     // 4. Create booking record
@@ -1695,11 +1739,7 @@ const walkInEnrollment = async (req, res) => {
       (a && typeof a === 'object' && (a.id === 'addon-tips' || (a.name && a.name.includes('Maintenance'))))
     );
 
-    const toAmount = (value) => {
-      if (value == null) return 0;
-      const numeric = Number(String(value).replace(/[^0-9.-]/g, ''));
-      return Number.isFinite(numeric) ? numeric : 0;
-    };
+
 
     const normalizedCourseListForPricing = (() => {
       const source = Array.isArray(req.body?.courseList) && req.body.courseList.length
@@ -1738,18 +1778,23 @@ const walkInEnrollment = async (req, res) => {
 
     // Use promoPct from request if provided
     let effectivePromoPct = toAmount(promoPct);
-    if (normalizedPromoDiscount <= 0 && isPromoBundleRequest && discountBasis > 0) {
+    const isManualBundle = !!req.body.isManualBundle;
+
+    if (normalizedPromoDiscount <= 0 && discountBasis > 0) {
       if (effectivePromoPct > 0) {
         // Percentage applies only to the subtotal (discountBasis), NOT the fee
         normalizedPromoDiscount = Number((discountBasis * (effectivePromoPct / 100)).toFixed(2));
-      } else {
-        // Fallback for bundles
+      } else if (isManualBundle) {
+        // Fallback ONLY for manual multi-course selections (manual bundles)
         normalizedPromoDiscount = Number((discountBasis * 0.03).toFixed(2));
+        effectivePromoPct = 3;
       }
     }
 
+    const saturdaySurcharge = isOnlineTdcNoSchedule ? 0 : calculateSaturdaySurcharge(pdcSchedules);
+
     const normalizedBreakdownTotal = Math.max(0, Number((
-      discountBasis + finalConvenienceFee - normalizedPromoDiscount
+      discountBasis + finalConvenienceFee + saturdaySurcharge - normalizedPromoDiscount
     ).toFixed(2)));
 
     const normalizedTotalAssessment = [
@@ -1809,6 +1854,7 @@ const walkInEnrollment = async (req, res) => {
           promoDiscount: normalizedPromoDiscount,
           promoPct: effectivePromoPct,
           convenienceFee: normalizedConvenienceFee,
+          saturdaySurcharge: saturdaySurcharge,
           totalAmount: normalizedTotalAssessment,
           initialAmountPaid: Math.max(0, toAmount(amountPaid))
         })
@@ -1969,6 +2015,8 @@ const walkInEnrollment = async (req, res) => {
         addonsDetailed: normalizedAddonsDetailed,
         subtotal: normalizedSubtotal,
         promoDiscount: normalizedPromoDiscount,
+        promoPct: effectivePromoPct,
+        isManualBundle: isManualBundle,
         convenienceFee: normalizedConvenienceFee,
         totalAmount: normalizedTotalAssessment,
         isNewUser // Pass flag to control credentials display in email
@@ -2428,7 +2476,23 @@ const markBookingAsPaid = async (req, res) => {
     const notesPromo = Math.max(0, toAmount(notesJson?.promoDiscount || 0));
     const notesConvenience = Math.max(0, toAmount(notesJson?.convenienceFee || 0));
     const notesSubtotal = Math.max(0, toAmount(notesJson?.subtotal || 0));
-    const notesDerivedAssessment = Math.max(0, Number(((notesSubtotal > 0 ? notesSubtotal : (notesCourseTotal + notesAddonTotal)) + notesConvenience - notesPromo).toFixed(2)));
+
+    // Dynamic 3% Multi-course discount fallback
+    const noteCourseList = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
+    const hasPromoInList = noteCourseList.some(c => {
+        const n = String(c?.name || '').toLowerCase();
+        const cat = String(c?.category || '').toLowerCase();
+        return n.includes('promo') || n.includes('bundle') || cat === 'promo' || (n.includes('tdc') && n.includes('pdc'));
+    });
+    const isMultiCourseQualifying = noteCourseList.length > 1 && !hasPromoInList;
+    
+    let effectivePromo = notesPromo;
+    if (effectivePromo === 0 && isMultiCourseQualifying) {
+        const subtotalForDynamic = (notesSubtotal > 0 ? notesSubtotal : (notesCourseTotal + notesAddonTotal));
+        effectivePromo = Number((subtotalForDynamic * 0.03).toFixed(2));
+    }
+
+    const notesDerivedAssessment = Math.max(0, Number(((notesSubtotal > 0 ? notesSubtotal : (notesCourseTotal + notesAddonTotal)) + notesConvenience - effectivePromo).toFixed(2)));
     const explicitNotesAssessment = [
       notesJson?.totalAmount,
       notesJson?.grandTotal,
@@ -2547,8 +2611,8 @@ const markBookingAsPaid = async (req, res) => {
             courseName: u.course_name || 'N/A',
             amountPaid: receiptPaymentAmount,
             coursePrice: targetAssessment,
-            promoDiscount: toAmount(notesJson?.promoDiscount || 0),
-            promoPct: toAmount(notesJson?.promoPct || 0),
+            promoDiscount: effectivePromo,
+            promoPct: effectivePromo > 0 && notesPromo === 0 ? 3 : toAmount(notesJson?.promoPct || 0),
             paymentMethod: payment_method || 'Cash',
             paymentDate: new Date(),
             isFullPayment: true,
@@ -2940,7 +3004,23 @@ const sendReceiptEmail = async (req, res) => {
     const notesPromo = Math.max(0, toAmount(notesJson?.promoDiscount || 0));
     const notesConvenience = Math.max(0, toAmount(notesJson?.convenienceFee || 0));
     const notesSubtotal = Math.max(0, toAmount(notesJson?.subtotal || 0));
-    const notesDerivedAssessment = Math.max(0, Number(((notesSubtotal > 0 ? notesSubtotal : (notesCourseTotal + notesAddonTotal)) + notesConvenience - notesPromo).toFixed(2)));
+
+    // Dynamic 3% Multi-course discount fallback
+    const noteCourseList = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
+    const hasPromoInList = noteCourseList.some(c => {
+        const n = String(c?.name || '').toLowerCase();
+        const cat = String(c?.category || '').toLowerCase();
+        return n.includes('promo') || n.includes('bundle') || cat === 'promo' || (n.includes('tdc') && n.includes('pdc'));
+    });
+    const isMultiCourseQualifying = noteCourseList.length > 1 && !hasPromoInList;
+    
+    let effectivePromo = notesPromo;
+    if (effectivePromo === 0 && isMultiCourseQualifying) {
+        const subtotalForDynamic = (notesSubtotal > 0 ? notesSubtotal : (notesCourseTotal + notesAddonTotal));
+        effectivePromo = Number((subtotalForDynamic * 0.03).toFixed(2));
+    }
+
+    const notesDerivedAssessment = Math.max(0, Number(((notesSubtotal > 0 ? notesSubtotal : (notesCourseTotal + notesAddonTotal)) + notesConvenience - effectivePromo).toFixed(2)));
     const explicitNotesAssessment = [notesJson?.totalAmount, notesJson?.grandTotal, notesJson?.finalTotal, notesJson?.assessedTotal]
       .map((v) => Math.max(0, toAmount(v)))
       .find((v) => v > 0) || 0;
@@ -2971,6 +3051,8 @@ const sendReceiptEmail = async (req, res) => {
       courseName: row.course_name || 'N/A',
       amountPaid: amountPaidForReceipt,
       coursePrice,
+      promoDiscount: effectivePromo,
+      promoPct: effectivePromo > 0 && notesPromo === 0 ? 3 : toAmount(notesJson?.promoPct || 0),
       paymentMethod: receiptPaymentMethod,
       paymentDate: receiptPaymentDate,
       isFullPayment,
@@ -3013,12 +3095,14 @@ const getNotifications = async (req, res) => {
           THEN 'reschedule'
           WHEN LOWER(COALESCE(b.status, '')) <> 'completed'
             AND b.notes IS NOT NULL AND b.notes ~ '^\\{'
+            AND (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true'
             AND (
               (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
               OR (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
             )
             OR (
               LOWER(COALESCE(b.status, '')) <> 'completed'
+              AND (b.notes IS NULL OR b.notes !~ '^\\{' OR (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true')
               AND (
               LOWER(COALESCE(c.category, '')) = 'tdc'
               AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
@@ -3042,12 +3126,14 @@ const getNotifications = async (req, res) => {
           THEN 'Reschedule Request'
           WHEN LOWER(COALESCE(b.status, '')) <> 'completed'
             AND b.notes IS NOT NULL AND b.notes ~ '^\\{'
+            AND (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true'
             AND (
               (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
               OR (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
             )
             OR (
               LOWER(COALESCE(b.status, '')) <> 'completed'
+              AND (b.notes IS NULL OR b.notes !~ '^\\{' OR (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true')
               AND (
               LOWER(COALESCE(c.category, '')) = 'tdc'
               AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
@@ -3074,12 +3160,14 @@ const getNotifications = async (req, res) => {
             || ' at ' || COALESCE(br.name, 'branch')
           WHEN LOWER(COALESCE(b.status, '')) <> 'completed'
             AND b.notes IS NOT NULL AND b.notes ~ '^\\{'
+            AND (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true'
             AND (
               (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
               OR (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
             )
             OR (
               LOWER(COALESCE(b.status, '')) <> 'completed'
+              AND (b.notes IS NULL OR b.notes !~ '^\\{' OR (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true')
               AND (
               LOWER(COALESCE(c.category, '')) = 'tdc'
               AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
@@ -3370,6 +3458,7 @@ const getTdcOnlineStudents = async (req, res) => {
       `SELECT
         b.id AS booking_id,
         b.status AS booking_status,
+        b.notes,
         b.booking_date,
         b.created_at,
         b.total_amount,
@@ -3408,7 +3497,7 @@ const getTdcOnlineStudents = async (req, res) => {
             )
           )
         )
-        AND LOWER(COALESCE(b.status, '')) IN ('pending', 'confirmed', 'paid', 'partial_payment')
+        AND LOWER(COALESCE(b.status, '')) IN ('pending', 'confirmed', 'paid', 'partial_payment', 'enrolled', 'in-progress')
         AND ($1::int IS NULL OR b.branch_id = $1::int)
       ORDER BY b.created_at DESC`,
       [branchId]

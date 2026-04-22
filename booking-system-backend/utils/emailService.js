@@ -21,18 +21,18 @@ const interp = (tpl, vars) =>
 // Convert raw JSON data (all plain strings/arrays) → EMAIL_CONTENT object with function fields
 const buildEmailContent = (d) => ({
   ...d,
-  walkIn:  { ...d.walkIn,  greeting: (f, l) => interp(d.walkIn.greeting,  { first: f, last: l }) },
-  guest:   { ...d.guest,   greeting: (f, l) => interp(d.guest.greeting,   { first: f, last: l }) },
-  noShow:  {
+  walkIn: { ...d.walkIn, greeting: (f, l) => interp(d.walkIn.greeting, { first: f, last: l }) },
+  guest: { ...d.guest, greeting: (f, l) => interp(d.guest.greeting, { first: f, last: l }) },
+  noShow: {
     ...d.noShow,
-    greeting: (f, l)           => interp(d.noShow.greeting, { first: f, last: l }),
-    intro:    (cn, dt, se)     => interp(d.noShow.intro,    { courseName: cn, date: dt, session: se }),
+    greeting: (f, l) => interp(d.noShow.greeting, { first: f, last: l }),
+    intro: (cn, dt, se) => interp(d.noShow.intro, { courseName: cn, date: dt, session: se }),
   },
   receipt: {
     ...d.receipt,
-    greeting:    (f, l)  => interp(d.receipt.greeting,    { first: f, last: l }),
-    pdfNote:     (fn)    => interp(d.receipt.pdfNote,     { filename: fn }),
-    balanceNote: (amt)   => interp(d.receipt.balanceNote, { amount: Number(amt).toLocaleString() }),
+    greeting: (f, l) => interp(d.receipt.greeting, { first: f, last: l }),
+    pdfNote: (fn) => interp(d.receipt.pdfNote, { filename: fn }),
+    balanceNote: (amt) => interp(d.receipt.balanceNote, { amount: Number(amt).toLocaleString() }),
   },
   news: { ...d.news, greeting: (first) => interp(d.news.greeting, { first: first || 'Student' }) },
 });
@@ -51,160 +51,156 @@ const loadEmailContentData = () => {
 let EMAIL_CONTENT = (() => {
   const data = loadEmailContentData();
   return data ? buildEmailContent(data) : buildEmailContent({
-  schoolName: 'Master Driving School',
-  copyrightYear: '2026',
-  footerTagline: 'If you have any questions, please contact our support team.',
-  verification: {
-    subjectVerify: 'Email Verification - Master Driving School',
-    subjectReset: 'Password Reset OTP - Master Driving School',
-    titleVerify: 'Email Verification',
-    titleReset: 'Password Reset',
-    messageVerify: 'Thank you for registering with Master Driving School. Please use the following verification code to complete your registration:',
-    messageReset: 'You requested to reset your password. Please use the following OTP to proceed:',
-    expiry: 'This code will expire in 10 minutes.',
-    notRequested: "If you didn't request this code, please ignore this email.",
-  },
-  newAccount: {
-    subject: 'Account Created - Master Driving School',
-    headerTitle: 'Welcome to the Team!',
-    credentialsHeading: 'Your Login Credentials',
-    passwordRevealHint: 'Click the password above to reveal it',
-    securityHeading: '⚠️ Important Security Notice:',
-    securityPoints: [
-      'Please change your password after your first login',
-      'Do not share your password with anyone',
-      'Keep this email secure or delete it after changing your password',
-    ],
-    loginPrompt: 'You can now log in to the system using the credentials provided above.',
-    loginButtonText: 'Go to Login Page',
-    unexpectedFooter: "If you didn't expect this email, please contact our support team immediately.",
-  },
-  walkIn: {
-    subject: 'Walk-In Enrollment Confirmation - Master Driving School',
-    headerSubtitle: 'Walk-In Enrollment Confirmation',
-    greeting: 'Hello {first} {last}!',
-    intro: 'Your walk-in enrollment has been successfully processed. Below are your enrollment details and login credentials.',
-    scheduleHeading: '📅 Your Training Schedule',
-    detailsHeading: '📋 Enrollment Details',
-    credentialsHeading: '🔐 Your Login Credentials',
-    credentialsIntro: 'An account has been created for you. Use the credentials below to log in and manage your enrollment.',
-    passwordWarning: '⚠️ Important: Please change your password after your first login for security reasons.',
-    verifyHeading: '📧 Verify Your Email',
-    verifyIntro: 'To activate your account, please verify your email using the code below:',
-    verifyExpiry: 'This code will expire in 10 minutes. You can request a new code from the login page.',
-    verifyButtonText: 'Verify Email & Activate Account',
+    schoolName: 'Master Driving School',
+    copyrightYear: '2026',
     footerTagline: 'If you have any questions, please contact our support team.',
-  },
-  guest: {
-    subject: 'Enrollment Confirmation - Master Driving School',
-    headerSubtitle: 'Enrollment Confirmation',
-    greeting: 'Hello {first} {last}!',
-    intro: 'Your enrollment has been successfully processed. Below are your enrollment details and schedule information.',
-    scheduleHeading: '📅 Your Training Schedule',
-    detailsHeading: '📋 Enrollment Details',
-    thankYou: 'Thank you for choosing Master Driving School!',
-    footerTagline: 'If you have any questions, please contact our support team.',
-  },
-  noShow: {
-    subject: 'Action Required: Missed Training Session - Master Driving School',
-    headerSubtitle: 'Missed Session Notice',
-    greeting: 'Hello {first} {last},',
-    intro: 'We noticed that you did not attend your scheduled training session for <strong>{courseName}</strong> on <strong>{date}</strong> ({session}).',
-    feeHeading: 'Rescheduling Fee Required',
-    feeNote: 'As per our Cancellation and Refund Policy (Section 3), a rescheduling fee of <b>₱{fee}</b> is required for unattended sessions before you can re-book.',
-    howToHeading: 'How to Reschedule:',
-    howToSteps: [
-      'Log in to your student portal.',
-      'Settle the ₱{fee} rescheduling fee.',
-      'Select a new training date from the available schedules.',
-    ],
-    loginButtonText: 'Log In to Reschedule',
-  },
-  receipt: {
-    subjectFull: 'Full Payment Receipt - Master Driving School',
-    subjectDown: 'Downpayment Receipt & Balance Reminder - Master Driving School',
-    headerFull: '✅ Full Payment Receipt',
-    headerDown: '🧾 Downpayment Receipt',
-    greeting: 'Hello {first} {last}!',
-    introFull: 'Your full payment has been received and confirmed. Here is your official receipt.',
-    introDown: 'Your downpayment has been received. Please see your balance details and how to settle it below.',
-    pdfNote: '📎 A <strong>PDF copy</strong> of your receipt is attached to this email (<strong>{filename}</strong>). Please save it for your records.',
-    detailsHeading: '📋 Payment Details',
-    paidInFull: 'PAID IN FULL ✅',
-    amountPaid: 'AMOUNT PAID',
-    balanceHeading: '⚠️ Remaining Balance to Pay',
-    balanceNote: 'To complete your enrollment, please settle your remaining balance of <strong>₱{amount}</strong>.',
-    balanceStepsHeading: 'How to Pay Your Remaining Balance:',
-    balanceSteps: [
-      'Log in to your student account on our website',
-      'Go to <strong>My Profile → Course History</strong>',
-      'Click <strong>"Pay Balance Online"</strong> on your enrollment',
-      'Choose your preferred payment method (GCash, Cash)',
-      'Or pay in person at the branch on your first day of class',
-    ],
-    successBadge: '🎉',
-    successHeading: 'Payment Complete!',
-    successNote: 'Your enrollment is fully paid. See you on your training date!',
-    viewAccountButton: 'View My Account',
-    footerTagline: 'If you have any questions, contact our support team.',
-  },
-  downpaymentReminder: {
-    heading: '💳 Remaining Balance Reminder:',
-    note: 'Since your payment type is <strong>Downpayment</strong>, please note that you must settle your remaining balance when you go to the branch on the <strong>first or second day</strong> of your class.',
-  },
-  vehicleRental: {
-    heading: 'ℹ️ Vehicle Rental Requirement:',
-    tricycleNote: "For Practical Driving Course (PDC) - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.",
-  },
-  requirements: {
-    heading: '📌 Requirements to Bring on Your Schedule Date:',
-    tdc: [
-      'Ball Pen or Pencil',
-      'Be timely and attend all 15 hours (split over sessions/days as scheduled)',
-      'Valid Government-issued ID (for verification)',
-      'Proof of Payment (You can use this email as your official receipt)',
-    ],
-    pdc: [
-      'Valid Government-issued ID (original + photocopy)',
-      '2x2 ID Picture (2 copies, white background)',
-      'PSA Birth Certificate (original + photocopy)',
-      'Medical Certificate (from any clinic)',
-      'Proof of Payment (You can use this email as your official receipt)',
-      'Student Permit (if applicable)',
-    ],
-  },
-  terms: {
-    heading: '📜 Terms and Conditions',
-    items: [
-      'Students must arrive at least 30 minutes before their scheduled session.',
-      'Rescheduling must be done at least 24 hours before the scheduled date.',
-      'No-show on the scheduled date may result in forfeiture of the session.',
-      "Refunds are subject to the school's refund policy (processing fee may apply).",
-      'Students must bring all required documents on the training date.',
-      'The school reserves the right to reschedule sessions due to unforeseen circumstances.',
-      'Students must follow all safety guidelines and instructions during training.',
-      'Completion certificates will be issued only after fulfilling all course requirements.',
-      'Personal belongings are the responsibility of the student during training.',
-      'By enrolling or creating an account, you agree to receive News, Events, and Promotional emails from Master Driving School.',
-      'By enrolling, you agree to abide by all rules and regulations of Master Driving School.',
-    ],
-  },
-  news: {
-    headerSubtitle: 'New Announcement & Update',
-    greeting: 'Hi {first},',
-    intro: 'We have a new update for you from Master Driving School!',
-    visitButton: 'Visit Our Website',
-    unsubNote: 'You received this email because you enrolled or created an account at Master Driving School.',
-  },
-  pdf: {
-    schoolName: 'MASTER DRIVING SCHOOL',
-    titleFull: 'Full Payment Receipt',
-    titleDown: 'Downpayment Receipt',
-    receiptTitle: 'OFFICIAL RECEIPT',
-    footerLine1: 'Master Driving School  •  This is an official receipt',
-    footerLine2: 'Keep this receipt for your records. Thank you for choosing Master Driving School!',
-    balanceNote: 'Please settle this balance on or before your first day of class.',
-  },
+    verification: {
+      subjectVerify: 'Email Verification - Master Driving School',
+      subjectReset: 'Password Reset OTP - Master Driving School',
+      titleVerify: 'Email Verification',
+      titleReset: 'Password Reset',
+      messageVerify: 'Thank you for registering with Master Driving School. Please use the following verification code to complete your registration:',
+      messageReset: 'You requested to reset your password. Please use the following OTP to proceed:',
+      expiry: 'This code will expire in 10 minutes.',
+      notRequested: "If you didn't request this code, please ignore this email.",
+    },
+    newAccount: {
+      subject: 'Account Created - Master Driving School',
+      headerTitle: 'Welcome to the Team!',
+      credentialsHeading: 'Your Login Credentials',
+      passwordRevealHint: 'Click the password above to reveal it',
+      securityHeading: '⚠️ Important Security Notice:',
+      securityPoints: [
+        'Please change your password after your first login',
+        'Do not share your password with anyone',
+        'Keep this email secure or delete it after changing your password',
+      ],
+      loginPrompt: 'You can now log in to the system using the credentials provided above.',
+      loginButtonText: 'Go to Login Page',
+      unexpectedFooter: "If you didn't expect this email, please contact our support team immediately.",
+    },
+    walkIn: {
+      subject: 'Walk-In Enrollment Confirmation - Master Driving School',
+      headerSubtitle: 'Walk-In Enrollment Confirmation',
+      greeting: 'Hello {first} {last}!',
+      intro: 'Your walk-in enrollment has been successfully processed. Below are your enrollment details and login credentials.',
+      scheduleHeading: '📅 Your Training Schedule',
+      detailsHeading: '📋 Enrollment Details',
+      credentialsHeading: '🔐 Your Login Credentials',
+      credentialsIntro: 'An account has been created for you. Use the credentials below to log in and manage your enrollment.',
+      passwordWarning: '⚠️ Important: Please change your password after your first login for security reasons.',
+      verifyHeading: '📧 Verify Your Email',
+      verifyIntro: 'To activate your account, please verify your email using the code below:',
+      verifyExpiry: 'This code will expire in 10 minutes. You can request a new code from the login page.',
+      verifyButtonText: 'Verify Email & Activate Account',
+      footerTagline: 'If you have any questions, please contact our support team.',
+    },
+    guest: {
+      subject: 'Enrollment Confirmation - Master Driving School',
+      headerSubtitle: 'Enrollment Confirmation',
+      greeting: 'Hello {first} {last}!',
+      intro: 'Your enrollment has been successfully processed. Below are your enrollment details and schedule information.',
+      scheduleHeading: '📅 Your Training Schedule',
+      detailsHeading: '📋 Enrollment Details',
+      thankYou: 'Thank you for choosing Master Driving School!',
+      footerTagline: 'If you have any questions, please contact our support team.',
+    },
+    noShow: {
+      subject: 'Action Required: Missed Training Session - Master Driving School',
+      headerSubtitle: 'Missed Session Notice',
+      greeting: 'Hello {first} {last},',
+      intro: 'We noticed that you did not attend your scheduled training session for <strong>{courseName}</strong> on <strong>{date}</strong> ({session}).',
+      feeHeading: 'Rescheduling Fee Required',
+      feeNote: 'As per our Cancellation and Refund Policy (Section 3), a rescheduling fee of <b>₱{fee}</b> is required for unattended sessions before you can re-book.',
+      howToHeading: 'How to Reschedule:',
+      howToSteps: [
+        'Log in to your student portal.',
+        'Settle the ₱{fee} rescheduling fee.',
+        'Select a new training date from the available schedules.',
+      ],
+      loginButtonText: 'Log In to Reschedule',
+    },
+    receipt: {
+      subjectFull: 'Full Payment Receipt - Master Driving School',
+      subjectDown: 'Downpayment Receipt & Balance Reminder - Master Driving School',
+      headerFull: '✅ Full Payment Receipt',
+      headerDown: '🧾 Downpayment Receipt',
+      greeting: 'Hello {first} {last}!',
+      introFull: 'Your full payment has been received and confirmed. Here is your official receipt.',
+      introDown: 'Your downpayment has been received. Please see your balance details and how to settle it below.',
+      pdfNote: '📎 A <strong>PDF copy</strong> of your receipt is attached to this email (<strong>{filename}</strong>). Please save it for your records.',
+      detailsHeading: '📋 Payment Details',
+      paidInFull: 'PAID IN FULL ✅',
+      amountPaid: 'AMOUNT PAID',
+      balanceHeading: '⚠️ Remaining Balance to Pay',
+      balanceNote: 'To complete your enrollment, please settle your remaining balance of <strong>₱{amount}</strong>.',
+      balanceStepsHeading: 'How to Pay Your Remaining Balance:',
+      balanceSteps: [
+        'Log in to your student account on our website',
+        'Go to <strong>My Profile → Course History</strong>',
+        'Click <strong>"Pay Balance Online"</strong> on your enrollment',
+        'Choose your preferred payment method (GCash, Cash)',
+        'Or pay in person at the branch on your first day of class',
+      ],
+      successBadge: '🎉',
+      successHeading: 'Payment Complete!',
+      successNote: 'Your enrollment is fully paid. See you on your training date!',
+      viewAccountButton: 'View My Account',
+      footerTagline: 'If you have any questions, contact our support team.',
+    },
+    downpaymentReminder: {
+      heading: '💳 Remaining Balance Reminder:',
+      note: 'Since your payment type is <strong>Downpayment</strong>, please note that you must settle your remaining balance when you go to the branch on the <strong>first or second day</strong> of your class.',
+    },
+    requirements: {
+      heading: '📌 Requirements to Bring on Your Schedule Date:',
+      tdc: [
+        'Ball Pen or Pencil',
+        'Be timely and attend all 15 hours (split over sessions/days as scheduled)',
+        'Valid Government-issued ID (for verification)',
+        'Proof of Payment (You can use this email as your official receipt)',
+      ],
+      pdc: [
+        'Valid Government-issued ID (original + photocopy)',
+        '2x2 ID Picture (2 copies, white background)',
+        'PSA Birth Certificate (original + photocopy)',
+        'Medical Certificate (from any clinic)',
+        'Proof of Payment (You can use this email as your official receipt)',
+        'Student Permit (if applicable)',
+      ],
+    },
+    terms: {
+      heading: '📜 Terms and Conditions',
+      items: [
+        'Students must arrive at least 30 minutes before their scheduled session.',
+        'Rescheduling must be done at least 24 hours before the scheduled date.',
+        'No-show on the scheduled date may result in forfeiture of the session.',
+        "Refunds are subject to the school's refund policy (processing fee may apply).",
+        'Students must bring all required documents on the training date.',
+        'The school reserves the right to reschedule sessions due to unforeseen circumstances.',
+        'Students must follow all safety guidelines and instructions during training.',
+        'Completion certificates will be issued only after fulfilling all course requirements.',
+        'Personal belongings are the responsibility of the student during training.',
+        'By enrolling or creating an account, you agree to receive News, Events, and Promotional emails from Master Driving School.',
+        'By enrolling, you agree to abide by all rules and regulations of Master Driving School.',
+      ],
+    },
+    news: {
+      headerSubtitle: 'New Announcement & Update',
+      greeting: 'Hi {first},',
+      intro: 'We have a new update for you from Master Driving School!',
+      visitButton: 'Visit Our Website',
+      unsubNote: 'You received this email because you enrolled or created an account at Master Driving School.',
+    },
+    pdf: {
+      schoolName: 'MASTER DRIVING SCHOOL',
+      titleFull: 'Full Payment Receipt',
+      titleDown: 'Downpayment Receipt',
+      receiptTitle: 'OFFICIAL RECEIPT',
+      footerLine1: 'Master Driving School  •  This is an official receipt',
+      footerLine2: 'Keep this receipt for your records. Thank you for choosing Master Driving School!',
+      balanceNote: 'Please settle this balance on or before your first day of class.',
+    },
   });
 })();
 
@@ -259,15 +255,17 @@ const generateReceiptPDF = (firstName, lastName, receiptData) => {
     // Divider
     doc.moveTo(40, 108).lineTo(doc.page.width - 40, 108).strokeColor('#e5e7eb').stroke();
 
+    const totalAssessment = paidAmt + dueAmt;
+
     // Details
     const rows = [
       ['Transaction ID', transactionId],
       ['Booking ID', `BK-${String(bookingId).padStart(3, '0')}`],
       ['Course', courseName],
-      ['Course Price', `PHP ${Number(coursePrice).toLocaleString()}`],
+      ['Total Assessment', `PHP ${Number(totalAssessment).toLocaleString()}`],
       ['Date', formattedDate],
       ['Payment Method', paymentMethod],
-      ['Amount Paid', `PHP ${Number(amountPaid).toLocaleString()}`],
+      ['Total Amount Paid', `PHP ${Number(amountPaid).toLocaleString()}`],
     ];
 
     let y = 118;
@@ -281,7 +279,7 @@ const generateReceiptPDF = (firstName, lastName, receiptData) => {
     // Total row
     doc.rect(40, y, doc.page.width - 80, 28).fill(resolvedIsFullPayment ? '#dcfce7' : '#fff7ed');
     doc.fillColor(resolvedIsFullPayment ? '#15803d' : '#c2410c').fontSize(11).font('Helvetica-Bold')
-      .text(resolvedIsFullPayment ? 'PAID IN FULL ✓' : 'AMOUNT PAID', 48, y + 8);
+      .text(resolvedIsFullPayment ? 'PAID IN FULL ✓' : 'TOTAL AMOUNT PAID', 48, y + 8);
     doc.text(`PHP ${Number(settledTotalAmt).toLocaleString()}`, 200, y + 8, { align: 'right', width: doc.page.width - 250 });
     y += 38;
 
@@ -887,7 +885,7 @@ const computeEmailRemainingBalance = (enrollmentDetails = {}, amountPaid = 0, pa
   const inferredAddonTotal = detailedAddonTotal > 0
     ? detailedAddonTotal
     : (hasReviewerAddonByName || enrollmentDetails?.hasReviewer ? 30 : 0)
-      + (hasVehicleTipsAddonByName || enrollmentDetails?.hasVehicleTips ? 20 : 0);
+    + (hasVehicleTipsAddonByName || enrollmentDetails?.hasVehicleTips ? 20 : 0);
 
   const paymentMethodRaw = String(enrollmentDetails?.paymentMethod || '').toLowerCase();
   const courseTypeRaw = String(enrollmentDetails?.courseType || '').toLowerCase();
@@ -1000,22 +998,114 @@ const resolveTdcScheduleLabel = (enrollmentDetails = {}, courseType = '', course
   return 'TDC';
 };
 
+/* ─────────────────────────────────────────────────────────────────────
+   Helper to build the OTDC Step-by-Step Guide HTML block.
+   This is injected into enrollment emails when TDC Online is detected.
+  ───────────────────────────────────────────────────────────────────── */
+const getOtdcGuideHtml = () => {
+  return `
+    <div style="background-color: #fffaf0; border: 2px solid #f3b74c; border-radius: 12px; padding: 25px; margin: 20px 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+      <h3 style="color: #d97706; margin-top: 0; font-size: 18px; text-transform: uppercase; border-bottom: 2px solid #fde68a; padding-bottom: 10px; font-weight: 800;">
+        SELF-PACED ONLINE THEORETICAL DRIVING COURSE (OTDC)
+      </h3>
+      <p style="font-size: 15px; color: #92400e; font-weight: 600; margin: 15px 0;">
+        Pwede nyo itong gawin kahit kailan, saan, at paano nyo gusto.
+      </p>
+      
+      <div style="margin-top: 20px;">
+        <h4 style="color: #b45309; margin: 0 0 12px 0; font-size: 16px; font-weight: 700;">Step-by-Step Guide:</h4>
+        
+        <div style="margin-bottom: 18px; clear: both; overflow: hidden;">
+          <div style="float: left; background: #f3b74c; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold; margin-right: 12px; text-align: center; line-height: 22px;">1</div>
+          <div style="float: left; width: calc(100% - 40px);">
+            <strong style="color: #451a03; font-size: 15px;">Check your Email</strong>
+            <p style="margin: 4px 0 0; color: #78350f; font-size: 14px;">After payment, makakatanggap kayo ng OTDC link sa inyong email.</p>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 18px; clear: both; overflow: hidden;">
+          <div style="float: left; background: #f3b74c; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold; margin-right: 12px; text-align: center; line-height: 22px;">2</div>
+          <div style="float: left; width: calc(100% - 40px);">
+            <strong style="color: #451a03; font-size: 15px;">Complete the Modules</strong>
+            <ul style="margin: 6px 0 0; padding-left: 18px; color: #78350f; font-size: 14px; list-style-type: disc;">
+              <li>May 3 modules</li>
+              <li>Each module has 20–30 videos</li>
+              <li>Panoorin lahat ng videos tungkol sa LTO road safety rules and regulations</li>
+            </ul>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 18px; clear: both; overflow: hidden;">
+          <div style="float: left; background: #f3b74c; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold; margin-right: 12px; text-align: center; line-height: 22px;">3</div>
+          <div style="float: left; width: calc(100% - 40px);">
+            <strong style="color: #451a03; font-size: 15px;">Take the Exams</strong>
+            <ul style="margin: 6px 0 0; padding-left: 18px; color: #78350f; font-size: 14px; list-style-type: disc;">
+              <li>May exam after bawat module</li>
+              <li>Kailangan maipasa para makapag proceed sa next module</li>
+            </ul>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 0; clear: both; overflow: hidden;">
+          <div style="float: left; background: #f3b74c; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold; margin-right: 12px; text-align: center; line-height: 22px;">4</div>
+          <div style="float: left; width: calc(100% - 40px);">
+            <strong style="color: #451a03; font-size: 15px;">Final Step (Branch Visit)</strong>
+            <ul style="margin: 6px 0 0; padding-left: 18px; color: #78350f; font-size: 14px; list-style-type: disc;">
+              <li>Kapag tapos na ang 3 modules</li>
+              <li>Pumunta sa branch kung saan kayo nag-enroll</li>
+              <li>Para sa Final Assessment at TDC Certificate</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top: 25px; text-align: center; background: #fffbeb; padding: 12px; border-radius: 8px; border: 1px dashed #f59e0b; clear: both;">
+        <strong style="color: #92400e; font-size: 14px; display: block; margin-bottom: 4px;">Reminder:</strong>
+        <span style="color: #b45309; font-weight: 800; font-size: 15px;">Tapusin within 30 days para maiwasan ang account deactivation.</span>
+      </div>
+    </div>
+    `;
+};
+
 // Send walk-in enrollment confirmation email with schedule, password, verification code, and optional PDF add-ons
 const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, verificationCode, enrollmentDetails, hasReviewer = false, hasVehicleTips = false) => {
   try {
     const transporter = createTransporter();
-    const { courseName, courseCategory, courseType, branchName, branchAddress, scheduleDate, scheduleSession, scheduleTime, scheduleDate2, scheduleSession2, scheduleTime2, pdcSchedules, paymentMethod, amountPaid, paymentStatus } = enrollmentDetails;
+    const { courseName, courseCategory, courseType, courseList, branchName, branchAddress, scheduleDate, scheduleSession, scheduleTime, scheduleDate2, scheduleSession2, scheduleTime2, pdcSchedules, paymentMethod, amountPaid, paymentStatus, addonsDetailed } = enrollmentDetails;
 
     const categoryNorm = String(courseCategory || '').toUpperCase();
-    const isPromo = categoryNorm.includes('PROMO');
-    const isTDC = categoryNorm.includes('TDC') || categoryNorm.includes('THEORETICAL');
-    const isRegularPdc = categoryNorm.includes('PDC') || categoryNorm.includes('PRACTICAL');
-    const isOnlineTdc = (isTDC || isPromo) && (String(courseType || '').toLowerCase().includes('online') || String(courseType || '').toLowerCase().includes('otdc') || String(courseName || '').toLowerCase().includes('otdc'));
+    const courseNameNorm = String(courseName || '').toUpperCase();
+    const isPromo = categoryNorm.includes('PROMO') || categoryNorm.includes('BUNDLE') || categoryNorm.includes('MULTIPLE') || courseNameNorm.includes('PROMO') || courseNameNorm.includes('BUNDLE');
+    const isTDC = categoryNorm.includes('TDC') || categoryNorm.includes('THEORETICAL') || courseNameNorm.includes('TDC') || courseNameNorm.includes('THEORETICAL');
+    const isRegularPdc = categoryNorm.includes('PDC') || categoryNorm.includes('PRACTICAL') || courseNameNorm.includes('PDC') || courseNameNorm.includes('PRACTICAL');
+
+    console.log(`[EmailService] Walk-in detection - Course: ${courseName}, Type: ${courseType}, Category: ${courseCategory}`);
+
+    const hasCourseListOnlineTdc = Array.isArray(courseList) && courseList.some(item => {
+      const cName = String(item.name || '').toLowerCase();
+      const cType = String(item.type || '').toLowerCase();
+      const isItemTdc = cName.includes('tdc') || cName.includes('theoretical') || cName.includes('otdc');
+      const isItemOnline = cType.includes('online') || cName.includes('online') || cType.includes('otdc') || cName.includes('otdc');
+      const match = isItemTdc && isItemOnline;
+      if (match) console.log(`[EmailService] Found Online TDC in courseList: ${item.name} (${item.type})`);
+      return match;
+    });
+
+    const isOnlineTdc = hasCourseListOnlineTdc || (
+      (isTDC || isPromo) && (
+        String(courseType || '').toLowerCase().includes('online') ||
+        String(courseType || '').toLowerCase().includes('otdc') ||
+        courseNameNorm.includes('OTDC') ||
+        courseNameNorm.includes('ONLINE')
+      )
+    );
+
+    console.log(`[EmailService] final isOnlineTdc: ${isOnlineTdc}, hasCourseListOnlineTdc: ${hasCourseListOnlineTdc}`);
     const isPdcScheduleLocked = !!enrollmentDetails?.pdcScheduleLockedUntilCompletion;
     const pdcLockReason = enrollmentDetails?.pdcScheduleLockReason || 'Branch Manager will assigns your PDC schedule after OTDC is marked complete.';
     const formattedDate = formatDisplayDate(scheduleDate);
     const displayPrimarySession = resolveDisplaySession(scheduleSession, scheduleTime);
-    
+
     const schedules = [];
     const tdcLabel = String(enrollmentDetails?.tdcLabel || 'TDC').trim();
 
@@ -1051,7 +1141,8 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
 
     // TDC Day 2
     const { scheduleEndDate, pdcDate1, pdcSession1, pdcTime1, pdcDate2, pdcSession2, pdcTime2 } = enrollmentDetails;
-    const tdcDay2 = scheduleEndDate ? formatDisplayDate(scheduleEndDate) : (isTDC || isPromo ? computeTDCDay2(scheduleDate) : null);
+    const isTdcPromo = isPromo && String(courseName || '').toLowerCase().includes('tdc');
+    const tdcDay2 = scheduleEndDate ? formatDisplayDate(scheduleEndDate) : (isTDC || isTdcPromo ? computeTDCDay2(scheduleDate) : null);
     if (!isOnlineTdc && !isRegularPdc && tdcDay2) {
       schedules.push({
         label: `${primaryScheduleLabel} - Day 2`,
@@ -1063,7 +1154,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
 
     const hasMultiPdc = Array.isArray(pdcSchedules) && pdcSchedules.length > 0;
 
-    if (!isOnlineTdc && hasMultiPdc) {
+    if (hasMultiPdc) {
       pdcSchedules.forEach((s, idx) => {
         const baseLabel = buildDetailedScheduleLabel(
           s?.label || s?.courseName || `PDC ${idx + 1}`,
@@ -1093,7 +1184,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
           });
         }
       });
-    } else if (!isOnlineTdc) {
+    } else if (pdcDate1 || enrollmentDetails.courseTypePdc) {
       // Backward compatibility for older payloads that only pass one PDC schedule.
       const fallbackPdcLabel = buildDetailedScheduleLabel(courseName || 'PDC', effectivePdcType || 'PDC', effectivePdcTransmission);
       if (pdcDate1) {
@@ -1186,49 +1277,29 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
               <h2 style="margin-top: 0;">${EMAIL_CONTENT.walkIn.greeting(firstName, lastName)}</h2>
               <p>${EMAIL_CONTENT.walkIn.intro}</p>
               
-              ${isOnlineTdc ? `
-              <div class="requirements" style="background: #ecfeff; border-left: 4px solid #0891b2; margin: 18px 0; border-radius: 8px;">
-                <h4 style="color: #0e7490; margin: 0 0 8px 0;">💻 Online TDC Provider Notice</h4>
-                <p style="margin: 0; font-size: 14px; color: #155e75;">
-                  Please expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.
-                </p>
-              </div>
+              ${isOnlineTdc ? getOtdcGuideHtml() : ''}
 
-              <div class="requirements" style="background: #fdfae6; border-left: 4px solid #f59e0b; margin: 15px 0; border-radius: 8px; padding: 15px;">
-                <h4 style="color: #b45309; margin: 0 0 10px 0;">SELF-PACED ONLINE THEORETICAL DRIVING COURSE (OTDC)</h4>
-                <p style="margin: 0 0 15px 0; font-size: 14px; color: #78350f;">Pwede nyo itong gawin kahit kailan, saan, at paano nyo gusto.</p>
-                <div style="font-weight: bold; color: #92400e; margin-bottom: 8px;">Step-by-Step Guide:</div>
-                <ol style="margin: 0; padding-left: 20px; font-size: 13px; color: #78350f; line-height: 1.6;">
-                  <li><strong>Check your Email</strong><br/>After payment, makakatanggap kayo ng OTDC link sa inyong email.</li>
-                  <li style="margin-top: 8px;"><strong>Complete the Modules</strong><br/>May 3 modules<br/>Each module has 20–30 videos<br/>Panoorin lahat ng videos tungkol sa LTO road safety rules and regulations</li>
-                  <li style="margin-top: 8px;"><strong>Take the Exams</strong><br/>May exam after bawat module<br/>Kailangan maipasa para makapag proceed sa next module</li>
-                  <li style="margin-top: 8px;"><strong>Final Step (Branch Visit)</strong><br/>Kapag tapos na ang 3 modules<br/>Pumunta sa branch kung saan kayo nag-enroll<br/>Para sa Final Assessment at TDC Certificate</li>
-                </ol>
-                <div style="margin-top: 15px; font-size: 13px; font-weight: bold; color: #991b1b; text-align: center;">
-                  Reminder:<br/>Tapusin within 30 days para maiwasan ang account deactivation.
+              ${isOnlineTdc && isPdcScheduleLocked ? `
+                <div class="requirements" style="background: #eff6ff; border-left: 4px solid #2563eb; margin: 12px 0 18px 0; border-radius: 8px;">
+                  <h4 style="color: #1d4ed8; margin: 0 0 8px 0;">🗓️ PDC Scheduling Notice</h4>
+                  <p style="margin: 0; font-size: 14px; color: #1e3a8a;">${pdcLockReason}</p>
                 </div>
-              </div>
-
-              ${isPdcScheduleLocked ? `
-              <div class="requirements" style="background: #eff6ff; border-left: 4px solid #2563eb; margin: 12px 0 18px 0; border-radius: 8px;">
-                <h4 style="color: #1d4ed8; margin: 0 0 8px 0;">🗓️ PDC Scheduling Notice</h4>
-                <p style="margin: 0; font-size: 14px; color: #1e3a8a;">${pdcLockReason}</p>
-              </div>
               ` : ''}
-              ` : `
-              <div class="schedule-highlight">
-                <h3>${EMAIL_CONTENT.walkIn.scheduleHeading}</h3>
-                ${schedules.map((s, idx) => `
-                  <div style="margin-bottom: ${idx === schedules.length - 1 ? '0' : '15px'};">
-                    <div style="font-size: 11px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px;">${compactScheduleLabelForDisplay(s.label, s?.courseType || '', s?.transmission || '')}</div>
-                    <div class="schedule-date">${s.date}</div>
-                    <div class="schedule-session">${s.session}</div>
-                    <div class="schedule-time">${s.time}</div>
-                  </div>
-                  ${idx === schedules.length - 1 ? '' : '<hr style="border: none; border-top: 2px dashed #93c5fd; margin: 15px 0;">'}
-                `).join('')}
-              </div>
-              `}
+
+              ${schedules.length > 0 ? `
+                <div class="schedule-highlight">
+                  <h3>${EMAIL_CONTENT.walkIn.scheduleHeading}</h3>
+                  ${schedules.map((s, idx) => `
+                    <div style="margin-bottom: ${idx === schedules.length - 1 ? '0' : '15px'};">
+                      <div style="font-size: 11px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px;">${compactScheduleLabelForDisplay(s.label, s?.courseType || '', s?.transmission || '')}</div>
+                      <div class="schedule-date">${s.date}</div>
+                      <div class="schedule-session">${s.session}</div>
+                      <div class="schedule-time">${s.time}</div>
+                    </div>
+                    ${idx === schedules.length - 1 ? '' : '<hr style="border: none; border-top: 2px dashed #93c5fd; margin: 15px 0;">'}
+                  `).join('')}
+                </div>
+              ` : ''}
 
               <div class="section">
                 <h3>${EMAIL_CONTENT.walkIn.detailsHeading}</h3>
@@ -1239,11 +1310,11 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
                 <div class="detail-row">
                   <span class="detail-label">Type:&nbsp;&nbsp;</span>
                   <span class="detail-value">${(() => {
-                    const tdcLabel = courseType ? `${courseType.toUpperCase()} (TDC)` : '';
-                    const pdcLabel = enrollmentDetails.courseTypePdc ? `${enrollmentDetails.courseTypePdc.toUpperCase()} (PDC)` : '';
-                    if (tdcLabel && pdcLabel) return `${tdcLabel} + ${pdcLabel}`;
-                    return (courseType || 'N/A').toUpperCase();
-                  })()}</span>
+          const tdcLabel = courseType ? `${courseType.toUpperCase()} (TDC)` : '';
+          const pdcLabel = enrollmentDetails.courseTypePdc ? `${enrollmentDetails.courseTypePdc.toUpperCase()} (PDC)` : '';
+          if (tdcLabel && pdcLabel) return `${tdcLabel} + ${pdcLabel}`;
+          return (courseType || 'N/A').toUpperCase();
+        })()}</span>
                 </div>
                 ${enrollmentDetails.addonNames ? `
                 <div class="detail-row">
@@ -1266,18 +1337,28 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
                   <span class="detail-value">₱${Number(enrollmentDetails.subtotal || (amountPaid + enrollmentDetails.promoDiscount)).toLocaleString()}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Discount (${enrollmentDetails.promoPct || 0}%):&nbsp;&nbsp;</span>
+                  <span class="detail-label">${enrollmentDetails.isManualBundle ? 'Multi-Course Discount' : 'Discount'} (${enrollmentDetails.promoPct || 0}%):&nbsp;&nbsp;</span>
                   <span class="detail-value" style="color: #16a34a;">- ₱${Number(enrollmentDetails.promoDiscount).toLocaleString()}</span>
                 </div>
                 ` : ''}
                 <div class="detail-row">
-                  <span class="detail-label">Amount Paid:&nbsp;&nbsp;</span>
-                  <span class="detail-value">₱${Number(amountPaid).toLocaleString()}</span>
+                  <span class="detail-label" style="color: #1a4fba; font-weight: 800;">Total Assessment:&nbsp;&nbsp;</span>
+                  <span class="detail-value" style="color: #1a4fba; font-weight: 800;">₱${(() => {
+          const total = Number(enrollmentDetails.totalAmount);
+          const paid = Number(amountPaid);
+          const bal = Number(remainingBalanceDue);
+          const val = !isNaN(total) && total > 0 ? total : (paid + bal);
+          return isNaN(val) ? '0.00' : val.toLocaleString();
+        })()}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Total Amount Paid:&nbsp;&nbsp;</span>
+                  <span class="detail-value">₱${Number(amountPaid || 0).toLocaleString()}</span>
                 </div>
                 ${isDownpayment && remainingBalanceDue > 0 ? `
                 <div class="detail-row">
                   <span class="detail-label">Remaining Balance:&nbsp;&nbsp;</span>
-                  <span class="detail-value">₱${Number(remainingBalanceDue).toLocaleString()}</span>
+                  <span class="detail-value" style="color: #ea580c; font-weight: 700;">₱${Number(remainingBalanceDue).toLocaleString()}</span>
                 </div>
                 ` : ''}
                 <div class="detail-row">
@@ -1294,10 +1375,13 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
               </div>
               ` : ''}
 
-              ${isTricycle ? `
-              <div style="background: #eff6ff; border-left: 4px solid #2157da; padding: 12px 15px; margin: 15px 0; border-radius: 0 8px 8px 0; font-size: 13px;">
-                <strong style="color: #1e40af;">${EMAIL_CONTENT.vehicleRental.heading}</strong>
-                <p style="margin: 6px 0 0; color: #1e3a8a;">${EMAIL_CONTENT.vehicleRental.tricycleNote}</p>
+              
+              ${isOnlineTdc ? `
+              <div style="background: #f8fafc; border-left: 4px solid #cbd5e1; padding: 15px 20px; margin: 15px 0; border-radius: 0 8px 8px 0; font-size: 14px;">
+                <strong style="color: #475569; display: flex; align-items: center; gap: 8px;">💻 Online TDC Provider Notice</strong>
+                <p style="margin: 8px 0 0; color: #64748b; line-height: 1.5;">
+                  The guide above provides important steps for your OTDC. Please check your email for the link to start your modules.
+                </p>
               </div>
               ` : ''}
               
@@ -1377,7 +1461,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
     // Construct plain text version
     let plainText = `Hello ${firstName} ${lastName}!\n\nYour walk-in enrollment has been successfully processed.\n`;
     if (isOnlineTdc) {
-      plainText += `\nONLINE TDC PROVIDER NOTICE:\nPlease expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.\n\nSELF-PACED ONLINE THEORETICAL DRIVING COURSE (OTDC)\nPwede nyo itong gawin kahit kailan, saan, at paano nyo gusto.\n\nStep-by-Step Guide:\n1. Check your Email\n   After payment, makakatanggap kayo ng OTDC link sa inyong email.\n2. Complete the Modules\n   May 3 modules. Each module has 20–30 videos.\n   Panoorin lahat ng videos tungkol sa LTO road safety rules and regulations.\n3. Take the Exams\n   May exam after bawat module.\n   Kailangan maipasa para makapag proceed sa next module.\n4. Final Step (Branch Visit)\n   Kapag tapos na ang 3 modules, pumunta sa branch kung saan kayo nag-enroll para sa Final Assessment at TDC Certificate.\n\nReminder:\nTapusin within 30 days para maiwasan ang account deactivation.\n`;
+      plainText += `\nONLINE TDC PROVIDER NOTICE:\nPlease expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.\n`;
 
       if (isPdcScheduleLocked) {
         plainText += `\nPDC SCHEDULING NOTICE:\n${pdcLockReason}\n`;
@@ -1390,7 +1474,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
     if (enrollmentDetails.promoDiscount > 0) {
       plainText += `Discount (${enrollmentDetails.promoPct || 0}%): - PHP ${Number(enrollmentDetails.promoDiscount).toLocaleString()}\n`;
     }
-    
+
     if (enrollmentDetails.isNewUser) {
       plainText += `\nLogin Credentials:\nEmail: ${email}\nPassword: ${password}\n\nVerification Code: ${verificationCode}\n`;
     } else {
@@ -1403,8 +1487,7 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
       }
       plainText += `\nREMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first day of your class or pay via starpay in profile.\n`;
     }
-    if (isTricycle) plainText += `\nVEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle.\n`;
-    
+
     plainText += `\nMaster Driving School`;
     mailOptions.text = plainText;
 
@@ -1420,23 +1503,53 @@ const sendWalkInEnrollmentEmail = async (email, firstName, lastName, password, v
 
 // Send enrollment confirmation without login credentials.
 const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails, hasReviewer = false, hasVehicleTips = false) => {
+  console.log(`[EmailService] Attempting to send enrollment email to ${email} for course: ${enrollmentDetails?.courseName}`);
   try {
     const transporter = createTransporter();
-    const { courseName, courseList, courseCategory, courseType, branchName, branchAddress, scheduleDate, scheduleSession, scheduleTime, scheduleDate2, scheduleSession2, scheduleTime2, pdcSchedules, paymentMethod, amountPaid, paymentStatus } = enrollmentDetails;
+    const { courseName, courseList, courseCategory, courseType, branchName, branchAddress, scheduleDate, scheduleSession, scheduleTime, scheduleDate2, scheduleSession2, scheduleTime2, pdcSchedules, paymentMethod, amountPaid, paymentStatus, totalAmount, addonsDetailed } = enrollmentDetails;
 
-    const isTDC = (courseCategory || '').toUpperCase() === 'TDC';
-    const isPromo = (courseCategory || '').toUpperCase() === 'PROMO';
-    const isOnlineTdc = (isTDC || isPromo) && (String(courseType || '').toLowerCase().includes('online') || String(courseType || '').toLowerCase().includes('otdc') || String(courseName || '').toLowerCase().includes('otdc'));
+    const categoryNorm = String(courseCategory || '').toUpperCase();
+    const courseNameNorm = String(courseName || '').toLowerCase();
+    const isTDC = categoryNorm.includes('TDC') || categoryNorm.includes('THEORETICAL') || courseNameNorm.includes('tdc') || courseNameNorm.includes('theoretical');
+    const isPromo = categoryNorm.includes('PROMO') || categoryNorm.includes('BUNDLE') || categoryNorm.includes('MULTIPLE') || courseNameNorm.includes('promo') || courseNameNorm.includes('bundle');
+
+    // Robust detection for TDC bundles
+    const isTdcBundle = isTDC || (isPromo && (courseNameNorm.includes('tdc') || courseNameNorm.includes('theoretical') || courseNameNorm.includes('otdc')));
+
+    console.log(`[EmailService] Guest detection - Course: ${courseName}, Type: ${courseType}, Category: ${courseCategory}, IsPromo: ${isPromo}`);
+
+    const hasCourseListOnlineTdc = Array.isArray(courseList) && courseList.some(item => {
+      const cName = String(item.name || '').toLowerCase();
+      const cType = String(item.type || '').toLowerCase();
+      const isItemTdc = cName.includes('tdc') || cName.includes('theoretical') || cName.includes('otdc');
+      const isItemOnline = cType.includes('online') || cName.includes('online') || cType.includes('otdc') || cName.includes('otdc');
+      const match = isItemTdc && isItemOnline;
+      if (match) console.log(`[EmailService] Found Online TDC in courseList: ${item.name} (${item.type})`);
+      return match;
+    });
+
+    const isOnlineTdc = hasCourseListOnlineTdc || (
+      (isTdcBundle || isPromo) && (
+        String(courseType || '').toLowerCase().includes('online') ||
+        String(courseType || '').toLowerCase().includes('otdc') ||
+        courseNameNorm.includes('otdc') ||
+        courseNameNorm.includes('online')
+      )
+    );
+
+    console.log(`[EmailService] final isOnlineTdc: ${isOnlineTdc}, hasCourseListOnlineTdc: ${hasCourseListOnlineTdc}`);
+
     const isPdcScheduleLocked = !!enrollmentDetails?.pdcScheduleLockedUntilCompletion;
     const pdcLockReason = enrollmentDetails?.pdcScheduleLockReason || 'Branch Manager will assigns your PDC schedule after OTDC is marked complete.';
+
     const formattedDate = formatDisplayDate(scheduleDate);
     const displayScheduleSession = resolveDisplaySession(scheduleSession, scheduleTime);
 
     // Dynamically fulfill Day 2 for TDC directly, or bind to passed 2nd slots if PDC
-    const effectiveDate2 = (isTDC && !scheduleDate2) ? computeTDCDay2(scheduleDate) : formatDisplayDate(scheduleDate2);
-    const effectiveSession2Raw = (isTDC && !scheduleSession2) ? scheduleSession : scheduleSession2;
+    const effectiveDate2 = (isTdcBundle && !scheduleDate2) ? computeTDCDay2(scheduleDate) : formatDisplayDate(scheduleDate2);
+    const effectiveSession2Raw = (isTdcBundle && !scheduleSession2) ? scheduleSession : scheduleSession2;
     const effectiveSession2 = resolveDisplaySession(effectiveSession2Raw, scheduleTime2 || scheduleTime);
-    const effectiveTime2 = (isTDC && !scheduleTime2) ? scheduleTime : scheduleTime2;
+    const effectiveTime2 = (isTdcBundle && !scheduleTime2) ? scheduleTime : scheduleTime2;
     const hasMultiPdc = Array.isArray(pdcSchedules) && pdcSchedules.length > 0;
     const hasPrimarySchedule = !!scheduleDate && !isOnlineTdc;
     const effectivePdcType = String(
@@ -1460,8 +1573,23 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
     })();
     const incomingCourseList = Array.isArray(courseList) ? courseList.filter(Boolean) : [];
     const fallbackCourseList = [];
+
+    // Ensure TDC is in the list if it's a TDC bundle but missing from courseList
+    const listHasTdc = incomingCourseList.some(c => {
+      const n = (c?.name || '').toLowerCase();
+      return n.includes('tdc') || n.includes('theoretical');
+    });
+
+    if (isTdcBundle && !listHasTdc) {
+      fallbackCourseList.push({
+        name: courseNameClean.includes('f2f') || courseNameClean.includes('face to face') ? 'Theorectical Driving Course (TDC - F2F)' : 'Theorectical Driving Course (TDC)',
+        type: isOnlineTdc ? 'ONLINE' : 'F2F',
+        category: 'TDC'
+      });
+    }
+
     if (!incomingCourseList.length) {
-      if (courseName) {
+      if (!isTdcBundle && courseName) {
         fallbackCourseList.push({
           name: courseName,
           type: courseType || (isTDC ? 'TDC' : 'standard'),
@@ -1499,10 +1627,10 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
 
     const courseListHtml = hasCourseList
       ? normalizedCourseList.map((c, idx) => {
-          const n = c?.name || `Course ${idx + 1}`;
-          const t = c?.type ? String(c.type).toUpperCase() : 'STANDARD';
-          return `<div style="margin: 0 0 6px 0;"><span style="font-weight:700; color:#0f172a;">${idx + 1}.</span> ${n} <span style="color:#64748b;">(${t})</span></div>`;
-        }).join('')
+        const n = c?.name || `Course ${idx + 1}`;
+        const t = c?.type ? String(c.type).toUpperCase() : 'STANDARD';
+        return `<div style="margin: 0 0 6px 0;"><span style="font-weight:700; color:#0f172a;">${idx + 1}.</span> ${n} <span style="color:#64748b;">(${t})</span></div>`;
+      }).join('')
       : '';
 
     const sanitizeType = (value = '') => {
@@ -1528,9 +1656,9 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
 
     const multiPdcHtml = hasMultiPdc
       ? normalizedPdcSchedules.map((s, idx) => {
-          const d1 = formatDisplayDate(s.scheduleDate);
-          const d2 = formatDisplayDate(s.scheduleDate2);
-          return `
+        const d1 = formatDisplayDate(s.scheduleDate);
+        const d2 = formatDisplayDate(s.scheduleDate2);
+        return `
             <div style="margin-top: ${idx === 0 ? '0' : '16px'}; padding-top: ${idx === 0 ? '0' : '16px'}; border-top: ${idx === 0 ? 'none' : '2px dashed #93c5fd'};">
               <div style="font-size: 12px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">${s.scheduleLabelDisplay || `PDC ${idx + 1}`}</div>
               ${d2 ? `
@@ -1549,7 +1677,7 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
               `}
             </div>
           `;
-        }).join('')
+      }).join('')
       : '';
 
     const primaryScheduleHtml = hasPrimarySchedule
@@ -1583,13 +1711,25 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
     const path = require('path');
     const attachments = [];
     let items = [];
+
+    // Check individual flags
     if (hasReviewer) {
-        items.push('Driving School Reviewer');
-        attachments.push({ filename: 'MASTER-TDC-PDC-REVIEWER-AND-GUIDE.pdf', path: path.join(__dirname, 'AddOns', 'MASTER-TDC-PDC-REVIEWER-AND-GUIDE.pdf') });
+      items.push('Driving School Reviewer (Master TDC & PDC Guide)');
+      attachments.push({ filename: 'MASTER-TDC-PDC-REVIEWER-AND-GUIDE.pdf', path: path.join(__dirname, 'AddOns', 'MASTER-TDC-PDC-REVIEWER-AND-GUIDE.pdf') });
     }
     if (hasVehicleTips) {
-        items.push('Vehicle Maintenance Guide');
-        attachments.push({ filename: 'Vehicle-Maintenance-Guide.pdf', path: path.join(__dirname, 'AddOns', 'Vehicle-Maintenance-Guide.pdf') });
+      items.push('Vehicle Maintenance Guide (Universal Tips)');
+      attachments.push({ filename: 'Vehicle-Maintenance-Guide.pdf', path: path.join(__dirname, 'AddOns', 'Vehicle-Maintenance-Guide.pdf') });
+    }
+
+    // Check detailed addons array for anything missed
+    if (Array.isArray(addonsDetailed)) {
+      addonsDetailed.forEach(a => {
+        const name = a.name || a.course_name || '';
+        if (name && !items.some(it => it.includes(name))) {
+          items.push(name);
+        }
+      });
     }
 
     const mailOptions = {
@@ -1639,46 +1779,28 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
               <h2 style="margin-top: 0;">${EMAIL_CONTENT.guest.greeting(firstName, lastName)}</h2>
               <p>${EMAIL_CONTENT.guest.intro}</p>
               
-              ${isOnlineTdc ? `
-              <div class="requirements" style="background: #ecfeff; border-left: 4px solid #0891b2; margin: 18px 0; border-radius: 8px;">
-                <h4 style="color: #0e7490; margin: 0 0 8px 0;">💻 Online TDC Provider Notice</h4>
-                <p style="margin: 0; font-size: 14px; color: #155e75;">
-                  Please expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.
-                </p>
-              </div>
+              ${isOnlineTdc ? getOtdcGuideHtml() : ''}
 
-              <div class="requirements" style="background: #fdfae6; border-left: 4px solid #f59e0b; margin: 15px 0; border-radius: 8px; padding: 15px;">
-                <h4 style="color: #b45309; margin: 0 0 10px 0;">SELF-PACED ONLINE THEORETICAL DRIVING COURSE (OTDC)</h4>
-                <p style="margin: 0 0 15px 0; font-size: 14px; color: #78350f;">Pwede nyo itong gawin kahit kailan, saan, at paano nyo gusto.</p>
-                <div style="font-weight: bold; color: #92400e; margin-bottom: 8px;">Step-by-Step Guide:</div>
-                <ol style="margin: 0; padding-left: 20px; font-size: 13px; color: #78350f; line-height: 1.6;">
-                  <li><strong>Check your Email</strong><br/>After payment, makakatanggap kayo ng OTDC link sa inyong email.</li>
-                  <li style="margin-top: 8px;"><strong>Complete the Modules</strong><br/>May 3 modules<br/>Each module has 20–30 videos<br/>Panoorin lahat ng videos tungkol sa LTO road safety rules and regulations</li>
-                  <li style="margin-top: 8px;"><strong>Take the Exams</strong><br/>May exam after bawat module<br/>Kailangan maipasa para makapag proceed sa next module</li>
-                  <li style="margin-top: 8px;"><strong>Final Step (Branch Visit)</strong><br/>Kapag tapos na ang 3 modules<br/>Pumunta sa branch kung saan kayo nag-enroll<br/>Para sa Final Assessment at TDC Certificate</li>
-                </ol>
-                <div style="margin-top: 15px; font-size: 13px; font-weight: bold; color: #991b1b; text-align: center;">
-                  Reminder:<br/>Tapusin within 30 days para maiwasan ang account deactivation.
+              ${isOnlineTdc && isPdcScheduleLocked ? `
+                <div class="requirements" style="background: #eff6ff; border-left: 4px solid #2563eb; margin: 12px 0 18px 0; border-radius: 8px;">
+                  <h4 style="color: #1d4ed8; margin: 0 0 8px 0;">🗓️ PDC Scheduling Notice</h4>
+                  <p style="margin: 0; font-size: 14px; color: #1e3a8a;">${pdcLockReason}</p>
                 </div>
-              </div>
-              ${isPdcScheduleLocked ? `
-              <div class="requirements" style="background: #eff6ff; border-left: 4px solid #2563eb; margin: 12px 0 18px 0; border-radius: 8px;">
-                <h4 style="color: #1d4ed8; margin: 0 0 8px 0;">🗓️ PDC Scheduling Notice</h4>
-                <p style="margin: 0; font-size: 14px; color: #1e3a8a;">${pdcLockReason}</p>
-              </div>
               ` : ''}
-              ` : `
-              <div class="schedule-highlight">
-                <h3>${EMAIL_CONTENT.guest.scheduleHeading}</h3>
-                ${(hasMultiPdc || hasPrimarySchedule)
-                  ? `${primaryScheduleHtml}${multiPdcHtml}`
-                  : `
-                <div class="schedule-date">N/A</div>
-                <div class="schedule-session">No schedule data found</div>
-                <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">Please contact support if this persists.</div>
-                `}
-              </div>
-              `}
+
+              ${(hasMultiPdc || hasPrimarySchedule) ? `
+                <div class="schedule-highlight">
+                  <h3>${EMAIL_CONTENT.guest.scheduleHeading}</h3>
+                  ${`${primaryScheduleHtml}${multiPdcHtml}`}
+                </div>
+              ` : (isOnlineTdc ? '' : `
+                <div class="schedule-highlight">
+                  <h3>${EMAIL_CONTENT.guest.scheduleHeading}</h3>
+                  <div class="schedule-date">N/A</div>
+                  <div class="schedule-session">No schedule data found</div>
+                  <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">Please contact support if this persists.</div>
+                </div>
+              `)}
 
               
               ${items.length > 0 ? `
@@ -1692,14 +1814,14 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
               ` : ''}
 
               <div class="section">
-                <h3>${EMAIL_CONTENT.guest.detailsHeading}</h3>
+                <h3>Enrollment Details</h3>
                 <div class="detail-row">
-                  <span class="detail-label">Course:&nbsp;&nbsp;</span>
+                  <span class="detail-label">Course Bundle:&nbsp;&nbsp;</span>
                   <span class="detail-value">${courseName}</span>
                 </div>
-                ${hasCourseList ? `<div class="detail-row"><span class="detail-label">Enrolled Courses (${normalizedCourseList.length}):&nbsp;&nbsp;</span><span class="detail-value" style="line-height:1.4;">${courseListHtml}</span></div>` : ''}
+                ${hasCourseList ? `<div class="detail-row"><span class="detail-label">Enrolled Courses:&nbsp;&nbsp;</span><span class="detail-value" style="line-height:1.4;">${courseListHtml}</span></div>` : ''}
                 <div class="detail-row">
-                  <span class="detail-label">Type:&nbsp;&nbsp;</span>
+                  <span class="detail-label">Training Type:&nbsp;&nbsp;</span>
                   <span class="detail-value">${courseTypeSummary}</span>
                 </div>
                 <div class="detail-row">
@@ -1714,21 +1836,41 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
                 ${enrollmentDetails.promoDiscount > 0 ? `
                 <div class="detail-row">
                   <span class="detail-label">Subtotal:&nbsp;&nbsp;</span>
-                  <span class="detail-value">₱${Number(enrollmentDetails.subtotal || (amountPaid + enrollmentDetails.promoDiscount)).toLocaleString()}</span>
+                  <span class="detail-value">₱${(() => {
+            const sub = Number(enrollmentDetails.subtotal);
+            const disc = Number(enrollmentDetails.promoDiscount || 0);
+            const total = Number(totalAmount);
+            const paid = Number(amountPaid);
+            const bal = Number(remainingBalanceDue);
+
+            if (!isNaN(sub) && sub > 0) return sub.toLocaleString();
+            const inferred = (total > 0 ? total : (paid + bal)) + disc;
+            return isNaN(inferred) ? '0.00' : inferred.toLocaleString();
+          })()}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Discount (${enrollmentDetails.promoPct || 0}%):&nbsp;&nbsp;</span>
-                  <span class="detail-value" style="color: #16a34a;">- ₱${Number(enrollmentDetails.promoDiscount).toLocaleString()}</span>
+                  <span class="detail-label">${enrollmentDetails.isManualBundle ? 'Multi-Course Discount' : 'Discount'} (${Number(enrollmentDetails.promoPct || 0)}%):&nbsp;&nbsp;</span>
+                  <span class="detail-value" style="color: #16a34a;">- ₱${Number(enrollmentDetails.promoDiscount || 0).toLocaleString()}</span>
                 </div>
                 ` : ''}
                 <div class="detail-row">
-                  <span class="detail-label">Amount Paid:&nbsp;&nbsp;</span>
-                  <span class="detail-value">₱${Number(amountPaid).toLocaleString()}</span>
+                  <span class="detail-label" style="color: #1a4fba; font-weight: 800;">Total Assessment:&nbsp;&nbsp;</span>
+                  <span class="detail-value" style="color: #1a4fba; font-weight: 800;">₱${(() => {
+          const total = Number(totalAmount);
+          const paid = Number(amountPaid);
+          const bal = Number(remainingBalanceDue);
+          const val = !isNaN(total) && total > 0 ? total : (paid + bal);
+          return isNaN(val) ? '0.00' : val.toLocaleString();
+        })()}</span>
                 </div>
-                ${isDownpayment && remainingBalanceDue > 0 ? `<div class="detail-row"><span class="detail-label">Remaining Balance:&nbsp;&nbsp;</span><span class="detail-value">₱${Number(remainingBalanceDue).toLocaleString()}</span></div>` : ''}
+                <div class="detail-row">
+                  <span class="detail-label">Total Amount Paid:&nbsp;&nbsp;</span>
+                  <span class="detail-value">₱${Number(amountPaid || 0).toLocaleString()}</span>
+                </div>
+                ${isDownpayment && Number(remainingBalanceDue) > 0 ? `<div class="detail-row"><span class="detail-label">Remaining Balance:&nbsp;&nbsp;</span><span class="detail-value" style="color: #ea580c; font-weight: 700;">₱${Number(remainingBalanceDue).toLocaleString()}</span></div>` : ''}
                 <div class="detail-row">
                   <span class="detail-label">Payment Status:&nbsp;&nbsp;</span>
-                  <span class="detail-value">${paymentStatus}</span>
+                  <span class="detail-value">${paymentStatus || 'Paid'}</span>
                 </div>
                 ${isPdcScheduleLocked ? `<div class="detail-row"><span class="detail-label">PDC Schedule:&nbsp;&nbsp;</span><span class="detail-value">${pdcLockReason}</span></div>` : ''}
               </div>
@@ -1737,13 +1879,6 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
               <div class="requirements" style="background: #e0f2fe; border-left: 4px solid #0284c7;">
                 <h4 style="color: #0369a1; margin-top: 0;">${EMAIL_CONTENT.downpaymentReminder.heading}</h4>
                 <p style="margin: 0; font-size: 14px; color: #0c4a6e;">${EMAIL_CONTENT.downpaymentReminder.note}</p>
-              </div>
-              ` : ''}
-
-              ${isTricycle ? `
-              <div style="background: #eff6ff; border-left: 4px solid #2157da; padding: 12px 15px; margin: 15px 0; border-radius: 0 8px 8px 0; font-size: 13px;">
-                <strong style="color: #1e40af;">${EMAIL_CONTENT.vehicleRental.heading}</strong>
-                <p style="margin: 6px 0 0; color: #1e3a8a;">${EMAIL_CONTENT.vehicleRental.tricycleNote}</p>
               </div>
               ` : ''}
 
@@ -1771,21 +1906,22 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
         </body>
         </html>
       `,
-      text: `Hello ${firstName} ${lastName}!\n\nYour enrollment has been successfully processed.\n\n${[isOnlineTdc ? `ONLINE TDC PROVIDER NOTICE:\nPlease expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.\n\nSELF-PACED ONLINE THEORETICAL DRIVING COURSE (OTDC)\nPwede nyo itong gawin kahit kailan, saan, at paano nyo gusto.\n\nStep-by-Step Guide:\n1. Check your Email\n   After payment, makakatanggap kayo ng OTDC link sa inyong email.\n2. Complete the Modules\n   May 3 modules. Each module has 20–30 videos.\n   Panoorin lahat ng videos tungkol sa LTO road safety rules and regulations.\n3. Take the Exams\n   May exam after bawat module.\n   Kailangan maipasa para makapag proceed sa next module.\n4. Final Step (Branch Visit)\n   Kapag tapos na ang 3 modules, pumunta sa branch kung saan kayo nag-enroll para sa Final Assessment at TDC Certificate.\n\nReminder:\nTapusin within 30 days para maiwasan ang account deactivation.${isPdcScheduleLocked ? `\n\nPDC SCHEDULING NOTICE:\n${pdcLockReason}` : ''}` : (hasPrimarySchedule ? `${primaryScheduleLabel}\nDay 1: ${formattedDate}\nSession: ${displayScheduleSession}\nTime: ${scheduleTime || 'N/A'}${effectiveDate2 ? `\nDay 2: ${effectiveDate2}\nSession: ${effectiveSession2 || 'N/A'}\nTime: ${effectiveTime2 || 'N/A'}` : ''}` : ''), hasMultiPdc
+      text: `Hello ${firstName} ${lastName}!\n\nYour enrollment has been successfully processed.\n\n${[isOnlineTdc ? `ONLINE TDC PROVIDER NOTICE:\nPlease expect an email regarding your online course. Kindly check your inbox (including spam/junk) and follow the instructions. If not received, please contact us.\n\nReminder:\nTapusin within 30 days para maiwasan ang account deactivation.${isPdcScheduleLocked ? `\n\nPDC SCHEDULING NOTICE:\n${pdcLockReason}` : ''}` : (hasPrimarySchedule ? `${primaryScheduleLabel}\nDay 1: ${formattedDate}\nSession: ${displayScheduleSession}\nTime: ${scheduleTime || 'N/A'}${effectiveDate2 ? `\nDay 2: ${effectiveDate2}\nSession: ${effectiveSession2 || 'N/A'}\nTime: ${effectiveTime2 || 'N/A'}` : ''}` : ''), hasMultiPdc
         ? normalizedPdcSchedules.map((s, idx) => {
-            const d1 = formatDisplayDate(s.scheduleDate);
-            const d2 = formatDisplayDate(s.scheduleDate2);
-            return `${s.scheduleLabelDisplay || `PDC ${idx + 1}`}\nDay 1: ${d1}\nSession: ${s.scheduleSessionDisplay || 'N/A'}\nTime: ${s.scheduleTime || 'N/A'}${d2 ? `\nDay 2: ${d2}\nSession: ${s.scheduleSession2Display || 'N/A'}\nTime: ${s.scheduleTime2 || 'N/A'}` : ''}`;
-          }).join('\n\n')
-        : ''].filter(Boolean).join('\n\n')}\nCourse: ${courseName} (${courseType})\n${hasCourseList ? `Enrolled Courses:\n${normalizedCourseList.map((c, idx) => `${idx + 1}. ${c?.name || `Course ${idx + 1}`} (${(c?.type || 'standard').toUpperCase()})`).join('\n')}\n` : ''}Branch: ${branchName}\n\n${isDownpayment ? `${remainingBalanceDue > 0 ? `Remaining Balance: PHP ${Number(remainingBalanceDue).toLocaleString()}\n` : ''}REMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n\n` : ''}${isTricycle ? `VEHICLE RENTAL NOTE: For PDC - A1 TRICYCLE, students are required to rent their own Tricycle for the course instead of using the school's vehicle because we only have one unit for all branches.\n\n` : ''}Thank you for choosing Master Driving School!`,
+          const d1 = formatDisplayDate(s.scheduleDate);
+          const d2 = formatDisplayDate(s.scheduleDate2);
+          return `${s.scheduleLabelDisplay || `PDC ${idx + 1}`}\nDay 1: ${d1}\nSession: ${s.scheduleSessionDisplay || 'N/A'}\nTime: ${s.scheduleTime || 'N/A'}${d2 ? `\nDay 2: ${d2}\nSession: ${s.scheduleSession2Display || 'N/A'}\nTime: ${s.scheduleTime2 || 'N/A'}` : ''}`;
+        }).join('\n\n')
+        : ''].filter(Boolean).join('\n\n')}\nCourse: ${courseName} (${courseType})\n${hasCourseList ? `Enrolled Courses:\n${normalizedCourseList.map((c, idx) => `${idx + 1}. ${c?.name || `Course ${idx + 1}`} (${(c?.type || 'standard').toUpperCase()})`).join('\n')}\n` : ''}Branch: ${branchName}\n\n${isDownpayment ? `${remainingBalanceDue > 0 ? `Remaining Balance: PHP ${Number(remainingBalanceDue).toLocaleString()}\n` : ''}REMAINING BALANCE REMINDER: Since your payment type is Downpayment, you must settle your remaining balance when you go to the branch on the first or second day of your class.\n\n` : ''}Thank you for choosing Master Driving School!`,
     };
 
     const info = await sendMailWithFallback(transporter, mailOptions);
-    console.log('✅ Enrollment email sent to:', email);
-    console.log('Message ID:', info.messageId);
+    console.log(`✅ Enrollment email SUCCESSFULLY sent to: ${email} (MessageID: ${info.messageId})`);
     return true;
   } catch (error) {
-    console.error('❌ Enrollment email sending failed:', error.message);
+    console.error(`❌ Enrollment email failed for ${email}:`, error.message);
+    // Log details of the envelope if it got that far
+    if (error.envelope) console.error('Envelope info:', JSON.stringify(error.envelope));
     throw error;
   }
 };
@@ -2012,36 +2148,57 @@ const sendPaymentReceiptEmail = async (email, firstName, lastName, receiptData) 
               <h2 style="margin-top:0;">${EMAIL_CONTENT.receipt.greeting(firstName, lastName)}</h2>
               <p>
                 ${resolvedIsFullPayment
-                  ? EMAIL_CONTENT.receipt.introFull
-                  : EMAIL_CONTENT.receipt.introDown}
+          ? EMAIL_CONTENT.receipt.introFull
+          : EMAIL_CONTENT.receipt.introDown}
               </p>
 
-              <div class="pdf-note">
+              <div class="pdf-note" style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px 16px; margin: 16px 0; font-size: 13px; color: #1e40af;">
                 ${EMAIL_CONTENT.receipt.pdfNote(pdfFilename)}
               </div>
 
-              <div class="receipt-box">
-                <h3>${EMAIL_CONTENT.receipt.detailsHeading}</h3>
-                <table class="details-table">
-                  <tr><td class="lbl">Transaction ID</td><td class="val">${transactionId}</td></tr>
-                  <tr><td class="lbl">Booking ID</td><td class="val">BK-${String(bookingId).padStart(3, '0')}</td></tr>
-                  <tr><td class="lbl">Course</td><td class="val">${courseName}</td></tr>
-                  <tr><td class="lbl">Course Price</td><td class="val">₱${Number(coursePrice).toLocaleString()}</td></tr>
+               <div class="receipt-box">
+                <h3 style="color: #1a4fba; margin-top: 0; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;">${EMAIL_CONTENT.receipt.detailsHeading}</h3>
+                <table class="details-table" style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                  <tr style="border-bottom: 1px solid #f3f4f6;"><td class="lbl" style="color: #6b7280; font-weight: 600; padding: 9px 4px;">Transaction ID</td><td class="val" style="font-weight: 700; color: #1f2937; padding: 9px 4px; text-align: right;">${transactionId}</td></tr>
+                  <tr style="border-bottom: 1px solid #f3f4f6;"><td class="lbl" style="color: #6b7280; font-weight: 600; padding: 9px 4px;">Booking ID</td><td class="val" style="font-weight: 700; color: #1f2937; padding: 9px 4px; text-align: right;">BK-${String(bookingId).padStart(3, '0')}</td></tr>
+                  <tr style="border-bottom: 1px solid #f3f4f6;"><td class="lbl" style="color: #6b7280; font-weight: 600; padding: 9px 4px;">Course</td><td class="val" style="font-weight: 700; color: #1f2937; padding: 9px 4px; text-align: right;">${courseName}</td></tr>
+                  
                   ${receiptData.promoDiscount > 0 ? `
-                  <tr><td class="lbl">Discount (${receiptData.promoPct || 0}%)</td><td class="val" style="color:#16a34a;">- ₱${Number(receiptData.promoDiscount).toLocaleString()}</td></tr>
-                  ` : ''}
-                  <tr><td class="lbl">Date</td><td class="val">${formattedDate}</td></tr>
-                  <tr><td class="lbl">Payment Method</td><td class="val">${paymentMethod}</td></tr>
-                  <tr><td class="lbl">Amount Paid</td><td class="val" style="color:#16a34a;">₱${Number(amountPaid).toLocaleString()}</td></tr>
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td class="lbl" style="color: #6b7280; font-weight: 600; padding: 9px 4px;">Subtotal</td>
+                    <td class="val" style="font-weight: 700; color: #1f2937; padding: 9px 4px; text-align: right;">₱${Number(courseAmt + receiptData.promoDiscount).toLocaleString()}</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td class="lbl" style="color: #6b7280; font-weight: 600; padding: 9px 4px;">Discount (${receiptData.promoPct || 0}%)</td>
+                    <td class="val" style="font-weight: 700; color: #16a34a; padding: 9px 4px; text-align: right;">- ₱${Number(receiptData.promoDiscount).toLocaleString()}</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td class="lbl" style="color: #1a4fba; font-weight: 700; padding: 9px 4px;">Total Assessed</td>
+                    <td class="val" style="font-weight: 800; color: #1a4fba; padding: 9px 4px; text-align: right;">₱${Number(courseAmt).toLocaleString()}</td>
+                  </tr>
+                  ` : `
+                  <tr style="border-bottom: 1px solid #f3f4f6;"><td class="lbl" style="color: #6b7280; font-weight: 600; padding: 9px 4px;">Course Price</td><td class="val" style="font-weight: 700; color: #1f2937; padding: 9px 4px; text-align: right;">₱${Number(courseAmt).toLocaleString()}</td></tr>
+                  `}
+                  
+                  <tr style="border-bottom: 1px solid #f3f4f6;"><td class="lbl" style="color: #6b7280; font-weight: 600; padding: 9px 4px;">Date</td><td class="val" style="font-weight: 700; color: #1f2937; padding: 9px 4px; text-align: right;">${formattedDate}</td></tr>
+                  <tr style="border-bottom: 1px solid #f3f4f6;"><td class="lbl" style="color: #6b7280; font-weight: 600; padding: 9px 4px;">Payment Method</td><td class="val" style="font-weight: 700; color: #1f2937; padding: 9px 4px; text-align: right;">${paymentMethod}</td></tr>
+                  <tr>
+                    <td class="lbl" style="color: #16a34a; font-weight: 700; padding: 9px 4px;">Amount Paid Now</td>
+                    <td class="val" style="font-weight: 800; color: #16a34a; padding: 9px 4px; text-align: right;">₱${Number(paidAmt).toLocaleString()}</td>
+                  </tr>
                 </table>
-                <div class="total-row">
-                  <table class="total-inner">
-                    <tr>
-                      <td class="total-label">${resolvedIsFullPayment ? EMAIL_CONTENT.receipt.paidInFull : EMAIL_CONTENT.receipt.amountPaid}</td>
-                      <td class="total-value">₱${Number(settledTotalAmt).toLocaleString()}</td>
-                    </tr>
-                  </table>
+
+                ${!resolvedIsFullPayment ? `
+                <div class="balance-box" style="background: #fff7ed; border: 2px solid #fb923c; border-radius: 10px; padding: 20px; margin: 20px 0; text-align: center;">
+                  <h4 style="color: #c2410c; margin: 0 0 8px 0; font-size: 16px;">Remaining Balance Due</h4>
+                  <div class="balance-amount" style="font-size: 28px; font-weight: 800; color: #ea580c; margin: 5px 0;">₱${Number(dueAmt).toLocaleString()}</div>
+                  <p style="margin: 10px 0 0 0; font-size: 13px; color: #9a3412;">Please settle this balance at the branch on your first day of class.</p>
                 </div>
+                ` : `
+                <div class="total-row" style="background: #f0fdf4; border-radius: 8px; padding: 14px 10px; margin-top: 15px; text-align: center; border: 1px solid #bbf7d0;">
+                  <span style="font-size: 16px; font-weight: 700; color: #15803d; text-transform: uppercase; letter-spacing: 1px;">Status: Paid in Full</span>
+                </div>
+                `}
               </div>
 
               ${!resolvedIsFullPayment && dueAmt > 0 ? `
@@ -2106,12 +2263,12 @@ const sendAddonsEmail = async (email, firstName, lastName, hasReviewer, hasVehic
       attachments.push({ filename: 'Vehicle-Maintenance-Guide.pdf', path: path.join(__dirname, 'AddOns', 'Vehicle-Maintenance-Guide.pdf') });
     }
     if (attachments.length === 0) return;
-    const mailOptions = { 
-      from: getFromAddress(), 
-      to: email, 
-      subject: 'Your Driving School Add-ons', 
-      attachments, 
-      html: `<!DOCTYPE html><html><body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px;"><div style="max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;"><div style="background: linear-gradient(135deg, #1a4fba 0%, #3b82f6 100%); color: white; padding: 30px 20px; text-align: center;"><h1 style="margin:0;font-size:24px;">Your Add-ons Are Here!</h1></div><div style="padding: 30px; background: #fff;"><p>Hi ${firstName},</p><p>Thank you for availing our additional review materials! We have attached the following requested add-ons to this email:</p><ul>${items.map(i=>'<li><strong>'+i+'</strong></li>').join('')}</ul><p>These guides will greatly help with your driving preparation. If you have any questions, feel free to reach out to us.</p><br><p>Best regards,<br>The MDS Team</p></div></div></body></html>`
+    const mailOptions = {
+      from: getFromAddress(),
+      to: email,
+      subject: 'Your Driving School Add-ons',
+      attachments,
+      html: `<!DOCTYPE html><html><body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px;"><div style="max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;"><div style="background: linear-gradient(135deg, #1a4fba 0%, #3b82f6 100%); color: white; padding: 30px 20px; text-align: center;"><h1 style="margin:0;font-size:24px;">Your Add-ons Are Here!</h1></div><div style="padding: 30px; background: #fff;"><p>Hi ${firstName},</p><p>Thank you for availing our additional review materials! We have attached the following requested add-ons to this email:</p><ul>${items.map(i => '<li><strong>' + i + '</strong></li>').join('')}</ul><p>These guides will greatly help with your driving preparation. If you have any questions, feel free to reach out to us.</p><br><p>Best regards,<br>The MDS Team</p></div></div></body></html>`
     };
     await sendMailWithFallback(transporter, mailOptions);
     console.log('[EmailService] Add-ons sent to:', email);

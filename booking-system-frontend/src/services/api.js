@@ -395,10 +395,8 @@ export const starpayAPI = {
   payRescheduleFee: async (enrollmentId) => await apiRequest(`/starpay/reschedule-fee/${enrollmentId}`, {
     method: 'POST',
   }),
-  testMarkFeePaid: async (enrollmentId) => await apiRequest(`/starpay/test-mark-fee-paid/${enrollmentId}`, {
-    method: 'PATCH',
-  }),
 };
+
 
 // Bookings API
 export const bookingsAPI = {
@@ -463,10 +461,10 @@ export const adminAPI = {
   },
 
   // Update booking status (admin)
-  updateBookingStatus: async (id, status) => {
+  updateBookingStatus: async (id, status, extraFields = {}) => {
     return await apiRequest(`/admin/bookings/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, ...extraFields }),
     });
   },
 

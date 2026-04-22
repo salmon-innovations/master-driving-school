@@ -1,0 +1,65 @@
+/* =============================================
+   ADMIN RESPONSIVE TABLES UTILITY
+   ============================================= */
+
+/* Main wrapper class to be added to div surrounding <table> */
+.admin-table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 20px;
+    border-radius: 12px;
+    background: var(--card-bg, #ffffff);
+    border: 1px solid var(--border-color, #e2e8f0);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+/* Ensure the table doesn't shrink below a usable width */
+.admin-table-responsive table {
+    width: 100% !important;
+    min-width: 900px !important; /* Forces scroll bar when viewport is small */
+    border-collapse: collapse;
+    margin-bottom: 0 !important;
+}
+
+/* Fix for table layout to ensure cells respect their contents */
+.admin-table-responsive table th,
+.admin-table-responsive table td {
+    white-space: nowrap; /* Prevent messy wrapping in tight cells */
+    padding: 14px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+/* Special class for cells that SHOULD wrap (like long descriptions) */
+.admin-table-responsive .allow-wrap {
+    white-space: normal !important;
+    word-break: break-word;
+    min-width: 200px;
+}
+
+/* Truncation helper */
+.admin-table-responsive .text-truncate {
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Custom Scrollbar for better UI */
+
+/* Handle nested components like avatars in cells */
+.admin-table-responsive .student-cell {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Action buttons container in table */
+.admin-table-responsive .table-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+}

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import './css/Dashboard.css';
+import './css/responsive_tables.css';
+import './css/admin-scrollbar.css';
 import Sidebar from './components/Sidebar';
 
 // Lazy-load heavy admin pages for code-splitting — each loads only when first visited.
@@ -186,6 +188,8 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     const { theme, toggleTheme } = useTheme();
     const { showNotification } = useNotification();
     const [activeTab, setActiveTab] = useState(() => getAdminTabFromPath(window.location.pathname) || localStorage.getItem('adminActiveTab') || 'dashboard');
+    const [showTdcOnlineModal, setShowTdcOnlineModal] = useState(false);
+    const [tdcOnlineQueue, setTdcOnlineQueue] = useState({ data: [], loading: false });
     const hasInitializedAdminPath = useRef(false);
     const autoOpenedOnlineTdcIdsRef = useRef(new Set());
     const lastOnlineTdcReminderAtRef = useRef(0);
@@ -390,8 +394,8 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         markAsRead(notification.id);
         setShowNotifications(false);
         if (notification.notifType === 'online_tdc_account_setup') {
-            setScheduleNavigationTarget({ view: 'tdc_online', token: Date.now() });
-            setActiveTab('schedules');
+            fetchTdcOnlineQueue();
+            setShowTdcOnlineModal(true);
         }
     };
 
@@ -414,7 +418,44 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     ).length;
     const [showNotifications, setShowNotifications] = useState(false);
 
-    // Fetch notifications on mount and auto-refresh every 30s.
+    const fetchTdcOnlineQueue = async () => {
+        try {
+            setTdcOnlineQueue(prev => ({ ...prev, loading: true }));
+            const res = await adminAPI.getTdcOnlineStudents({ branchId: adminProfile.branchId || undefined });
+            if (res.success) {
+                const rawData = Array.isArray(res.data) ? res.data : [];
+                const filtered = rawData.filter(row => {
+                    const isTdcOnlineOrBundle = /online|otdc|bundle|\+/i.test(row.course_name || '') || 
+                                              /online|otdc/i.test(row.course_type || '');
+                    return isTdcOnlineOrBundle;
+                });
+                setTdcOnlineQueue({ data: filtered, loading: false });
+            }
+        } catch (err) {
+            console.error('Failed to load TDC Online queue:', err);
+            setTdcOnlineQueue({ data: [], loading: false });
+        }
+    };
+
+    const handleTdcOnlineDone = async (bookingId) => {
+        try {
+            await adminAPI.updateBookingStatus(bookingId, null, { isTdcOnlineOnboarded: true });
+            // Decrease the alert count by marking the notification as read locally
+            markAsRead(String(bookingId));
+            showNotification('TDC Online account setup marked as done.', 'success');
+            // Refresh local queue
+            setTdcOnlineQueue(prev => ({
+                ...prev,
+                data: prev.data.filter(item => String(item.booking_id) !== String(bookingId))
+            }));
+            // Refresh dashboard and notifications
+            fetchNotifications();
+        } catch (err) {
+            showNotification(err.message || 'Failed to mark as done', 'error');
+        }
+    };
+
+    // Refresh notifications on mount and auto-refresh every 30s.
     useEffect(() => {
     fetchNotifications();
     // Poll every 45 s — reduced from 30 s to lower Render Starter request count
@@ -475,7 +516,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         }
 
         const pendingOnlineTdc = notifications.filter(
-            (n) => n.notifType === 'online_tdc_account_setup'
+            (n) => !n.read && n.notifType === 'online_tdc_account_setup'
         );
 
         if (pendingOnlineTdc.length === 0) {
@@ -493,10 +534,33 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
             showNotification(
                 `Online TDC reminder: ${pendingOnlineTdc.length} enrollment${pendingOnlineTdc.length > 1 ? 's' : ''} pending provider account setup.`,
                 'info',
-                10000
+                15000,
+                {
+                    label: 'View Pending Queue',
+                    onClick: () => {
+                        fetchTdcOnlineQueue();
+                        setShowTdcOnlineModal(true);
+                    }
+                }
             );
         }
     }, [notifications, showNotification, tdcOnlineAlertsEnabled]);
+
+    // Listen for cross-component notification updates (e.g. from Schedule.jsx)
+    useEffect(() => {
+        const handleMarkReadEvent = (e) => {
+            const { id } = e.detail || {};
+            if (id) {
+                markAsRead(String(id));
+                // Refresh core data to ensure sync across views
+                fetchNotifications();
+                fetchTdcOnlineQueue();
+            }
+        };
+
+        window.addEventListener('mds-mark-notification-read', handleMarkReadEvent);
+        return () => window.removeEventListener('mds-mark-notification-read', handleMarkReadEvent);
+    }, []);
 
     // Fetch admin profile on mount
     useEffect(() => {
@@ -1782,6 +1846,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                         onNavigate={setActiveTab}
                         currentUserPermissions={effectiveAdminPermissions}
                         currentUserRole={adminProfile.rawRole}
+                        currentUserBranchId={adminProfile.branchId}
                         navigationTarget={scheduleNavigationTarget}
                     />
                     </Suspense>
@@ -2173,10 +2238,110 @@ const NotificationPage = ({ notifications, markAsRead, deleteNotification, clear
                     </div>
                 )}
             </div>
+            {/* TDC Online Queue Modal */}
+            {showTdcOnlineModal && (
+                <div className="modal-overlay" style={{ zIndex: 1100 }}>
+                    <div className="modal-content" style={{ maxWidth: '1000px', width: '95%', padding: '0', borderRadius: '16px', overflow: 'hidden' }}>
+                        <div style={{
+                            padding: '20px 24px', background: 'var(--primary-color)', color: '#fff',
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                        }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '1.25rem' }}>TDC Online Account Setup Queue</h3>
+                                <p style={{ margin: '4px 0 0', fontSize: '0.85rem', opacity: 0.9 }}>
+                                    Manage students waiting for online provider account registration
+                                </p>
+                            </div>
+                            <button 
+                                onClick={() => setShowTdcOnlineModal(false)}
+                                style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                            </button>
+                        </div>
+
+                        <div style={{ padding: '24px', maxHeight: '70vh', overflowY: 'auto' }}>
+                            {tdcOnlineQueue.loading ? (
+                                <div style={{ textAlign: 'center', padding: '40px' }}>
+                                    <div className="noshow-loading-spinner" style={{ margin: '0 auto 16px' }}></div>
+                                    <div style={{ color: 'var(--secondary-text)' }}>Fetching enrollees...</div>
+                                </div>
+                            ) : tdcOnlineQueue.data.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--secondary-text)' }}>
+                                    <div style={{ fontSize: '3rem', marginBottom: '16px', opacity: 0.3 }}>✅</div>
+                                    <h4 style={{ margin: '0 0 8px', color: 'var(--text-color)' }}>All Caught Up!</h4>
+                                    <p style={{ margin: 0 }}>No pending TDC Online account setups found.</p>
+                                </div>
+                            ) : (
+                                <div className="table-wrapper">
+                                    <table className="custom-table" style={{ fontSize: '0.85rem' }}>
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>Student</th>
+                                                <th>Contact</th>
+                                                <th>Course</th>
+                                                <th>Enrolled</th>
+                                                <th>Branch</th>
+                                                <th style={{ textAlign: 'right' }}>Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {tdcOnlineQueue.data.map((row, idx) => (
+                                                <tr key={row.booking_id}>
+                                                    <td>{idx + 1}</td>
+                                                    <td>
+                                                        <div style={{ fontWeight: 700 }}>{row.student_name}</div>
+                                                        <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>{row.email}</div>
+                                                    </td>
+                                                    <td>{row.contact_numbers || '—'}</td>
+                                                    <td>{row.course_name}</td>
+                                                    <td>{new Date(row.created_at).toLocaleDateString()}</td>
+                                                    <td>{row.branch_name}</td>
+                                                    <td style={{ textAlign: 'right' }}>
+                                                        <button
+                                                            onClick={() => handleTdcOnlineDone(row.booking_id)}
+                                                            style={{
+                                                                background: '#16a34a', color: '#fff', border: 'none',
+                                                                borderRadius: '6px', padding: '6px 12px', fontSize: '0.8rem',
+                                                                fontWeight: 600, cursor: 'pointer', display: 'inline-flex',
+                                                                alignItems: 'center', gap: '6px'
+                                                            }}
+                                                        >
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                            Mark Done
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                        
+                        <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'flex-end', background: 'var(--hover-bg)' }}>
+                            <button 
+                                className="noshow-refresh-btn"
+                                onClick={fetchTdcOnlineQueue}
+                                style={{ marginRight: 'auto' }}
+                            >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: '6px' }}><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                Refresh
+                            </button>
+                            <button 
+                                onClick={() => setShowTdcOnlineModal(false)}
+                                style={{ padding: '8px 24px', borderRadius: '8px', border: '1.5px solid var(--border-color)', background: '#fff', fontWeight: 600, cursor: 'pointer' }}
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
-
 
 export default Admin;
 

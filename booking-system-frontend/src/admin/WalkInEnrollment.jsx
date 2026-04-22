@@ -122,7 +122,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const defaultFormData = {
         firstName: '', middleName: '', lastName: '', age: '', gender: '', birthday: '', nationality: '', maritalStatus: '',
         address: '', zipCode: '', birthPlace: '', contactNumbers: '', email: '', emergencyContactPerson: '', emergencyContactNumber: '',
-        course: null, courseType: '', branchId: '', branchName: '',
+        course: null, courseType: '', 
+        branchId: adminProfile?.branchId ? String(adminProfile.branchId) : '', 
+        branchName: adminProfile?.branch || '',
         promoTdcType: '',
         selectedCourses: [],
         scheduleDate: '', scheduleSlotId: null, scheduleSession: '', scheduleTime: '',
@@ -286,6 +288,16 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         // We no longer clear the state on unmount.
         // This ensures that navigating to other admin pages and back preserves progress.
     }, []);
+
+    useEffect(() => {
+        if (adminProfile?.branchId && !formData.branchId) {
+            setFormData(prev => ({
+                ...prev,
+                branchId: String(adminProfile.branchId),
+                branchName: adminProfile.branch || ''
+            }));
+        }
+    }, [adminProfile, formData.branchId]);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -461,7 +473,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     };
 
     const isTDC = formData.course?.category === 'TDC';
-    const isPromo = formData.course?.category === 'Promo';
+    const isPromo = formData.course?.category === 'Promo' || formData.course?.category === 'Bundle';
     const promoDerivedTdcType = isPromo ? (() => {
         const raw = String(formData.course?.course_type || '').toUpperCase();
         if (!raw.includes('+')) return 'F2F';
@@ -500,10 +512,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     );
 
     useEffect(() => {
-        if (isPromo && isOnlineTdcNoSchedule && promoStep === 1) {
+        const hasTdc = !!formData.course?._tdcCourse;
+        if (isPromo && (!hasTdc || isOnlineTdcNoSchedule) && promoStep === 1) {
             setPromoStep(2);
         }
-    }, [isPromo, isOnlineTdcNoSchedule, promoStep]);
+    }, [isPromo, isOnlineTdcNoSchedule, promoStep, formData.course]);
 
     const getPromoPdcCourseKey = (item) => `${item?.id || 'na'}::${(item?.name || '').toLowerCase()}::${(item?.course_type || '').toLowerCase()}`;
 
@@ -781,8 +794,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             return grouped;
         })()
         : [];
-    // PDC scheduling is always self-selected by admin for all promo bundles (including online TDC).
-    const isPromoOnlineTdcLockedBundle = isPromo && isOnlineTdcNoSchedule;
+    // If the bundle (Promo or Manual) contains an Online TDC, defer PDC scheduling to the branch manager
+    const isPromoOnlineTdcLockedBundle = (isPromo || !!formData.course?._isManualBundle) && isOnlineTdcNoSchedule;
 
     const activePromoPdcCourse = promoPdcCourses.find(c => c._pdcKey === activePromoPdcCourseId) || promoPdcCourses[0] || null;
     const activePromoPdcCourseKey = activePromoPdcCourse?._pdcKey || null;
@@ -953,7 +966,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     useEffect(() => {
         if (step !== 3) return;
         const cat = formData.course?.category;
-        if (cat !== 'PDC' && cat !== 'Promo') return;
+        if (cat !== 'PDC' && cat !== 'Promo' && cat !== 'Bundle') return;
         schedulesAPI.getSlotsByDate(null, formData.branchId, 'PDC')
             .then(slots => setPdcAllSlots(transformSlots(slots)))
             .catch(err => console.error('Error loading PDC calendar slots:', err));
@@ -1075,15 +1088,58 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 const isOnlineTdc = ct.toLowerCase().includes('online') || ct.toLowerCase().includes('otdc') || cn.toLowerCase().includes('otdc');
 
                 if (cat === 'TDC') {
-                    avail[pkg.id] = isOnlineTdc || hasTdcSlot();
+                    const hasSharedTdc = isOnlineTdc || hasTdcSlot();
+                    avail[pkg.id] = {
+                        ok: hasSharedTdc,
+                        components: [
+                            { ok: hasSharedTdc, label: isOnlineTdc ? 'Online TDC' : 'Theoretical Driving Course' }
+                        ]
+                    };
                 } else if (cat === 'PDC') {
-                    avail[pkg.id] = hasPdcSlot(ct, cn);
+                    const ok = hasPdcSlot(ct, cn);
+                    avail[pkg.id] = {
+                        ok: ok,
+                        components: [
+                            { ok, label: pkg.shortName || pkg.name }
+                        ]
+                    };
                 } else if (cat === 'Promo') {
                     const pdcParts = parsePromoPdcParts(ct);
                     const partsToCheck = pdcParts.length > 0 ? pdcParts : [ct.split('+')[1] || ''];
-                    avail[pkg.id] = (isOnlineTdc || hasTdcSlot()) && partsToCheck.every((part) => hasPdcSlot(part, cn));
+                    const tdcOk = isOnlineTdc || hasTdcSlot();
+                    
+                    const components = [
+                        { ok: tdcOk, label: isOnlineTdc ? 'Online TDC' : 'Theoretical Driving Course' }
+                    ];
+                    
+                    partsToCheck.forEach(part => {
+                        const meta = getPromoPdcCourseMeta({ name: part, shortName: part, course_type: part });
+                        components.push({ ok: hasPdcSlot(part, cn), label: `PDC - ${meta.label}` });
+                    });
+
+                    avail[pkg.id] = {
+                        ok: tdcOk && components.every(c => c.ok),
+                        components
+                    };
+                } else if (cat === 'Bundle') {
+                    const bundleTdc = pkg?._tdcCourse;
+                    const bundlePdcs = pkg?._pdcCourses || (pkg?._pdcCourse ? [pkg._pdcCourse] : []);
+                    const tdcOk = !bundleTdc || (String(bundleTdc.course_type || '').toLowerCase().includes('online') || hasTdcSlot());
+                    
+                    const components = [];
+                    if (bundleTdc) {
+                        components.push({ ok: tdcOk, label: bundleTdc.shortName || 'TDC' });
+                    }
+                    bundlePdcs.forEach(p => {
+                        components.push({ ok: hasPdcSlot(p.course_type || '', p.name || ''), label: p.shortName || p.name });
+                    });
+
+                    avail[pkg.id] = {
+                        ok: tdcOk && components.every(c => c.ok),
+                        components
+                    };
                 } else {
-                    avail[pkg.id] = true;
+                    avail[pkg.id] = { ok: true };
                 }
             });
             setCourseAvailability(avail);
@@ -1512,13 +1568,30 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
     const handleCourseToggle = (pkg) => {
         setFormData(prev => {
-            const exists = prev.selectedCourses.find(c => c.id === pkg.id);
+            const sel = prev.selectedCourses || [];
+            const exists = sel.find(c => c.id === pkg.id);
             let updated;
 
             if (exists) {
-                updated = [];
+                updated = sel.filter(c => c.id !== pkg.id);
             } else {
-                updated = [pkg];
+                if (pkg.category === 'Promo') {
+                    // Selecting a promo clears everything else
+                    updated = [pkg];
+                } else {
+                    // Selecting regular items
+                    // 1. Remove any existing Promo selections
+                    const withoutPromo = sel.filter(c => c.category !== 'Promo');
+                    
+                    if (pkg.category === 'TDC') {
+                        // Max 1 TDC - replace previous TDC if exists
+                        const withoutTdc = withoutPromo.filter(c => c.category !== 'TDC');
+                        updated = [...withoutTdc, pkg];
+                    } else {
+                        // Add PDC (allowing multiple)
+                        updated = [...withoutPromo, pkg];
+                    }
+                }
             }
 
             return {
@@ -1535,11 +1608,43 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         const sel = formData.selectedCourses;
         if (!sel || sel.length === 0) return;
 
-        let course = sel[0];
-        if (course?.category === 'Promo') {
-            course = enrichSinglePromoCourse(course);
+        let course;
+        if (sel.length === 1 && sel[0].category === 'Promo') {
+            course = enrichSinglePromoCourse(sel[0]);
+        } else if (sel.length > 1) {
+            // Manual bundle selection
+            const tdc = sel.find(c => c.category === 'TDC');
+            const pdcs = sel.filter(c => c.category === 'PDC');
+            
+            // Create a virtual "Bundle" course to trigger the multi-track scheduling UI without mixing with Promo logic
+            course = {
+                id: 'manual-bundle-' + Date.now(),
+                name: 'Manual Bundle: ' + sel.map(c => c.shortName || c.name).join(' + '),
+                category: 'Bundle',
+                _isManualBundle: true,
+                _tdcCourse: tdc || null,
+                _pdcCourses: pdcs,
+                _pdcCourse: pdcs[0] || null,
+                // Construct a course_type for summary display
+                course_type: (tdc ? 'TDC + ' : '') + pdcs.map(p => p.shortName || p.name).join(' | '),
+                price: sel.reduce((sum, c) => sum + (c.price || 0), 0),
+                original_price: sel.reduce((sum, c) => sum + (c.original_price || 0), 0),
+                duration: sel.reduce((sum, c) => {
+                    const hrs = parseInt(c.duration) || 0;
+                    return sum + hrs;
+                }, 0) + ' Hours',
+                typeOptions: tdc ? tdc.typeOptions : (pdcs[0]?.typeOptions || [])
+            };
+        } else {
+            // Single regular course
+            course = sel[0];
         }
+
         let courseType = '';
+        // If it's a single TDC/PDC with options, we might need a default courseType
+        if (course.category !== 'Promo' && course.typeOptions?.length > 0) {
+            courseType = course.typeOptions[0].value;
+        }
 
         setFormData(prev => ({
             ...prev, course, courseType,
@@ -1584,25 +1689,78 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
             const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
             const selectedTypeOpt = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType);
-            const selectedPrice = selectedTypeOpt?.price || dynamicCourse?.price || 0;
-            const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
-            const subtotal = selectedPrice + addonsTotal;
             
-            const discountPct = selectedTypeOpt?.discount || dynamicCourse?.discount || 0;
-            const promoDiscount = discountPct > 0 ? Number((subtotal * (discountPct / 100)).toFixed(2)) : 0;
-            const totalAmountDue = Math.max(0, Number((subtotal - promoDiscount).toFixed(2)));
-
-            const enteredAmount = Number(formData.amountPaid || 0);
-            const changeAmount = Math.max(0, enteredAmount - totalAmountDue);
-            const actualAmountToRecord = Math.max(0, enteredAmount - changeAmount);
+            const isRegularPromoBundle = isPromo && !!formData.course?._isManualBundle;
+            const regularBundleCourses = isRegularPromoBundle
+                ? [
+                    ...(formData.course?._tdcCourse ? [formData.course._tdcCourse] : []),
+                    ...((formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
+                        ? formData.course._pdcCourses
+                        : (formData.course?._pdcCourse ? [formData.course._pdcCourse] : []))
+                ]
+                : [];
+            const selectedPrice = isRegularPromoBundle
+                ? regularBundleCourses.reduce((sum, c) => {
+                    if (c.category === 'TDC' && selectedTypeOpt) {
+                        return sum + selectedTypeOpt.price;
+                    }
+                    return sum + Number(c.price || 0);
+                }, 0)
+                : (selectedTypeOpt?.price || dynamicCourse?.price || 0);
+            
             const isOnlineTdcNoSchedule =
-                ['TDC', 'PROMO'].includes(String(formData.course?.category || '').toUpperCase()) &&
+                ['TDC', 'PROMO', 'BUNDLE'].includes(String(formData.course?.category || '').toUpperCase()) &&
                 (String(formData.courseType || '').toLowerCase().includes('online') ||
                     String(formData.courseType || '').toLowerCase().includes('otdc') ||
                     String(formData.promoTdcType || '').toLowerCase().includes('online') ||
                     String(formData.promoTdcType || '').toLowerCase().includes('otdc') ||
                     String(formData.course?.name || '').toLowerCase().includes('otdc') ||
                     String(formData.course?.shortName || '').toLowerCase().includes('otdc'));
+            
+            const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
+            const subtotal = selectedPrice + addonsTotal;
+            
+            // Calculate Saturday Surcharge (₱150 per Saturday for PDC)
+            const calculateSaturdaySurcharge = () => {
+                if (isOnlineTdcNoSchedule) return 0;
+                let surcharge = 0;
+                
+                // Regular PDC
+                if (formData.course?.category === 'PDC') {
+                    if (formData.scheduleDate) {
+                        const d1 = new Date(formData.scheduleDate);
+                        if (d1.getDay() === 6) surcharge += 150;
+                    }
+                    if (formData.scheduleDate2) {
+                        const d2 = new Date(formData.scheduleDate2);
+                        if (d2.getDay() === 6) surcharge += 150;
+                    }
+                }
+
+                // Promo PDC Selections
+                if (isPromo) {
+                    Object.values(promoPdcSelections).forEach(sel => {
+                        if (sel.scheduleDate) {
+                            const d1 = new Date(sel.scheduleDate);
+                            if (d1.getDay() === 6) surcharge += 150;
+                        }
+                        if (sel.promoPdcDate2) {
+                            const d2 = new Date(sel.promoPdcDate2);
+                            if (d2.getDay() === 6) surcharge += 150;
+                        }
+                    });
+                }
+                return surcharge;
+            };
+
+            const saturdaySurcharge = calculateSaturdaySurcharge();
+            const discountPct = formData.course?._isManualBundle ? 3 : (selectedTypeOpt?.discount || dynamicCourse?.discount || 0);
+            const promoDiscount = discountPct > 0 ? Number((subtotal * (discountPct / 100)).toFixed(2)) : 0;
+            const totalAmountDue = Math.max(0, Number((subtotal + saturdaySurcharge - promoDiscount).toFixed(2)));
+
+            const enteredAmount = Number(formData.amountPaid || 0);
+            const changeAmount = Math.max(0, enteredAmount - totalAmountDue);
+            const actualAmountToRecord = Math.max(0, enteredAmount - changeAmount);
             const isPromoPdcLocked = isPromoOnlineTdcLockedBundle;
             const submitPdcCourses = formData.course?._isManualBundle
                 ? (formData.course?._pdcCourses || [])
@@ -1638,7 +1796,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     ].filter(Boolean)
                     : [formData.course?.id].filter(Boolean),
                 courseCategory: formData.course?.category,
-                courseType: formData.courseType,
+                courseType: isOnlineTdcNoSchedule ? 'Online' : formData.courseType,
                 branchId: formData.branchId,
                 courseList: (() => {
                     const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
@@ -1651,15 +1809,24 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         type: formData.courseType,
                         price: selectedPrice
                     });
-                    // Add secondary courses if bundle
+                    // Add all component courses for manual bundles
                     if (formData.course?._isManualBundle) {
+                        if (formData.course._tdcCourse) {
+                            items.push({
+                                id: formData.course._tdcCourse.id,
+                                name: formData.course._tdcCourse.name,
+                                category: formData.course._tdcCourse.category,
+                                type: isOnlineTdcNoSchedule ? 'Online' : 'Standard',
+                                price: 0
+                            });
+                        }
                         (formData.course._pdcCourses || []).forEach(c => {
                             items.push({
                                 id: c.id,
                                 name: c.name,
                                 category: c.category,
-                                type: c.course_type || '',
-                                price: 0 // Components are usually included in the main price
+                                type: c.course_type || 'Standard',
+                                price: 0 
                             });
                         });
                     } else if (hasPromoPdcCourses) {
@@ -1675,6 +1842,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     }
                     return items;
                 })(),
+                isOnlineTdcNoSchedule,
                 ...((formData.course?._isManualBundle || hasPromoPdcCourses) ? {
                     pdcCourseId: formData.course._pdcCourse?.id || submitPdcCourses?.[0]?.id,
                     pdcCourseIds: submitPdcCourses.map(c => c.id).filter(Boolean),
@@ -1744,6 +1912,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 promoDiscount,
                 promoPct: discountPct,
                 totalAmount: totalAmountDue,
+                saturdaySurcharge,
                 convenienceFee: 0,
 
                 // Metadata
@@ -2240,7 +2409,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         <div className="step-content animate-fadeIn">
             <div className="section-header center mb-8">
                 <h2>Select Course</h2>
-                <p>Choose one or promo bundle courses</p>
+                <p>Choose one or multiple courses</p>
             </div>
 
             {loading ? (
@@ -2257,7 +2426,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 const selectedTDC = selectedCourses.find(c => c.category === 'TDC');
                 const selectedPDCs = selectedCourses.filter(c => c.category === 'PDC');
                 const selectedPromoCourse = selectedCourses.find(c => c.category === 'Promo');
-                const isPromoBundle = !!(selectedTDC && selectedPDCs.length > 0);
+                const isPromoBundle = !!(selectedTDC && selectedPDCs.length > 0) || selectedPDCs.length > 1;
                 const isPromoCourseMode = !!selectedPromoCourse;
                 const bundleRaw = selectedCourses.reduce((s, c) => s + (c.price || 0), 0);
                 const bundleDiscount = 0;
@@ -2273,33 +2442,81 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     const minPrice = Math.min(...pkg.typeOptions.map(opt => opt.price));
                     const maxPrice = Math.max(...pkg.typeOptions.map(opt => opt.price));
                     const priceDisplay = minPrice === maxPrice ? `₱${minPrice.toLocaleString()}` : `₱${minPrice.toLocaleString()} - ₱${maxPrice.toLocaleString()}`;
-                    const isAvailable = courseAvailability[pkg.id] !== false;
+                    const availInfo = courseAvailability[pkg.id];
+                    const isAvailable = availInfo === undefined ? true : (typeof availInfo === 'boolean' ? availInfo : availInfo.ok);
                     const availChecked = pkg.id in courseAvailability;
                     const isSelected = formData.selectedCourses?.some(c => c.id === pkg.id);
                     const blockedByPromoMode = !!selectedPromoCourse && !isSelected && pkg.category !== 'Promo';
                     const blockedByRegularMode = hasRegularSelection && !isSelected && pkg.category === 'Promo';
                     const blockedByMode = blockedByPromoMode || blockedByRegularMode;
                     const hasNoSlots = availChecked && !isAvailable;
-                    const isTdcSelection = pkg.category === 'TDC' || (pkg.category === 'Promo' && (pkg.name.toLowerCase().includes('otdc') || pkg.name.toLowerCase().includes('online')));
                     const wouldReplace = pkg.category === 'TDC' && selectedTDC && selectedTDC.id !== pkg.id;
 
-                    // TDC is always selectable because online slots are always available
-                    const canSelect = availChecked && (isAvailable || isTdcSelection) && !blockedByMode;
+                    // Slot availability check is final — bundles must satisfy all component requirements (TDC and PDC)
+                    const canSelect = availChecked && isAvailable && !blockedByMode;
 
                     return (
                         <div key={pkg.id} className={`course-row ${isSelected ? 'selected' : ''}`}
                             onClick={() => canSelect && handleCourseToggle(pkg)}
-                            style={hasNoSlots && !isTdcSelection ? { opacity: 0.8, cursor: 'not-allowed' } : undefined}>
+                            style={hasNoSlots ? { opacity: 0.8, cursor: 'not-allowed' } : undefined}>
 
-                            <div className="course-thumbnail">
-                                <img src={pkg.image} alt={pkg.name} onError={(e) => e.target.style.display = 'none'} />
+                            <div className="course-thumbnail" style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'center', 
+                                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                position: 'relative',
+                                color: 'white',
+                                flexShrink: 0
+                            }}>
+                                <img 
+                                    src={pkg.image} 
+                                    alt={pkg.name} 
+                                    onError={(e) => {
+                                        e.target.style.display = 'none';
+                                        if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex';
+                                    }} 
+                                />
+                                <span style={{ 
+                                    display: pkg.image ? 'none' : 'flex', 
+                                    fontSize: '1.5rem', 
+                                    fontWeight: '900',
+                                    zIndex: 1 
+                                }}>
+                                    {(pkg.shortName || pkg.name || '?').charAt(0).toUpperCase()}
+                                </span>
                             </div>
 
                             <div className="course-main-content">
-                                <div className="course-category-row">
-                                    <span className="course-category-tag">{pkg.category}</span>
-                                    {hasNoSlots && <span className="no-slots-chip">No Slots</span>}
-                                </div>
+                                    <div className="course-category-row" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                                        <span className="course-category-tag" style={{ marginTop: '2px' }}>{pkg.category}</span>
+                                        {hasNoSlots && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                                <span className="no-slots-chip" style={{ background: '#ef4444', color: '#fff', boxShadow: '0 2px 4px rgba(239, 68, 68, 0.2)', padding: '2px 8px' }}>No Slots</span>
+                                                {availInfo?.components?.some(c => !c.ok) && (
+                                                    <div style={{ 
+                                                        display: 'flex', 
+                                                        alignItems: 'center', 
+                                                        gap: '4px', 
+                                                        background: '#fff1f2', 
+                                                        border: '1px solid #fecaca', 
+                                                        borderRadius: '6px', 
+                                                        padding: '2px 8px',
+                                                        boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+                                                    }}>
+                                                        <span style={{ fontSize: '9px', fontWeight: 800, color: '#b91c1c', borderRight: '1px solid #fecaca', paddingRight: '6px', marginRight: '2px', textTransform: 'uppercase', lineHeight: 1 }}>Full:</span>
+                                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                            {availInfo.components.filter(c => !c.ok).map((c, i) => (
+                                                                <span key={i} style={{ fontSize: '10px', color: '#dc2626', fontWeight: 700, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                                                    <span style={{ color: '#ef4444', fontWeight: 900 }}>✗</span> {c.label}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
                                 <h3 className="course-row-title">{pkg.name}</h3>
                                 <div className="course-sub-meta">
                                     <span>⏱ {pkg.duration}</span>
@@ -2321,16 +2538,16 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 <button
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); canSelect && handleCourseToggle(pkg); }}
-                                    className={`row-action-btn ${isSelected ? 'selected' : ''} ${hasNoSlots && !isTdcSelection ? 'no-slots-btn' : ''}`}
-                                    disabled={!canSelect || (hasNoSlots && !isTdcSelection)}
+                                    className={`row-action-btn ${isSelected ? 'selected' : ''} ${hasNoSlots ? 'no-slots-btn' : ''}`}
+                                    disabled={!canSelect || hasNoSlots}
                                 >
-                                    {hasNoSlots && !isTdcSelection ? 'No Slots'
+                                    {hasNoSlots ? 'No Slots'
                                         : !availChecked ? 'Checking...'
                                             : isSelected ? '✓ Selected'
                                                 : blockedByPromoMode ? 'Locked'
                                                     : blockedByRegularMode ? 'Locked'
                                                         : wouldReplace ? 'Replace'
-                                                            : 'Select Course'}
+                                                            : isSelected ? '✓ Selected' : 'Select Course'}
                                 </button>
                             </div>
                         </div>
@@ -2398,8 +2615,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
                     {selectedPDCs.length > 1 && (
                         <div className="single-course-hint" style={{ borderColor: '#bfdbfe', background: '#eff6ff' }}>
-                            <span>✓ <strong>{selectedPDCs.length} PDC courses</strong> selected</span>
-                            <span className="hint-tip">Bundle scheduling will use the selected PDC track in Step 3.</span>
+                            <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 bg-blue-500 text-white rounded-full flex items-center justify-center text-[10px] font-black">!</div>
+                                <span><strong>{selectedPDCs.length} PDC courses</strong> selected</span>
+                            </div>
+                            <span className="hint-tip">A manual bundle will be created. You will schedule each PDC track in Step 3.</span>
                         </div>
                     )}
 
@@ -2512,9 +2732,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         // =====================================================================
         if (isPromo) {
             const isManualPromoBundle = !!formData.course?._isManualBundle;
-            const promoFlowTitle = isManualPromoBundle ? 'Regular Bundle — 2-Step Schedule' : 'Promo Course Bundle — 2-Step Schedule';
+            const hasTdcCourse = !!formData.course?._tdcCourse;
+            const promoFlowTitle = isManualPromoBundle 
+                ? (hasTdcCourse ? 'Regular Bundle — 2-Step Schedule' : 'Manual Multi-Course Schedule') 
+                : 'Promo Course Bundle — 2-Step Schedule';
             const promoFlowDesc = isManualPromoBundle
-                ? 'Step 1: Select TDC schedule · Step 2: Select selected PDC track schedules'
+                ? (hasTdcCourse 
+                    ? 'Step 1: Select TDC schedule · Step 2: Select selected PDC track schedules'
+                    : 'Select schedules for each of your selected PDC tracks.')
                 : 'Step 1: Select TDC schedule · Step 2: Select promo PDC schedules';
             const pdcDoneCount = promoPdcCourses.filter(c => getIsPromoPdcComplete(c._pdcKey)).length;
             const allPromoPdcDone = isPromoOnlineTdcLockedBundle ? true : (promoPdcCourses.length > 0
@@ -2547,9 +2772,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 if (!activePromoPdcType) return true;
                 const slotTx = (slot.transmission || '').toLowerCase().trim();
                 const slotCT = (slot.course_type || '').toLowerCase().trim();
+                const slotName = (slot.name || '').toLowerCase().trim();
 
-                const isManual = slotTx.includes('manual') || slotTx === 'mt';
-                const isAuto = slotTx.includes('automatic') || slotTx === 'at';
+                const isManual = slotTx.includes('manual') || slotTx === 'mt' || slotCT.includes('manual') || slotCT.includes('(mt)') || slotCT.endsWith(' mt') || slotName.includes('manual') || slotName.includes('(mt)');
+                const isAuto = slotTx.includes('automatic') || slotTx === 'at' || slotCT.includes('automatic') || slotCT.includes('(at)') || slotCT.endsWith(' at') || slotName.includes('automatic') || slotName.includes('(at)');
+
                 // Promo transmission selection should be strict: AT shows AT only, MT shows MT only.
                 const matchesStrictPromoTx = () => {
                     if (effectivePromoPdcTransmission === 'AT') return isAuto;
@@ -2659,7 +2886,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 promoPdcDay1Session.toLowerCase().includes('afternoon') ||
                 promoPdcDay1Session.toLowerCase().includes('4 hours')
             );
-            const promoCanProceed = (!!formData.scheduleSlotId || isOnlineTdcNoSchedule) && allPromoPdcDone;
+            const promoCanProceed = ((!hasTdcCourse || !!formData.scheduleSlotId || isOnlineTdcNoSchedule)) && allPromoPdcDone;
 
             const handlePromoTdcSelect = (slot) => {
                 setFormData(prev => ({ ...prev, scheduleSlotId: slot.id, scheduleDate: slot.date, scheduleSession: slot.session, scheduleTime: slot.time_range }));
@@ -2899,7 +3126,10 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         </div>
                         <div className="schedule-banner__actions">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                {[{ label: 'TDC', done: !!formData.scheduleSlotId || isOnlineTdcNoSchedule, active: (promoStep === 1 && !isPromoOnlineTdcLockedBundle) }, { label: 'PDC', done: allPromoPdcDone, active: promoStep === 2 }].map((item, idx) => (
+                                {([
+                                    hasTdcCourse ? { label: 'TDC', done: !!formData.scheduleSlotId || isOnlineTdcNoSchedule, active: (promoStep === 1 && !isPromoOnlineTdcLockedBundle) } : null,
+                                    { label: 'PDC', done: allPromoPdcDone, active: promoStep === 2 }
+                                ].filter(Boolean)).map((item, idx) => (
                                     <React.Fragment key={item.label}>
                                         {idx > 0 && <div style={{ width: '16px', height: '2px', background: '#d97706' }} />}
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -3838,7 +4068,6 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     const renderStep4 = () => {
         const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
         const selectedTypeOpt = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType);
-        const selectedPrice = selectedTypeOpt?.price || dynamicCourse?.price || 0;
         const isRegularPromoBundle = isPromo && !!formData.course?._isManualBundle;
         const regularBundleCourses = isRegularPromoBundle
             ? [
@@ -3848,6 +4077,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     : (formData.course?._pdcCourse ? [formData.course._pdcCourse] : []))
             ]
             : [];
+        const selectedPrice = isRegularPromoBundle
+            ? regularBundleCourses.reduce((sum, c) => {
+                if (c.category === 'TDC' && selectedTypeOpt) {
+                    return sum + selectedTypeOpt.price;
+                }
+                return sum + Number(c.price || 0);
+            }, 0)
+            : (selectedTypeOpt?.price || dynamicCourse?.price || 0);
         const regularBundleOriginalTotal = regularBundleCourses.reduce((sum, c) => {
             const itemPrice = Number(c?.price || 0);
             const itemOriginal = Number(c?.original_price ?? c?.originalPrice ?? itemPrice);
@@ -3859,10 +4096,44 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
         const subtotal = selectedPrice + addonsTotal;
         
-        // Calculate dynamic discount
-        const discountPct = selectedTypeOpt?.discount || dynamicCourse?.discount || 0;
+        // Calculate Saturday Surcharge (₱150 per Saturday for PDC)
+        const calculateSaturdaySurcharge = () => {
+            if (isOnlineTdcNoSchedule) return 0;
+            let surcharge = 0;
+            
+            // Regular PDC
+            if (formData.course?.category === 'PDC') {
+                if (formData.scheduleDate) {
+                    const d1 = new Date(formData.scheduleDate);
+                    if (d1.getDay() === 6) surcharge += 150;
+                }
+                if (formData.scheduleDate2) {
+                    const d2 = new Date(formData.scheduleDate2);
+                    if (d2.getDay() === 6) surcharge += 150;
+                }
+            }
+
+            // Promo PDC Selections
+            if (isPromo) {
+                Object.values(promoPdcSelections).forEach(sel => {
+                    if (sel.scheduleDate) {
+                        const d1 = new Date(sel.scheduleDate);
+                        if (d1.getDay() === 6) surcharge += 150;
+                    }
+                    if (sel.promoPdcDate2) {
+                        const d2 = new Date(sel.promoPdcDate2);
+                        if (d2.getDay() === 6) surcharge += 150;
+                    }
+                });
+            }
+            return surcharge;
+        };
+
+        const saturdaySurcharge = calculateSaturdaySurcharge();
+        const discountPct = formData.course?._isManualBundle ? 3 : (selectedTypeOpt?.discount || dynamicCourse?.discount || 0);
+        const discountLabel = formData.course?._isManualBundle ? 'Multi-Course Discount (3%)' : `Discount (${discountPct}%)`;
         const promoDiscount = discountPct > 0 ? Number((subtotal * (discountPct / 100)).toFixed(2)) : 0;
-        const totalAmount = Math.max(0, Number((subtotal - promoDiscount).toFixed(2)));
+        const totalAmount = Math.max(0, Number((subtotal + saturdaySurcharge - promoDiscount).toFixed(2)));
 
         const promoPdcSummaryCourses = isPromo
             ? ((formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
@@ -4080,9 +4351,15 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             <span style={{ color: '#64748b' }}>Subtotal</span>
                             <span style={{ color: '#64748b' }}>₱{subtotal.toLocaleString()}</span>
                         </div>
+                        {saturdaySurcharge > 0 && (
+                            <div className="breakdown-row" style={{ color: '#64748b', fontWeight: '500' }}>
+                                <span>Saturday Surcharge</span>
+                                <span>+₱{saturdaySurcharge.toLocaleString()}</span>
+                            </div>
+                        )}
                         {discountPct > 0 && (
                             <div className="breakdown-row" style={{ color: '#ef4444', fontWeight: 'bold' }}>
-                                <span>Discount ({discountPct}%)</span>
+                                <span>{discountLabel}</span>
                                 <span>-₱{promoDiscount.toLocaleString()}</span>
                             </div>
                         )}
@@ -4229,7 +4506,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         // Determine schedule label prefixes
         const isTdcCourse = formData.course?.category === 'TDC';
         const isOnlineTdcNoSchedule =
-            ['TDC', 'PROMO'].includes(String(formData.course?.category || '').toUpperCase()) &&
+            ['TDC', 'PROMO', 'BUNDLE'].includes(String(formData.course?.category || '').toUpperCase()) &&
             (String(formData.courseType || '').toLowerCase().includes('online') ||
                 String(formData.courseType || '').toLowerCase().includes('otdc') ||
                 String(formData.promoTdcType || '').toLowerCase().includes('online') ||
@@ -4241,13 +4518,64 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         // Recalculate balance for downpayment
         const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
         const selectedTypeOpt = dynamicCourse?.typeOptions?.find(opt => opt.value === formData.courseType);
-        const selectedPrice = selectedTypeOpt?.price || dynamicCourse?.price || 0;
-        const isRegularPromoBundle = String(formData.course?.category || '').toLowerCase() === 'promo' && !!formData.course?._isManualBundle;
+        const isRegularPromoBundle = isPromo && !!formData.course?._isManualBundle;
+        const regularBundleCourses = isRegularPromoBundle
+            ? [
+                ...(formData.course?._tdcCourse ? [formData.course._tdcCourse] : []),
+                ...((formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
+                    ? formData.course._pdcCourses
+                    : (formData.course?._pdcCourse ? [formData.course._pdcCourse] : []))
+            ]
+            : [];
+        const selectedPrice = isRegularPromoBundle
+            ? regularBundleCourses.reduce((sum, c) => {
+                if (c.category === 'TDC' && selectedTypeOpt) {
+                    return sum + selectedTypeOpt.price;
+                }
+                return sum + Number(c.price || 0);
+            }, 0)
+            : (selectedTypeOpt?.price || dynamicCourse?.price || 0);
         const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
         const subtotal = selectedPrice + addonsTotal;
-        const discountPct = selectedTypeOpt?.discount || dynamicCourse?.discount || 0;
+        
+        // Calculate Saturday Surcharge (₱150 per Saturday for PDC)
+        const calculateSaturdaySurcharge = () => {
+            if (isOnlineTdcNoSchedule) return 0;
+            let surcharge = 0;
+            
+            // Regular PDC
+            if (formData.course?.category === 'PDC') {
+                if (formData.scheduleDate) {
+                    const d1 = new Date(formData.scheduleDate);
+                    if (d1.getDay() === 6) surcharge += 150;
+                }
+                if (formData.scheduleDate2) {
+                    const d2 = new Date(formData.scheduleDate2);
+                    if (d2.getDay() === 6) surcharge += 150;
+                }
+            }
+
+            // Promo PDC Selections
+            if (isPromo) {
+                Object.values(promoPdcSelections).forEach(sel => {
+                    if (sel.scheduleDate) {
+                        const d1 = new Date(sel.scheduleDate);
+                        if (d1.getDay() === 6) surcharge += 150;
+                    }
+                    if (sel.promoPdcDate2) {
+                        const d2 = new Date(sel.promoPdcDate2);
+                        if (d2.getDay() === 6) surcharge += 150;
+                    }
+                });
+            }
+            return surcharge;
+        };
+
+        const saturdaySurcharge = calculateSaturdaySurcharge();
+        const discountPct = formData.course?._isManualBundle ? 3 : (selectedTypeOpt?.discount || dynamicCourse?.discount || 0);
+        const discountLabel = formData.course?._isManualBundle ? 'Multi-Course Discount (3%)' : `Discount (${discountPct}%)`;
         const promoDiscount = discountPct > 0 ? Number((subtotal * (discountPct / 100)).toFixed(2)) : 0;
-        const totalAmount = Math.max(0, Number((subtotal - promoDiscount).toFixed(2)));
+        const totalAmount = Math.max(0, Number((subtotal + saturdaySurcharge - promoDiscount).toFixed(2)));
         const balanceDue = Math.max(0, Number((totalAmount - (Number(formData.amountPaid) || 0)).toFixed(2)));
 
         const promoPdcSummaryCount = (formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
@@ -4407,8 +4735,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             <p><strong>Method:</strong> {formData.paymentMethod}</p>
                             <p><strong>Payment Status:</strong> {formData.paymentStatus}</p>
                             <p><strong>Subtotal:</strong> ₱{subtotal.toLocaleString()}</p>
+                            {saturdaySurcharge > 0 && (
+                                <p><strong>Saturday Surcharge:</strong> +₱{saturdaySurcharge.toLocaleString()}</p>
+                            )}
                             {discountPct > 0 && (
-                                <p style={{ color: '#ef4444' }}><strong>Discount ({discountPct}%):</strong> -₱{promoDiscount.toLocaleString()}</p>
+                                <p style={{ color: '#ef4444' }}><strong>{discountLabel}:</strong> -₱{promoDiscount.toLocaleString()}</p>
                             )}
                             <p><strong>Total Amount Due:</strong> ₱{totalAmount.toLocaleString()}</p>
                             <p><strong>Amount Paid Today:</strong> ₱{Number(formData.amountPaid).toLocaleString()}</p>

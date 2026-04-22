@@ -131,6 +131,120 @@
     color: var(--text-color);
 }
 
+/* ======== Branch Filter Bar ======== */
+.branch-filter-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    background: var(--card-bg);
+    border: 1.5px solid var(--border-color);
+    border-radius: 20px;
+    padding: 16px 24px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+    flex-wrap: wrap;
+    transition: box-shadow 0.2s;
+    position: relative;
+    overflow: hidden;
+}
+
+.branch-filter-bar::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: linear-gradient(180deg, #2157da, #6d3aff);
+    border-radius: 4px 0 0 4px;
+}
+
+.branch-filter-bar:hover {
+    box-shadow: 0 8px 28px rgba(33, 87, 218, 0.09);
+}
+
+.branch-filter-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+}
+
+.branch-filter-icon {
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg, #2157da, #4f46e5);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(33, 87, 218, 0.28);
+}
+
+.branch-filter-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.branch-filter-label {
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: var(--primary-color);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    white-space: nowrap;
+}
+
+.branch-filter-value {
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--text-color);
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.branch-filter-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.branch-filter-count {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    background: linear-gradient(135deg, rgba(67, 24, 255, 0.08), rgba(139, 92, 246, 0.08));
+    border: 1px solid rgba(67, 24, 255, 0.15);
+    padding: 5px 14px;
+    border-radius: 20px;
+    white-space: nowrap;
+}
+
+.branch-filter-select {
+    padding: 10px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--card-bg);
+    color: var(--text-color);
+    font-weight: 600;
+    font-size: 0.88rem;
+    outline: none;
+    cursor: pointer;
+    min-width: 280px;
+    transition: all 0.2s;
+}
+
+.branch-filter-select:focus {
+    border-color: #2157da;
+    box-shadow: 0 0 0 4px rgba(33, 87, 218, 0.08);
+}
+
 /* ======== Stats Cards ======== */
 .booking-stats {
     display: grid;
@@ -455,19 +569,6 @@
     border-radius: 12px;
 }
 
-.booking-table-wrapper::-webkit-scrollbar {
-    height: 6px;
-}
-
-.booking-table-wrapper::-webkit-scrollbar-track {
-    background: var(--bg-color);
-    border-radius: 3px;
-}
-
-.booking-table-wrapper::-webkit-scrollbar-thumb {
-    background: var(--border-color);
-    border-radius: 3px;
-}
 
 .booking-table {
     width: 100%;
@@ -1935,10 +2036,6 @@
     flex-shrink: 0;
 }
 /* ── Custom Scrollbar for Modal Body ── */
-.bkv2-body::-webkit-scrollbar { width: 4px; }
-.bkv2-body::-webkit-scrollbar-track { background: transparent; }
-.bkv2-body::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-.bkv2-body::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 .bk-mark-paid-modal {
     width: 95%;

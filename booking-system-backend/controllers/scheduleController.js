@@ -1273,7 +1273,23 @@ const payRemainingBalance = async (req, res) => {
     const notesPromo = Math.max(0, toAmount(notesJson?.promoDiscount || 0));
     const notesConvenience = Math.max(0, toAmount(notesJson?.convenienceFee || 0));
     const notesSubtotal = Math.max(0, toAmount(notesJson?.subtotal || 0));
-    const notesDerivedAssessment = Math.max(0, Number(((notesSubtotal > 0 ? notesSubtotal : (notesCourseTotal + notesAddonTotal)) + notesConvenience - notesPromo).toFixed(2)));
+
+    // Dynamic 3% Multi-course discount fallback
+    const noteCourseList = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
+    const hasPromoInList = noteCourseList.some(c => {
+        const n = String(c?.name || '').toLowerCase();
+        const cat = String(c?.category || '').toLowerCase();
+        return n.includes('promo') || n.includes('bundle') || cat === 'promo' || (n.includes('tdc') && n.includes('pdc'));
+    });
+    const isMultiCourseQualifying = noteCourseList.length > 1 && !hasPromoInList;
+    
+    let effectivePromo = notesPromo;
+    if (effectivePromo === 0 && isMultiCourseQualifying) {
+        const subtotalForDynamic = (notesSubtotal > 0 ? notesSubtotal : (notesCourseTotal + notesAddonTotal));
+        effectivePromo = Number((subtotalForDynamic * 0.03).toFixed(2));
+    }
+
+    const notesDerivedAssessment = Math.max(0, Number(((notesSubtotal > 0 ? notesSubtotal : (notesCourseTotal + notesAddonTotal)) + notesConvenience - effectivePromo).toFixed(2)));
     const explicitNotesAssessment = [
       notesJson?.totalAmount,
       notesJson?.grandTotal,
@@ -1344,8 +1360,8 @@ const payRemainingBalance = async (req, res) => {
         courseName: booking.course_name || 'N/A',
         amountPaid: nextStatus === 'paid' ? collectedNow : amountPaid,
         coursePrice: assessedTotal,
-        promoDiscount: toAmount(notesJson?.promoDiscount || 0),
-        promoPct: toAmount(notesJson?.promoPct || 0),
+        promoDiscount: effectivePromo,
+        promoPct: effectivePromo > 0 && notesPromo === 0 ? 3 : toAmount(notesJson?.promoPct || 0),
         paymentMethod: payment_method || 'Online',
         paymentDate: new Date(),
         isFullPayment: nextStatus === 'paid',

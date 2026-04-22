@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, optionalAuthenticateToken } = require('../middleware/auth');
 const {
   getSlotsByDate,
   createSlot,
@@ -30,7 +30,7 @@ router.patch('/pay-balance/:bookingId', authenticateToken, payRemainingBalance);
 router.get('/unassigned-pdc', authenticateToken, getUnassignedPdcStudents);
 
 // Get slots by date
-router.get('/slots', getSlotsByDate);
+router.get('/slots', optionalAuthenticateToken, getSlotsByDate);
 
 // Create new slot
 router.post('/slots', authenticateToken, createSlot);

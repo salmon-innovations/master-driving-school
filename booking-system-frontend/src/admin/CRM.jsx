@@ -263,7 +263,7 @@ const CRMManagement = () => {
                     </div>
                 </div>
 
-                <div className="txn-table-wrapper">
+                <div className="admin-table-responsive txn-table-wrapper">
                     <table className="txn-table">
                         <thead>
                             <tr>
