@@ -170,17 +170,24 @@ const getDefaultAdminTab = (allowedTabs) => {
 };
 
 const getEffectiveBalanceDue = (booking = {}) => {
-    const rawDue = Number(parseFloat(booking?.balance_due || 0).toFixed(2));
-    if (rawDue > 0) return rawDue;
+    // Priority 1: Backend-calculated balance_due (from getUnpaidBookings)
+    if (booking.balance_due !== undefined && booking.balance_due !== null) {
+        return Math.max(0, Number(parseFloat(booking.balance_due).toFixed(2)));
+    }
+    if (booking.balanceDue !== undefined && booking.balanceDue !== null) {
+        return Math.max(0, Number(parseFloat(booking.balanceDue).toFixed(2)));
+    }
 
+    // Inferred from payment fields (Fallback for legacy or cached data)
     const paid = Number(parseFloat(booking?.total_amount || 0).toFixed(2));
     const listedCoursePrice = Number(parseFloat(booking?.course_price || 0).toFixed(2));
-    const isDownpayment = String(booking?.payment_type || '').toLowerCase().includes('down');
-
-    const assessed = isDownpayment
-        ? Math.max(listedCoursePrice, paid * 2, paid)
-        : Math.max(listedCoursePrice, paid);
-
+    const paymentType = String(booking?.payment_type || '').toLowerCase();
+    
+    let assessed = listedCoursePrice;
+    if (paymentType.includes('down')) {
+        assessed = Math.max(listedCoursePrice, paid * 2);
+    }
+    
     return Math.max(0, Number((assessed - paid).toFixed(2)));
 };
 

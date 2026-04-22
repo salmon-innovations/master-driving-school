@@ -342,6 +342,10 @@ const resolveAssessmentFigures = (booking = {}) => {
     else if (paymentType.includes('down') && paid > 0) {
         assessed = paid * 2;
     }
+    // Trust stored balanceDue if it exists and we haven't found a better assessment
+    else if (booking.balanceDue !== undefined && booking.balanceDue !== null && Number(booking.balanceDue) >= 0) {
+        assessed = paid + Number(booking.balanceDue);
+    }
     // Absolute fallback.
     else {
         assessed = paid;
@@ -1977,7 +1981,7 @@ const Booking = () => {
                                                 <div className="bkv2-line-item discount">
                                                     <span className="text-gray-600">
                                                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="19" y1="5" x2="5" y2="19"/><circle cx="12" cy="12" r="10"/></svg>
-                                                        {(!isPromoBooking(selectedBooking, parseNotesJson(selectedBooking.rawNotes)) && (paymentBreakdown.promoPct === 3 || (selectedBooking.courseItems?.length > 1))) 
+                                                        {(!isPromoBooking(selectedBooking, parseNotesJson(selectedBooking.rawNotes)) && (paymentBreakdown.promoPct === 3 || (selectedBooking.courseItems?.length > 1)) && !String(selectedBooking.fullCourseName).toLowerCase().includes('bundle')) 
                                                             ? 'Multi-Course Discount (3%)' 
                                                             : `Discount (${paymentBreakdown.promoPct > 0 ? `${paymentBreakdown.promoPct}%` : '3%'})`}
                                                     </span>

@@ -1780,12 +1780,20 @@ const walkInEnrollment = async (req, res) => {
     let effectivePromoPct = toAmount(promoPct);
     const isManualBundle = !!req.body.isManualBundle;
 
+    const hasTdcInList = normalizedCourseListForPricing.some(c => String(c?.name || '').toLowerCase().includes('tdc'));
+    const hasPdcInList = normalizedCourseListForPricing.some(c => String(c?.name || '').toLowerCase().includes('pdc'));
+    const hasPromoInList = normalizedCourseListForPricing.some(c => {
+        const n = String(c?.name || '').toLowerCase();
+        const cat = String(c?.category || '').toLowerCase();
+        return n.includes('promo') || n.includes('bundle') || cat === 'promo';
+    }) || (hasTdcInList && hasPdcInList);
+
     if (normalizedPromoDiscount <= 0 && discountBasis > 0) {
       if (effectivePromoPct > 0) {
         // Percentage applies only to the subtotal (discountBasis), NOT the fee
         normalizedPromoDiscount = Number((discountBasis * (effectivePromoPct / 100)).toFixed(2));
-      } else if (isManualBundle) {
-        // Fallback ONLY for manual multi-course selections (manual bundles)
+      } else if (isManualBundle && !hasPromoInList) {
+        // Fallback ONLY for manual multi-course selections (manual bundles) that don't already have a promo item
         normalizedPromoDiscount = Number((discountBasis * 0.03).toFixed(2));
         effectivePromoPct = 3;
       }
@@ -2239,9 +2247,11 @@ const getUnpaidBookings = async (req, res) => {
       const inferredDownpaymentTotal = isDownpayment && amountPaid > 0 ? amountPaid * 2 : 0;
 
       const assessedTotal =
-        computedFromNotes > 0
-          ? computedFromNotes
-          : (inferredDownpaymentTotal > 0 ? inferredDownpaymentTotal : fallbackCoursePrice);
+        (Number(notesJson?.totalAmount) > 0)
+          ? Number(notesJson.totalAmount)
+          : (computedFromNotes > 0
+            ? computedFromNotes
+            : (inferredDownpaymentTotal > 0 ? inferredDownpaymentTotal : fallbackCoursePrice));
 
       const balanceDue = Math.max(0, Number((assessedTotal - amountPaid).toFixed(2)));
 
@@ -2479,11 +2489,14 @@ const markBookingAsPaid = async (req, res) => {
 
     // Dynamic 3% Multi-course discount fallback
     const noteCourseList = Array.isArray(notesJson?.courseList) ? notesJson.courseList : [];
+    const hasTdcInList = noteCourseList.some(c => String(c?.name || '').toLowerCase().includes('tdc'));
+    const hasPdcInList = noteCourseList.some(c => String(c?.name || '').toLowerCase().includes('pdc'));
     const hasPromoInList = noteCourseList.some(c => {
         const n = String(c?.name || '').toLowerCase();
         const cat = String(c?.category || '').toLowerCase();
-        return n.includes('promo') || n.includes('bundle') || cat === 'promo' || (n.includes('tdc') && n.includes('pdc'));
-    });
+        return n.includes('promo') || n.includes('bundle') || cat === 'promo';
+    }) || (hasTdcInList && hasPdcInList);
+    
     const isMultiCourseQualifying = noteCourseList.length > 1 && !hasPromoInList;
     
     let effectivePromo = notesPromo;
