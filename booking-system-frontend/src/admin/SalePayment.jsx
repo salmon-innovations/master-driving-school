@@ -175,13 +175,14 @@ const resolveBookingAssessment = (booking = {}) => {
     const notesAddonList = Array.isArray(notesJson?.addonsDetailed) ? notesJson.addonsDetailed : [];
     const notesAddonTotal = notesAddonList.reduce((sum, addon) => sum + Math.max(0, Number(addon?.price || 0)), 0);
     const notesConvenience = Math.max(0, Number(notesJson?.convenienceFee || booking?.convenience_fee || 0));
+    const notesSurcharge = Math.max(0, Number(notesJson?.saturdaySurcharge || 0));
 
     const hasBundleInNotes = notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'TDC')
         && notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'PDC');
     const fallbackPromoDiscount = 0; // Removed legacy 3% fallback
     const notesPromoRaw = Number(notesJson?.promoDiscount || booking?.promo_discount || 0);
     const notesPromoDiscount = Math.max(0, Number(notesJson?.promoDiscount || booking?.promo_discount || 0));
-    const notesComputedTotal = Math.max(0, Number((notesCourseTotal + notesAddonTotal + notesConvenience - notesPromoDiscount).toFixed(2)));
+    const notesComputedTotal = Math.max(0, Number((notesCourseTotal + notesAddonTotal + notesConvenience + notesSurcharge - notesPromoDiscount).toFixed(2)));
 
     const explicitNoteTotals = [
         notesJson?.totalAmount,
@@ -196,7 +197,7 @@ const resolveBookingAssessment = (booking = {}) => {
 
     const baseFromBookingFields = Math.max(
         0,
-        Number((listedCoursePrice + Math.max(0, Number(booking?.convenience_fee || 0)) - Math.max(0, Number(booking?.promo_discount || 0))).toFixed(2))
+        Number((listedCoursePrice + Math.max(0, Number(booking?.convenience_fee || 0)) + notesSurcharge - Math.max(0, Number(booking?.promo_discount || 0))).toFixed(2))
     );
 
     let assessed = 0;
@@ -309,6 +310,7 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
     const courseSubtotal = courseLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
     
     let convenienceFee = Number(notesJson?.convenienceFee || txn?.convenience_fee || 0);
+    let saturdaySurcharge = Number(notesJson?.saturdaySurcharge || 0);
     let promoDiscount = Number(notesJson?.promoDiscount || txn?.promo_discount || 0);
     
     const hasReviewer = Boolean(notesJson?.hasReviewer);
@@ -363,7 +365,7 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
         }
     }
 
-    const total = Number((subtotal + convenienceFee - effectivePromoDiscount).toFixed(2));
+    const total = Number((subtotal + convenienceFee + saturdaySurcharge - effectivePromoDiscount).toFixed(2));
     const remainingBalance = (isDownpayment || getPaymentStatusKey(txn?.status) === 'partial-payment')
         ? Math.max(0, Number((total - paidAmount).toFixed(2)))
         : 0;
@@ -373,6 +375,7 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
         addonLines,
         subtotal,
         convenienceFee,
+        saturdaySurcharge,
         promoDiscount: effectivePromoDiscount,
         promoDiscountLabel,
         total,
@@ -1266,13 +1269,17 @@ const SalePayment = () => {
                     <div class="breakdown-head" style="background:#fff;">Summary</div>
                     <div class="line"><span>Subtotal</span><span class="line-strong">${toPeso(breakdown.subtotal)}</span></div>
                     <div class="line"><span>Convenience Fee</span><span class="line-strong">${toPeso(breakdown.convenienceFee)}</span></div>
+                    ${breakdown.saturdaySurcharge > 0
+                        ? `<div class="line"><span>Saturday Surcharge</span><span class="line-strong">${toPeso(breakdown.saturdaySurcharge)}</span></div>`
+                        : ''
+                    }
                     ${breakdown.promoDiscount > 0
                         ? `<div class="line line-discount"><span>${breakdown.promoDiscountLabel || 'Discount'}</span><span class="line-strong">-${toPeso(breakdown.promoDiscount).replace('P ', '')}</span></div>`
                         : ''
                     }
                     <div class="line line-strong" style="border-top: 2px solid #e2e8f0; margin-top: 4px; padding-top: 8px;">
                         <span>Total Assessment</span>
-                        <span>${toPeso(breakdown.subtotal + breakdown.convenienceFee - breakdown.promoDiscount)}</span>
+                        <span>${toPeso(breakdown.total)}</span>
                     </div>
 
                     ${isPartialPayment

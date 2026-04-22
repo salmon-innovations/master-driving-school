@@ -294,6 +294,7 @@ const resolveAssessmentFigures = (booking = {}) => {
     const notesAddonTotal = notesAddonList.reduce((sum, item) => sum + Math.max(0, Number(item?.price || 0)), 0);
 
     const notesConvenience = Math.max(0, Number(notesJson?.convenienceFee || 0));
+    const notesSurcharge = Math.max(0, Number(notesJson?.saturdaySurcharge || 0));
     const hasBundleInNotes = notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'TDC')
         && notesCourseList.some((item) => String(item?.category || '').toUpperCase() === 'PDC');
     const fallbackPromoBase = notesCourseTotal + notesAddonTotal + notesConvenience;
@@ -305,7 +306,7 @@ const resolveAssessmentFigures = (booking = {}) => {
         Number(booking?.promoDiscount || 0),
         Number(notesJson?.promoDiscount || 0) > 0 ? 0 : fallbackPromoDiscount
     );
-    const notesComputedTotal = Math.max(0, Number((notesCourseTotal + notesAddonTotal + notesConvenience - notesPromoDiscount).toFixed(2)));
+    const notesComputedTotal = Math.max(0, Number((notesCourseTotal + notesAddonTotal + notesConvenience + notesSurcharge - notesPromoDiscount).toFixed(2)));
 
     const explicitNoteTotals = [
         notesJson?.totalAmount,
@@ -318,7 +319,7 @@ const resolveAssessmentFigures = (booking = {}) => {
         .map((v) => Number(v))
         .filter((v) => Number.isFinite(v) && v > 0);
 
-    const baseFromBookingFields = Math.max(0, Number((coursePrice + convenienceFee - promoDiscount).toFixed(2)));
+    const baseFromBookingFields = Math.max(0, Number((coursePrice + convenienceFee + notesSurcharge - promoDiscount).toFixed(2)));
 
     let assessed = 0;
 
@@ -459,9 +460,8 @@ const buildPaymentBreakdown = (booking) => {
     const courseSubtotal = courseLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
     const addonsSubtotal = addonLines.reduce((sum, line) => sum + Number(line.price || 0), 0);
     const subtotal = courseSubtotal + addonsSubtotal;
-    const convenienceFee = Math.max(0, Number(booking?.convenienceFee || 0));
-    const promoDiscount = Math.max(0, Number(booking?.promoDiscount || 0));
-    const grandTotal = Math.max(0, subtotal + convenienceFee - promoDiscount);
+    const saturdaySurcharge = Math.max(0, Number(parseNotesJson(booking?.rawNotes || booking?.notes || '')?.saturdaySurcharge || 0));
+    const grandTotal = Math.max(0, subtotal + convenienceFee + saturdaySurcharge - promoDiscount);
 
     const promoPct = Number(booking?.promoPct || 0);
 
@@ -470,6 +470,7 @@ const buildPaymentBreakdown = (booking) => {
         addonLines,
         subtotal,
         convenienceFee,
+        saturdaySurcharge,
         promoDiscount,
         promoPct,
         grandTotal,
@@ -1974,6 +1975,16 @@ const Booking = () => {
                                                         Convenience Fee
                                                     </span>
                                                     <span>{toMoney(paymentBreakdown.convenienceFee)}</span>
+                                                </div>
+                                            )}
+
+                                            {paymentBreakdown.saturdaySurcharge > 0 && (
+                                                <div className="bkv2-line-item addon">
+                                                    <span>
+                                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                                                        Saturday Surcharge
+                                                    </span>
+                                                    <span>{toMoney(paymentBreakdown.saturdaySurcharge)}</span>
                                                 </div>
                                             )}
 

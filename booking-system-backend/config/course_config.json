@@ -57,14 +57,13 @@
       "label": "OTDC + 4 PDC"
     },
     {
-      "value": "None+PDC Car Automatic|PDC Motor Manual",
-      "key": "None+PDC Car Automatic|PDC Motor Manual",
-      "tdcPart": "None",
+      "value": "F2F+PDC Motor Automatic",
+      "key": "F2F+PDC Motor Automatic",
+      "tdcPart": "F2F",
       "pdcParts": [
-        "PDC Car Automatic",
-        "PDC Motor Manual"
+        "PDC Motor Automatic"
       ],
-      "label": "PDC + PDC"
+      "label": "FREE TDC + PDC"
     }
   ]
 }
