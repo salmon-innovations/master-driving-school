@@ -9,7 +9,7 @@ import { ConfirmModal } from './config/Modals';
 const SCHEDULE_TAB_PERMISSION_MAP = {
     schedule: ['operations.schedules.manage', 'operations.schedules.tab.schedule'],
     tdc_online: ['operations.schedules.manage', 'operations.schedules.tab.tdc_online'],
-    pdc_scheduling: ['operations.schedules.manage', 'operations.schedules.tab.tdc_online'],
+    pdc_scheduling: ['operations.schedules.manage', 'operations.schedules.tab.pdc_scheduling'],
     summary: ['operations.schedules.manage', 'operations.schedules.tab.summary'],
     noshow: ['operations.schedules.manage', 'operations.schedules.tab.noshow'],
 };

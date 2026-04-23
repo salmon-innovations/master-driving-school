@@ -400,10 +400,11 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
         if (!notification?.id) return;
         markAsRead(notification.id);
         setShowNotifications(false);
-        if (notification.notifType === 'online_tdc_account_setup') {
-            fetchTdcOnlineQueue();
-            setShowTdcOnlineModal(true);
-        }
+        
+        // Instead of always opening the modal which "locks" the UI, 
+        // we now just navigate to the Schedules page and the TDC Online tab.
+        setScheduleNavigationTarget({ view: 'tdc_online', token: Date.now() });
+        setActiveTab('schedules');
     };
 
     const deleteNotification = (id) => {
@@ -478,26 +479,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
     return () => clearInterval(interval);
     }, [showNotifications]);
 
-    // Zero-click path: if a new Online TDC alert arrives while on dashboard,
-    // auto-route once to the TDC Online queue so branch/admin can act immediately.
-    useEffect(() => {
-        if (!tdcOnlineAlertsEnabled) return;
-        if (activeTab !== 'dashboard') return;
-        if (!allowedAdminTabs.has('schedules')) return;
 
-        const nextOnlineTdc = notifications.find(
-            (n) => !n.read
-                && n.notifType === 'online_tdc_account_setup'
-                && !autoOpenedOnlineTdcIdsRef.current.has(n.id)
-        );
-
-        if (!nextOnlineTdc) return;
-
-        autoOpenedOnlineTdcIdsRef.current.add(nextOnlineTdc.id);
-        setScheduleNavigationTarget({ view: 'tdc_online', token: Date.now() });
-        setActiveTab('schedules');
-        showNotification('Opened TDC Online queue for new enrollment.', 'info');
-    }, [activeTab, notifications, allowedAdminTabs, tdcOnlineAlertsEnabled]);
 
     useEffect(() => {
         const syncAdminSettings = () => {
@@ -545,8 +527,9 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
                 {
                     label: 'View Pending Queue',
                     onClick: () => {
-                        fetchTdcOnlineQueue();
-                        setShowTdcOnlineModal(true);
+                        // Instead of a blocking modal, we navigate to the tab
+                        setScheduleNavigationTarget({ view: 'tdc_online', token: Date.now() });
+                        setActiveTab('schedules');
                     }
                 }
             );
