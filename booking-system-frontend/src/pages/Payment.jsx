@@ -211,17 +211,17 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     }
 
     // Calculate Saturday Surcharge (₱150 per Saturday for PDC)
-    let saturdaySurcharge = 0;
+    let saturdaySurchargeAmount = 0;
     if (!isOnlineTdcNoSchedule) {
       const pdcEntries = getPdcScheduleEntries();
       pdcEntries.forEach(entry => {
         if (entry.date1) {
           const d1 = new Date(entry.date1);
-          if (d1.getDay() === 6) saturdaySurcharge += 150;
+          if (d1.getDay() === 6) saturdaySurchargeAmount += 150;
         }
         if (entry.date2) {
           const d2 = new Date(entry.date2);
-          if (d2.getDay() === 6) saturdaySurcharge += 150;
+          if (d2.getDay() === 6) saturdaySurchargeAmount += 150;
         }
       });
     }
@@ -244,7 +244,10 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
     const hasDiscount = finalDiscountPercent > 0;
     
     const discountValue = hasDiscount ? Number((subtotal * (finalDiscountPercent / 100)).toFixed(2)) : 0;
-    const finalTotal = Number((subtotal + saturdaySurcharge - discountValue).toFixed(2));
+    
+    // Embed the surcharge into the subtotal and final total
+    const embeddedSubtotal = subtotal + saturdaySurchargeAmount;
+    const finalTotal = Number((embeddedSubtotal - discountValue).toFixed(2));
 
     return { 
       baseCoursePriceTotal, 
@@ -252,8 +255,8 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       vehicleTipsTotal, 
       customAddonsTotal, 
       convenienceTotal, 
-      saturdaySurcharge,
-      subtotal, 
+      saturdaySurcharge: 0, // No longer a separate line item
+      subtotal: embeddedSubtotal, 
       hasDiscount, 
       discountPercent: finalDiscountPercent, 
       discountValue, 
@@ -432,19 +435,24 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
 
       const expandedCourseList = [];
       activeCart.forEach(item => {
-        // Add the main item (e.g., the Promo Bundle itself)
+        let itemSurcharge = 0;
+        if (String(item.category || '').toUpperCase() === 'PDC') {
+          const d1 = new Date(item.scheduleDate);
+          if (!isNaN(d1.getTime()) && d1.getDay() === 6) itemSurcharge += 150;
+        }
+
+        // Add the main item
         expandedCourseList.push({
           id: item?.id || null,
           name: item?.name || 'N/A',
           type: item?.type || 'standard',
           category: item?.category || null,
           shortName: item?.shortName || null,
+          price: Number(item?.price || 0) + itemSurcharge
         });
 
         // If it's a promo bundle, also add the individual PDC courses it contains
-        // so the backend/admin can see the specific course names (e.g. "PDC Motor Automatic").
         if (String(item?.category || '').toLowerCase() === 'promo') {
-          // Priority 1: Use pre-resolved _pdcCourses if available
           const nested = item._pdcCourses || (item._pdcCourse ? [item._pdcCourse] : []);
           if (Array.isArray(nested) && nested.length > 0) {
             nested.forEach(c => {
@@ -453,10 +461,10 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                 name: c.name || (c.shortName ? `PDC - ${c.shortName}` : 'PDC Course'),
                 type: c.course_type || c.type || 'PDC',
                 category: 'PDC',
+                price: 0 // Components usually have 0 price in a bundle
               });
             });
           } else {
-            // Priority 2: Fallback to parsing from the type string (e.g. "online+pdc-a1-tricycle|pdc-b1-van/b2-l300|...")
             const slugToLabel = (slug = '') => String(slug)
               .replace(/^pdc[-_]?/i, '')
               .replace(/[-_\/]+/g, ' ')
@@ -477,6 +485,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                   name: displayName,
                   type: part,
                   category: 'PDC',
+                  price: 0
                 });
               });
             }
@@ -584,6 +593,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         addonsDetailed: addonsDetailedPayload,
         convenienceFee: totalsData.convenienceTotal,
         subtotal: totalsData.subtotal,
+        saturdaySurcharge: 0,
         isManualBundle: !!totalsData.isMultiCourseApplied,
         promoDiscount: totalsData.discountValue,
         promoPct: totalsData.discountPercent,
@@ -769,21 +779,13 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                 })}
               </div>
 
-              {/* Saturday Surcharge & Bundle Discount */}
-              {(totalsData.saturdaySurcharge > 0 || (totalsData.hasDiscount && totalsData.discountValue > 0)) && (
+              {/* Bundle Discount */}
+              {totalsData.hasDiscount && totalsData.discountValue > 0 && (
                 <div className="mt-4 pt-4 border-t border-slate-200 space-y-2">
-                  {totalsData.saturdaySurcharge > 0 && (
-                    <div className="flex justify-between items-center text-sm text-slate-600 font-medium">
-                      <span>Saturday Surcharge</span>
-                      <span>+₱{totalsData.saturdaySurcharge.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
-                  {totalsData.hasDiscount && totalsData.discountValue > 0 && (
-                    <div className="flex justify-between items-center text-sm text-red-500 font-semibold bg-red-50 p-2 rounded-lg -mx-2 px-2">
-                      <span>Discount (-{totalsData.discountPercent}%)</span>
-                      <span>-₱{totalsData.discountValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
+                  <div className="flex justify-between items-center text-sm text-red-500 font-semibold bg-red-50 p-2 rounded-lg -mx-2 px-2">
+                    <span>Discount (-{totalsData.discountPercent}%)</span>
+                    <span>-₱{totalsData.discountValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
                 </div>
               )}
 

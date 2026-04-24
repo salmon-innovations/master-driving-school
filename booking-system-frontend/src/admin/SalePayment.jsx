@@ -335,7 +335,7 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
         ...(vehicleTipsTotal > 0 ? [{ name: 'Vehicle Maintenance Tips', price: vehicleTipsTotal }] : []),
     ];
 
-    const subtotal = courseSubtotal + reviewerTotal + vehicleTipsTotal;
+    const subtotal = courseSubtotal + reviewerTotal + vehicleTipsTotal + saturdaySurcharge;
     
     // Internal discount calculation using the dynamic percentage from Course Management
     // For Multi-course: If we have > 1 course (or a manual bundle) and NO predefined promo category is involved, apply 3%.
@@ -1269,10 +1269,6 @@ const SalePayment = () => {
                     <div class="breakdown-head" style="background:#fff;">Summary</div>
                     <div class="line"><span>Subtotal</span><span class="line-strong">${toPeso(breakdown.subtotal)}</span></div>
                     <div class="line"><span>Convenience Fee</span><span class="line-strong">${toPeso(breakdown.convenienceFee)}</span></div>
-                    ${breakdown.saturdaySurcharge > 0
-                        ? `<div class="line"><span>Saturday Surcharge</span><span class="line-strong">${toPeso(breakdown.saturdaySurcharge)}</span></div>`
-                        : ''
-                    }
                     ${breakdown.promoDiscount > 0
                         ? `<div class="line line-discount"><span>${breakdown.promoDiscountLabel || 'Discount'}</span><span class="line-strong">-${toPeso(breakdown.promoDiscount).replace('P ', '')}</span></div>`
                         : ''

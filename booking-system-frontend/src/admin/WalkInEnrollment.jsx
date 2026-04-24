@@ -1753,10 +1753,13 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 return surcharge;
             };
 
-            const saturdaySurcharge = calculateSaturdaySurcharge();
+            const saturdaySurchargeAmount = calculateSaturdaySurcharge();
             const discountPct = formData.course?._isManualBundle ? 3 : (selectedTypeOpt?.discount || dynamicCourse?.discount || 0);
             const promoDiscount = discountPct > 0 ? Number((subtotal * (discountPct / 100)).toFixed(2)) : 0;
-            const totalAmountDue = Math.max(0, Number((subtotal + saturdaySurcharge - promoDiscount).toFixed(2)));
+            
+            // Embed surcharge into subtotal and total amount
+            const embeddedSubtotal = subtotal + saturdaySurchargeAmount;
+            const totalAmountDue = Math.max(0, Number((embeddedSubtotal - promoDiscount).toFixed(2)));
 
             const enteredAmount = Number(formData.amountPaid || 0);
             const changeAmount = Math.max(0, enteredAmount - totalAmountDue);
@@ -1800,6 +1803,20 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 branchId: formData.branchId,
                 courseList: (() => {
                     const dynamicCourse = packages.find(p => p.id === formData.course?.id) || formData.course;
+                    
+                    // Calculate Saturday Surcharge to embed it into the item price
+                    let itemSurcharge = 0;
+                    if (formData.course?.category === 'PDC') {
+                        if (formData.scheduleDate && new Date(formData.scheduleDate).getDay() === 6) itemSurcharge += 150;
+                        if (formData.scheduleDate2 && new Date(formData.scheduleDate2).getDay() === 6) itemSurcharge += 150;
+                    }
+                    if (isPromo) {
+                        Object.values(promoPdcSelections).forEach(sel => {
+                            if (sel.scheduleDate && new Date(sel.scheduleDate).getDay() === 6) itemSurcharge += 150;
+                            if (sel.promoPdcDate2 && new Date(sel.promoPdcDate2).getDay() === 6) itemSurcharge += 150;
+                        });
+                    }
+
                     const items = [];
                     // Add primary course (bundle or single)
                     items.push({
@@ -1807,7 +1824,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         name: dynamicCourse?.name,
                         category: dynamicCourse?.category,
                         type: formData.courseType,
-                        price: selectedPrice
+                        price: Number(selectedPrice) + itemSurcharge
                     });
                     // Add all component courses for manual bundles
                     if (formData.course?._isManualBundle) {
@@ -1908,11 +1925,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 paymentStatus: formData.paymentStatus,
                 transactionNo: formData.transactionNo,
                 addons: formData.addons || [],
-                subtotal,
+                subtotal: embeddedSubtotal,
                 promoDiscount,
                 promoPct: discountPct,
                 totalAmount: totalAmountDue,
-                saturdaySurcharge,
+                saturdaySurcharge: 0,
                 convenienceFee: 0,
 
                 // Metadata
@@ -4129,11 +4146,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             return surcharge;
         };
 
-        const saturdaySurcharge = calculateSaturdaySurcharge();
+        const saturdaySurchargeAmount = calculateSaturdaySurcharge();
         const discountPct = formData.course?._isManualBundle ? 3 : (selectedTypeOpt?.discount || dynamicCourse?.discount || 0);
         const discountLabel = formData.course?._isManualBundle ? 'Multi-Course Discount (3%)' : `Discount (${discountPct}%)`;
         const promoDiscount = discountPct > 0 ? Number((subtotal * (discountPct / 100)).toFixed(2)) : 0;
-        const totalAmount = Math.max(0, Number((subtotal + saturdaySurcharge - promoDiscount).toFixed(2)));
+        
+        // Embed surcharge into subtotal and total amount
+        const embeddedSubtotal = subtotal + saturdaySurchargeAmount;
+        const totalAmount = Math.max(0, Number((embeddedSubtotal - promoDiscount).toFixed(2)));
 
         const promoPdcSummaryCourses = isPromo
             ? ((formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
@@ -4165,7 +4185,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     {/* ── Booking Summary Card ── */}
                     {/* ── Booking Summary Card(s) ── */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        {formData.course && !isPromo && (
+                        {formData.course && !isPromo && !formData.course?._isManualBundle && (
                             <div className="payment-summary-card">
                                 <div className="payment-summary-card__left">
                                     <div className="payment-summary-card__icon">
@@ -4207,7 +4227,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             </div>
                         )}
 
-                        {formData.course && isPromo && (
+                        {formData.course && isPromo && !isRegularPromoBundle && (
                             <div className="payment-summary-card">
                                 <div className="payment-summary-card__left">
                                     <div className="payment-summary-card__icon">
@@ -4338,7 +4358,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     <div className="payment-breakdown">
                         <span className="breakdown-title">Final Billing Breakdown</span>
                         <div className="breakdown-row">
-                            <span>Course Fee ({formData.courseType || 'Standard'})</span>
+                            <span>
+                                {formData.course?._isManualBundle 
+                                    ? formData.course.name.replace('Manual Bundle: ', '')
+                                    : `Course Fee (${formData.courseType || 'Standard'})`}
+                            </span>
                             <span>₱{selectedPrice.toLocaleString()}</span>
                         </div>
                         {formData.addons.map(a => (
@@ -4349,14 +4373,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         ))}
                         <div className="breakdown-row" style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px dashed #e2e8f0' }}>
                             <span style={{ color: '#64748b' }}>Subtotal</span>
-                            <span style={{ color: '#64748b' }}>₱{subtotal.toLocaleString()}</span>
+                            <span style={{ color: '#64748b' }}>₱{embeddedSubtotal.toLocaleString()}</span>
                         </div>
-                        {saturdaySurcharge > 0 && (
-                            <div className="breakdown-row" style={{ color: '#64748b', fontWeight: '500' }}>
-                                <span>Saturday Surcharge</span>
-                                <span>+₱{saturdaySurcharge.toLocaleString()}</span>
-                            </div>
-                        )}
                         {discountPct > 0 && (
                             <div className="breakdown-row" style={{ color: '#ef4444', fontWeight: 'bold' }}>
                                 <span>{discountLabel}</span>
@@ -4571,11 +4589,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             return surcharge;
         };
 
-        const saturdaySurcharge = calculateSaturdaySurcharge();
+        const saturdaySurchargeAmount = calculateSaturdaySurcharge();
+        const embeddedSubtotal = subtotal + saturdaySurchargeAmount;
         const discountPct = formData.course?._isManualBundle ? 3 : (selectedTypeOpt?.discount || dynamicCourse?.discount || 0);
         const discountLabel = formData.course?._isManualBundle ? 'Multi-Course Discount (3%)' : `Discount (${discountPct}%)`;
-        const promoDiscount = discountPct > 0 ? Number((subtotal * (discountPct / 100)).toFixed(2)) : 0;
-        const totalAmount = Math.max(0, Number((subtotal + saturdaySurcharge - promoDiscount).toFixed(2)));
+        const promoDiscount = discountPct > 0 ? Number((embeddedSubtotal * (discountPct / 100)).toFixed(2)) : 0;
+        const totalAmount = Math.max(0, Number((embeddedSubtotal - promoDiscount).toFixed(2)));
         const balanceDue = Math.max(0, Number((totalAmount - (Number(formData.amountPaid) || 0)).toFixed(2)));
 
         const promoPdcSummaryCount = (formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
@@ -4734,10 +4753,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         <div className="review-payment-grid">
                             <p><strong>Method:</strong> {formData.paymentMethod}</p>
                             <p><strong>Payment Status:</strong> {formData.paymentStatus}</p>
-                            <p><strong>Subtotal:</strong> ₱{subtotal.toLocaleString()}</p>
-                            {saturdaySurcharge > 0 && (
-                                <p><strong>Saturday Surcharge:</strong> +₱{saturdaySurcharge.toLocaleString()}</p>
-                            )}
+                            <p><strong>Subtotal:</strong> ₱{embeddedSubtotal.toLocaleString()}</p>
+                            {/* Saturday Surcharge is now embedded in subtotal above */}
                             {discountPct > 0 && (
                                 <p style={{ color: '#ef4444' }}><strong>{discountLabel}:</strong> -₱{promoDiscount.toLocaleString()}</p>
                             )}

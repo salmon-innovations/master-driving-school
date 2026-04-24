@@ -55,28 +55,9 @@ const parseBookingFinancials = (rawAmount, notes) => {
 };
 
 const calculateSaturdaySurcharge = (pdcSchedules) => {
-    if (!Array.isArray(pdcSchedules)) return 0;
-    
-    let totalSurcharge = 0;
-    pdcSchedules.forEach(s => {
-        // Only PDC courses attract the surcharge
-        // Day 1
-        if (s.pdcDate || s.scheduleDate) {
-            const date = new Date(s.pdcDate || s.scheduleDate);
-            if (date.getDay() === 6) { // 6 is Saturday
-                totalSurcharge += 150;
-            }
-        }
-        // Day 2
-        if (s.pdcDate2 || s.promoPdcDate2 || s.scheduleDate2) {
-            const date2 = new Date(s.pdcDate2 || s.promoPdcDate2 || s.scheduleDate2);
-            if (date2.getDay() === 6) {
-                totalSurcharge += 150;
-            }
-        }
-    });
-    
-    return totalSurcharge;
+    // Surcharge is now embedded in the course price on the frontend.
+    // This function now returns 0 to avoid double-charging or separate line items.
+    return 0;
 };
 
 module.exports = {
