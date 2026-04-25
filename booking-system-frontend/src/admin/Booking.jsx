@@ -457,10 +457,26 @@ const buildPaymentBreakdown = (booking) => {
         }))
         .filter((addon) => addon.price > 0);
 
-    const courseSubtotal = courseLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
-    const addonsSubtotal = addonLines.reduce((sum, line) => sum + Number(line.price || 0), 0);
     const saturdaySurcharge = Math.max(0, Number(parseNotesJson(booking?.rawNotes || booking?.notes || '')?.saturdaySurcharge || 0));
-    const subtotal = courseSubtotal + addonsSubtotal + saturdaySurcharge;
+    
+    // Imbed surcharge into the first PDC course line
+    let surchargeDistributed = false;
+    const imbeddedCourseLines = courseLines.map(line => {
+        if (!surchargeDistributed && (line.label.startsWith('PDC') || line.label.includes('Practical'))) {
+            surchargeDistributed = true;
+            return { ...line, amount: line.amount + saturdaySurcharge };
+        }
+        return line;
+    });
+    
+    // Fallback if no PDC line found
+    if (!surchargeDistributed && saturdaySurcharge > 0 && imbeddedCourseLines.length > 0) {
+        imbeddedCourseLines[0].amount += saturdaySurcharge;
+    }
+
+    const courseSubtotal = imbeddedCourseLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    const addonsSubtotal = addonLines.reduce((sum, line) => sum + Number(line.price || 0), 0);
+    const subtotal = courseSubtotal + addonsSubtotal;
     const convenienceFee = Math.max(0, Number(booking?.convenienceFee || 0));
     const promoDiscount = Math.max(0, Number(booking?.promoDiscount || 0));
     const grandTotal = Math.max(0, subtotal + convenienceFee - promoDiscount);
@@ -468,7 +484,7 @@ const buildPaymentBreakdown = (booking) => {
     const promoPct = Number(booking?.promoPct || 0);
 
     return {
-        courseLines,
+        courseLines: imbeddedCourseLines,
         addonLines,
         subtotal,
         convenienceFee,

@@ -287,6 +287,8 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
     let appliedDiscountPct = 0;
 
     const filteredCourseList = courseList;
+    const saturdaySurcharge = Number(notesJson?.saturdaySurcharge || 0);
+    let surchargeDistributed = false;
 
     const courseLines = filteredCourseList.map((item) => {
         const rawName = String(item?.name || '').toLowerCase();
@@ -299,9 +301,15 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
             appliedDiscountPct = courseData.discount;
         }
 
+        let baseAmount = (isComp && !isBundleRoot) ? 0 : (Number(item?.price || 0) || courseData.price || 0);
+        if (!surchargeDistributed && (rawName.includes('pdc') || rawName.includes('practical'))) {
+            baseAmount += saturdaySurcharge;
+            surchargeDistributed = true;
+        }
+
         return {
             label: toCompactCourseLabel(item, hasBundleInTxn),
-            amount: (isComp && !isBundleRoot) ? 0 : (Number(item?.price || 0) || courseData.price || 0),
+            amount: baseAmount,
             rawName: item?.name || 'Course',
             isBundleComponent: isComp && !isBundleRoot
         };
@@ -310,7 +318,6 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
     const courseSubtotal = courseLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
     
     let convenienceFee = Number(notesJson?.convenienceFee || txn?.convenience_fee || 0);
-    let saturdaySurcharge = Number(notesJson?.saturdaySurcharge || 0);
     let promoDiscount = Number(notesJson?.promoDiscount || txn?.promo_discount || 0);
     
     const hasReviewer = Boolean(notesJson?.hasReviewer);
@@ -335,7 +342,7 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
         ...(vehicleTipsTotal > 0 ? [{ name: 'Vehicle Maintenance Tips', price: vehicleTipsTotal }] : []),
     ];
 
-    const subtotal = courseSubtotal + reviewerTotal + vehicleTipsTotal + saturdaySurcharge;
+    const subtotal = courseSubtotal + reviewerTotal + vehicleTipsTotal;
     
     // Internal discount calculation using the dynamic percentage from Course Management
     // For Multi-course: If we have > 1 course (or a manual bundle) and NO predefined promo category is involved, apply 3%.
@@ -365,7 +372,7 @@ const computeReceiptBreakdown = (txn, coursesList = []) => {
         }
     }
 
-    const total = Number((subtotal + convenienceFee + saturdaySurcharge - effectivePromoDiscount).toFixed(2));
+    const total = Number((subtotal + convenienceFee - effectivePromoDiscount).toFixed(2));
     const remainingBalance = (isDownpayment || getPaymentStatusKey(txn?.status) === 'partial-payment')
         ? Math.max(0, Number((total - paidAmount).toFixed(2)))
         : 0;

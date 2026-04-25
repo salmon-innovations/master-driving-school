@@ -12,8 +12,10 @@ const normalizePromoPdcName = (value) => {
   if (lower === 'motorcycle') return 'PDC Motor Manual';
   if (lower === 'manual' || lower === 'carmt' || lower === 'car mt' || lower === 'pdc car manual') return 'PDC Car Manual';
   if (lower === 'automatic' || lower === 'carat' || lower === 'car at' || lower === 'pdc car automatic') return 'PDC Car Automatic';
-  if (lower === 'v1-tricycle' || lower === 'a1-tricycle' || lower === 'pdc a1-tricycle') return 'PDC A1-Tricycle';
-  if (lower === 'b1-van/b2 - l300' || lower === 'b1-van/b2-l300' || lower === 'pdc b1-van/b2-l300') return 'PDC B1-Van/B2-L300';
+  if (lower === 'v1-tricycle' || lower === 'a1-tricycle' || lower === 'pdc a1-tricycle' || lower === 'tricycle' || lower === 'pdc tricycle') return 'PDC Tricycle';
+  if (lower === 'b1-van' || lower === 'pdc b1-van') return 'PDC B1-Van';
+  if (lower === 'b2-l300' || lower === 'pdc b2-l300') return 'PDC B2-L300';
+  if (lower === 'b1-van/b2 - l300' || lower === 'b1-van/b2-l300' || lower === 'pdc b1-van/b2-l300') return 'PDC B1-Van';
   return cleaned;
 };
 
@@ -78,8 +80,9 @@ const DEFAULT_COURSE_CONFIG = {
   pdcTypes: [
     { value: 'Automatic', label: 'Automatic' },
     { value: 'Manual', label: 'Manual' },
-    { value: 'V1-Tricycle', label: 'V1-Tricycle' },
-    { value: 'B1-Van/B2 - L300', label: 'B1 - Van/B2 - L300' },
+    { value: 'Tricycle', label: 'Tricycle' },
+    { value: 'B1-Van', label: 'B1 - Van' },
+    { value: 'B2-L300', label: 'B2 - L300' },
   ],
   bundleTypes: [],
 };

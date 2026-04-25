@@ -4146,12 +4146,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             return surcharge;
         };
 
+        // Embed surcharge into subtotal and total amount
         const saturdaySurchargeAmount = calculateSaturdaySurcharge();
+        const displaySelectedPrice = selectedPrice + saturdaySurchargeAmount;
         const discountPct = formData.course?._isManualBundle ? 3 : (selectedTypeOpt?.discount || dynamicCourse?.discount || 0);
         const discountLabel = formData.course?._isManualBundle ? 'Multi-Course Discount (3%)' : `Discount (${discountPct}%)`;
         const promoDiscount = discountPct > 0 ? Number((subtotal * (discountPct / 100)).toFixed(2)) : 0;
-        
-        // Embed surcharge into subtotal and total amount
         const embeddedSubtotal = subtotal + saturdaySurchargeAmount;
         const totalAmount = Math.max(0, Number((embeddedSubtotal - promoDiscount).toFixed(2)));
 
@@ -4363,7 +4363,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                     ? formData.course.name.replace('Manual Bundle: ', '')
                                     : `Course Fee (${formData.courseType || 'Standard'})`}
                             </span>
-                            <span>₱{selectedPrice.toLocaleString()}</span>
+                            <span>₱{displaySelectedPrice.toLocaleString()}</span>
                         </div>
                         {formData.addons.map(a => (
                             <div key={a.id} className="breakdown-row">
@@ -4590,6 +4590,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         };
 
         const saturdaySurchargeAmount = calculateSaturdaySurcharge();
+        const displaySelectedPrice = selectedPrice + saturdaySurchargeAmount;
         const embeddedSubtotal = subtotal + saturdaySurchargeAmount;
         const discountPct = formData.course?._isManualBundle ? 3 : (selectedTypeOpt?.discount || dynamicCourse?.discount || 0);
         const discountLabel = formData.course?._isManualBundle ? 'Multi-Course Discount (3%)' : `Discount (${discountPct}%)`;

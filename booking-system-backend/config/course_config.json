@@ -25,12 +25,8 @@
       "label": "Manual"
     },
     {
-      "value": "A1-Tricycle",
-      "label": "A1-Tricycle"
-    },
-    {
-      "value": "B1-Van/B2 - L300",
-      "label": "B1 - Van/B2 - L300"
+      "value": "Tricycle",
+      "label": "Tricycle"
     }
   ],
   "bundleTypes": [
@@ -45,14 +41,14 @@
       "label": "F2F TDC + PDC Motorcycle Manual"
     },
     {
-      "value": "Online+PDC A1-Tricycle|PDC B1-Van/B2-L300|PDC Car Automatic|PDC Motor Automatic",
-      "key": "Online+PDC A1-Tricycle|PDC B1-Van/B2-L300|PDC Car Automatic|PDC Motor Automatic",
+      "value": "Online+PDC B1-Van|PDC Car Automatic|PDC Motor Automatic|PDC Tricycle",
+      "key": "Online+PDC B1-Van|PDC Car Automatic|PDC Motor Automatic|PDC Tricycle",
       "tdcPart": "Online",
       "pdcParts": [
-        "PDC A1-Tricycle",
-        "PDC B1-Van/B2-L300",
+        "PDC B1-Van",
         "PDC Car Automatic",
-        "PDC Motor Automatic"
+        "PDC Motor Automatic",
+        "PDC Tricycle"
       ],
       "label": "OTDC + 4 PDC"
     },

@@ -22,6 +22,12 @@ const EMAIL_CONTENT_PATH = path.join(__dirname, '../config/emailContent.json');
 const ADDONS_CONFIG_PATH = path.join(__dirname, '../config/addonsConfig.json');
 const { parseBookingFinancials, calculateSaturdaySurcharge } = require('../utils/financeUtils');
 
+const toAmount = (value) => {
+  if (value == null) return 0;
+  const numeric = Number(String(value).replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
 let permissionsColumnReady = false;
 
 const PERMISSION_GROUPS = [
@@ -1615,7 +1621,7 @@ const walkInEnrollment = async (req, res) => {
     }
 
     // 4. Create booking record
-    const bookingStatus = paymentStatus === 'Full Payment' ? 'paid' : 'partial_payment';
+    // Status and Assessment will be calculated later after fees and surcharges are processed
     const primaryCourseId = Array.isArray(courseIds) ? courseIds[0] : courseId;
     
     // Fetch all course details for accurate booking display and notes payload
@@ -1814,6 +1820,10 @@ const walkInEnrollment = async (req, res) => {
     ]
       .map((v) => Math.max(0, toAmount(v)))
       .find((v) => v > 0) || 0;
+
+    const isExplicitFullPayment = String(paymentStatus || '').toLowerCase().trim() === 'full payment';
+    const isAmountFullyPaid = (toAmount(amountPaid) >= normalizedTotalAssessment - 0.009) && normalizedTotalAssessment > 0;
+    const bookingStatus = (isExplicitFullPayment || isAmountFullyPaid) ? 'paid' : 'partial_payment';
 
     const bookingDateForRecord = scheduleDate || new Date().toISOString().slice(0, 10);
 
@@ -2469,12 +2479,6 @@ const markBookingAsPaid = async (req, res) => {
       notesJson = {};
     }
 
-    const toAmount = (value) => {
-      if (value == null) return 0;
-      const numeric = Number(String(value).replace(/[^0-9.-]/g, ''));
-      return Number.isFinite(numeric) ? numeric : 0;
-    };
-
     const notesCourseTotal = (Array.isArray(notesJson?.courseList) ? notesJson.courseList : []).reduce((sum, item) => {
       const line = item?.finalPrice ?? item?.discountedPrice ?? item?.netPrice ?? item?.lineTotal ?? item?.price ?? item?.amount ?? item?.coursePrice ?? 0;
       return sum + Math.max(0, toAmount(line));
@@ -2517,16 +2521,16 @@ const markBookingAsPaid = async (req, res) => {
       .map((v) => Math.max(0, toAmount(v)))
       .find((v) => v > 0) || 0;
 
-    const estimatedAssessment = isDownpaymentBooking && previousAmount > 0
-      ? (previousAmount * 2)
-      : coursePrice;
-    const targetAssessment = Math.max(
-      explicitNotesAssessment,
-      notesDerivedAssessment,
-      estimatedAssessment,
-      previousAmount,
-      coursePrice
-    );
+    // Improved assessment logic: prefer explicit totals/derived totals over the 50% downpayment guess.
+    let targetAssessment = explicitNotesAssessment || notesDerivedAssessment || coursePrice;
+    
+    // Only fallback to 'paid * 2' if we have absolutely no price info and it's a downpayment.
+    if (targetAssessment === 0 && isDownpaymentBooking && previousAmount > 0) {
+      targetAssessment = previousAmount * 2;
+    }
+
+    // Safety: assessment can never be less than what has already been paid.
+    targetAssessment = Math.max(targetAssessment, previousAmount);
 
     let collectAmount = Number(amount_to_collect);
     if (!Number.isFinite(collectAmount) || collectAmount <= 0) {
@@ -3539,11 +3543,12 @@ const getPdcSchedulingQueue = async (req, res) => {
     /**
      * Normalizes verbose PDC course names from the DB into short, consistent labels.
      * Examples:
-     *  "Practical Driving Course(PDC) - (A1 - TRICYCLE) - V1-Tricycle"  → "PDC A1 Tricycle"
-     *  "Practical Driving Course(PDC) - (B1 - VAN/B2 - L300) - B1-Van/B2 - L300" → "PDC B1 Van B2 L300"
+     *  "Practical Driving Course(PDC) - (TRICYCLE) - Tricycle"           → "PDC Tricycle"
+     *  "Practical Driving Course(PDC) - (B1 - VAN) - B1-Van"             → "PDC B1 Van"
+     *  "Practical Driving Course(PDC) - (B2 - L300) - B2-L300"           → "PDC B2 L300"
      *  "Practical Driving Course(PDC) - (CAR) - Manual"                  → "PDC Car Manual"
      *  "Practical Driving Course(PDC) - (MOTORCYCLE) - Automatic"        → "PDC Motor Automatic"
-     *  "PDC A1 Tricycle" (already clean)                                 → "PDC A1 Tricycle"
+     *  "PDC Tricycle" (already clean)                                    → "PDC Tricycle"
      *  "pdc-car-automatic" (slug)                                         → "PDC Car Automatic"
      */
     const normalizePdcCourseName = (name = '', courseType = '') => {
@@ -3593,8 +3598,9 @@ const getPdcSchedulingQueue = async (req, res) => {
 
       // Vehicle type detection
       if (/MOTOR|MOTORCYCLE/.test(src)) vehicleType = 'Motor';
-      else if (/A1|TRICYCLE/.test(src)) vehicleType = 'A1 Tricycle';
-      else if (/B1|B2|VAN|L300/.test(src)) vehicleType = 'B1 Van B2 L300';
+      else if (/B1|VAN/.test(src)) vehicleType = 'B1 Van';
+      else if (/B2|L300/.test(src)) vehicleType = 'B2 L300';
+      else if (/TRICYCLE|A1/.test(src)) vehicleType = 'Tricycle';
       else if (/CAR/.test(src)) vehicleType = 'Car';
       else {
         // Fallback: title-case the extracted core
@@ -3688,7 +3694,7 @@ const getPdcSchedulingQueue = async (req, res) => {
       if (src.includes('MOTOR') || src.includes('MOTORCYCLE')) return false;
       if (src.includes('AUTOMATIC') || src.includes('MANUAL')) return true;
       if (src.includes('CAR') || src.includes('B1') || src.includes('B2') || src.includes('VAN') || src.includes('L300')) return true;
-      if (src.includes('TRICYCLE') || src.includes('V1') || src.includes('A1')) return true;
+      if (src.includes('TRICYCLE') || src.includes('V1')) return true;
       return false;
     };
 

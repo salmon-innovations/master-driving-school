@@ -13,10 +13,24 @@ const DEFAULT_CONFIG = {
         { value: 'Motorcycle', label: 'Motorcycle' },
         { value: 'Automatic', label: 'Automatic' },
         { value: 'Manual', label: 'Manual' },
-        { value: 'V1-Tricycle', label: 'V1-Tricycle' },
-        { value: 'B1-Van/B2 - L300', label: 'B1 - Van/B2 - L300' },
+        { value: 'Tricycle', label: 'Tricycle' },
+        { value: 'B1-Van', label: 'B1 - Van' },
+        { value: 'B2-L300', label: 'B2 - L300' },
     ],
     bundleTypes: [],
+    promoPdcOptions: [
+        'PDC Motor Manual',
+        'PDC Motor Automatic',
+        'PDC Car Manual',
+        'PDC Car Automatic',
+        'PDC Tricycle',
+        'PDC B1-Van',
+        'PDC B2-L300',
+    ],
+    manualBundleSettings: {
+        prefix: 'Manual Bundle',
+        discount: 3
+    }
 };
 
 const CORE_CATEGORIES = ['Basic', 'TDC', 'PDC', 'Promo'];
@@ -28,14 +42,17 @@ const PALETTE = {
     bundleTypes:{ iconClass: 'amber',       accent: '#d97706', light: '#fef3c7', text: '#b45309' },
 };
 
-const PROMO_BUNDLE_PDC_OPTIONS = [
-    'PDC Motor Manual',
-    'PDC Motor Automatic',
-    'PDC Car Manual',
-    'PDC Car Automatic',
-    'PDC A1-Tricycle',
-    'PDC B1-Van/B2-L300',
-];
+const getPromoPdcOptions = (config) => {
+    return Array.isArray(config?.promoPdcOptions) ? config.promoPdcOptions : [
+        'PDC Motor Manual',
+        'PDC Motor Automatic',
+        'PDC Car Manual',
+        'PDC Car Automatic',
+        'PDC Tricycle',
+        'PDC B1-Van',
+        'PDC B2-L300',
+    ];
+};
 
 const normalizePromoPdcName = (value) => {
     const cleaned = String(value || '').trim();
@@ -44,8 +61,10 @@ const normalizePromoPdcName = (value) => {
     if (lower === 'motorcycle') return 'PDC Motor Manual';
     if (lower === 'manual' || lower === 'carmt' || lower === 'car mt' || lower === 'pdc car manual') return 'PDC Car Manual';
     if (lower === 'automatic' || lower === 'carat' || lower === 'car at' || lower === 'pdc car automatic') return 'PDC Car Automatic';
-    if (lower === 'v1-tricycle' || lower === 'a1-tricycle' || lower === 'pdc a1-tricycle') return 'PDC A1-Tricycle';
-    if (lower === 'b1-van/b2 - l300' || lower === 'b1-van/b2-l300' || lower === 'pdc b1-van/b2-l300') return 'PDC B1-Van/B2-L300';
+    if (lower === 'v1-tricycle' || lower === 'a1-tricycle' || lower === 'pdc a1-tricycle' || lower === 'tricycle' || lower === 'pdc tricycle') return 'PDC Tricycle';
+    if (lower === 'b1-van' || lower === 'pdc b1-van') return 'PDC B1-Van';
+    if (lower === 'b2-l300' || lower === 'pdc b2-l300') return 'PDC B2-L300';
+    if (lower === 'b1-van/b2 - l300' || lower === 'b1-van/b2-l300' || lower === 'pdc b1-van/b2-l300') return 'PDC B1-Van';
     return cleaned;
 };
 
@@ -140,11 +159,11 @@ const TypeCard = ({ title, iconClass, icon, badge, fullWidth, children }) => (
 );
 
 /* Category row */
-const CategoryRow = ({ cat, isCore, onDelete }) => (
+const CategoryRow = ({ cat, isCore, onDelete, index }) => (
     <div className="ct-row">
         <div className="ct-row-left">
-            <div className="ct-avatar" style={{ background: PALETTE.categories.light, color: PALETTE.categories.text }}>
-                {cat[0].toUpperCase()}
+            <div className="ct-avatar" style={{ background: PALETTE.categories.light, color: PALETTE.categories.text, fontSize: '0.7rem' }}>
+                {index + 1}
             </div>
             <span className="ct-row-name">{cat}</span>
         </div>
@@ -162,7 +181,7 @@ const CategoryRow = ({ cat, isCore, onDelete }) => (
 );
 
 /* Generic type row (TDC / PDC) */
-const TypeRow = ({ item, palette, onEdit, onDelete, isEditing, onSave, onCancel }) => {
+const TypeRow = ({ item, palette, onEdit, onDelete, isEditing, onSave, onCancel, index }) => {
     const [val, setVal] = useState(item.value);
     const [lbl, setLbl] = useState(item.label);
     useEffect(() => { if (isEditing) { setVal(item.value); setLbl(item.label); } }, [isEditing, item.value, item.label]);
@@ -184,8 +203,8 @@ const TypeRow = ({ item, palette, onEdit, onDelete, isEditing, onSave, onCancel 
     return (
         <div className="ct-row">
             <div className="ct-row-left">
-                <div className="ct-avatar" style={{ background: palette.light, color: palette.text }}>
-                    {item.value[0].toUpperCase()}
+                <div className="ct-avatar" style={{ background: palette.light, color: palette.text, fontSize: '0.7rem' }}>
+                    {index + 1}
                 </div>
                 <div>
                     <div className="ct-row-name">{item.label}</div>
@@ -206,7 +225,7 @@ const TypeRow = ({ item, palette, onEdit, onDelete, isEditing, onSave, onCancel 
     );
 };
 
-const BundleRow = ({ item, onEdit, onDelete }) => (
+const BundleRow = ({ item, onEdit, onDelete, index }) => (
     <div className="ct-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '12px', padding: '16px', position: 'relative' }}>
         
         {/* Actions positioned top-right relative to row padding */}
@@ -219,23 +238,30 @@ const BundleRow = ({ item, onEdit, onDelete }) => (
             </button>
         </div>
 
-        {/* Top: Badges - padded on right to avoid buttons */}
-        <div className="ct-bundle-badges" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', paddingRight: '56px' }}>
-            {item.tdcPart && item.tdcPart.toLowerCase() !== 'none' && (
-                <>
-                    <span className="ct-tdc-badge">{item.tdcPart}</span>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: '#94a3b8', flexShrink: 0 }}><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                </>
-            )}
-            {item.pdcParts.map((pdc) => (
-                <span key={`${item.key}_${pdc}`} className="ct-pdc-badge">{pdc}</span>
-            ))}
-        </div>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+            <div className="ct-avatar" style={{ background: PALETTE.bundleTypes.light, color: PALETTE.bundleTypes.text, fontSize: '0.7rem' }}>
+                {index + 1}
+            </div>
+            <div style={{ flex: 1 }}>
+                {/* Badges - padded on right to avoid buttons */}
+                <div className="ct-bundle-badges" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', paddingRight: '56px', marginBottom: '8px' }}>
+                    {item.tdcPart && item.tdcPart.toLowerCase() !== 'none' && (
+                        <>
+                            <span className="ct-tdc-badge">{item.tdcPart}</span>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: '#94a3b8', flexShrink: 0 }}><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                        </>
+                    )}
+                    {item.pdcParts.map((pdc) => (
+                        <span key={`${item.key}_${pdc}`} className="ct-pdc-badge">{pdc}</span>
+                    ))}
+                </div>
 
-        {/* Bottom: Text Info */}
-        <div style={{ marginTop: '2px' }}>
-            <div className="ct-row-name" style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1e293b', marginBottom: '4px' }}>{item.label}</div>
-            <div className="ct-row-sub" style={{ fontSize: '0.8rem', color: '#64748b', wordBreak: 'break-word', overflowWrap: 'anywhere', lineHeight: '1.5' }}>{item.key}</div>
+                {/* Text Info */}
+                <div>
+                    <div className="ct-row-name" style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1e293b', marginBottom: '4px' }}>{item.label}</div>
+                    <div className="ct-row-sub" style={{ fontSize: '0.8rem', color: '#64748b', wordBreak: 'break-word', overflowWrap: 'anywhere', lineHeight: '1.5' }}>{item.key}</div>
+                </div>
+            </div>
         </div>
     </div>
 );
@@ -374,10 +400,11 @@ const CourseTypesSection = () => {
 
     const tdcOptions = ['None', ...config.tdcTypes.map(t => t.value)];
     const promoPdcOptions = useMemo(() => {
+        const baseOptions = getPromoPdcOptions(config);
         const fromFormAdd = Array.isArray(bundleForm.pdcParts) ? bundleForm.pdcParts : [];
         const fromFormEdit = Array.isArray(editBundleForm.pdcParts) ? editBundleForm.pdcParts : [];
-        return [...new Set([...PROMO_BUNDLE_PDC_OPTIONS, ...fromFormAdd, ...fromFormEdit])];
-    }, [bundleForm.pdcParts, editBundleForm.pdcParts]);
+        return [...new Set([...baseOptions, ...fromFormAdd, ...fromFormEdit])];
+    }, [config, bundleForm.pdcParts, editBundleForm.pdcParts]);
     const defaultTdc = tdcOptions[0] || 'F2F';
 
     useEffect(() => {
@@ -514,11 +541,13 @@ const CourseTypesSection = () => {
                     icon={<><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></>}
                 >
                     <p className="ct-desc">Top-level course categories. Core ones (TDC, PDC, Basic, Promo) are protected.</p>
-                    {config.categories.map(cat => (
-                        <CategoryRow key={cat} cat={cat}
-                            isCore={CORE_CATEGORIES.includes(cat)}
-                            onDelete={() => removeCategory(cat)} />
-                    ))}
+                    <div className="ct-list">
+                        {config.categories.map((cat, i) => (
+                            <CategoryRow key={cat} cat={cat} index={i}
+                                isCore={CORE_CATEGORIES.includes(cat)}
+                                onDelete={() => removeCategory(cat)} />
+                        ))}
+                    </div>
                     <AddRow palette={PALETTE.categories} placeholder1="New category name"
                         btnLabel="+ Add" onAdd={v => addCategory(v)} />
                 </TypeCard>
@@ -528,16 +557,37 @@ const CourseTypesSection = () => {
                     icon={<><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></>}
                 >
                     <p className="ct-desc">Modalities for TDC courses - e.g. Face-to-Face, Online.</p>
-                    {config.tdcTypes.map((t, i) => (
-                        <TypeRow key={t.value} item={t} palette={PALETTE.tdcTypes}
-                            isEditing={editingItem?.section === 'tdcTypes' && editingItem.index === i}
-                            onEdit={() => setEditingItem({ section: 'tdcTypes', index: i })}
-                            onDelete={() => removeType('tdcTypes', t.value)}
-                            onSave={(v, l) => saveEdit('tdcTypes', i, v, l)}
-                            onCancel={() => setEditingItem(null)} />
-                    ))}
+                    <div className="ct-list">
+                        {config.tdcTypes.map((t, i) => (
+                            <TypeRow key={t.value} item={t} palette={PALETTE.tdcTypes} index={i}
+                                isEditing={editingItem?.section === 'tdcTypes' && editingItem.index === i}
+                                onEdit={() => setEditingItem({ section: 'tdcTypes', index: i })}
+                                onDelete={() => removeType('tdcTypes', t.value)}
+                                onSave={(v, l) => saveEdit('tdcTypes', i, v, l)}
+                                onCancel={() => setEditingItem(null)} />
+                        ))}
+                    </div>
                     <AddRow palette={PALETTE.tdcTypes} placeholder1="Value (e.g. Hybrid)" placeholder2="Label (e.g. Hybrid/Blended)"
                         btnLabel="+ Add" onAdd={(v, l) => addType('tdcTypes', v, l)} />
+                </TypeCard>
+                
+                {/* 3. PDC Sub-Types */}
+                <TypeCard title="PDC Sub-Types" iconClass="emerald" badge={`${config.pdcTypes.length} types`}
+                    icon={<><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></>}
+                >
+                    <p className="ct-desc">Practical driving categories - e.g. Motorcycle, Manual, Automatic.</p>
+                    <div className="ct-list">
+                        {config.pdcTypes.map((t, i) => (
+                            <TypeRow key={t.value} item={t} palette={PALETTE.pdcTypes} index={i}
+                                isEditing={editingItem?.section === 'pdcTypes' && editingItem.index === i}
+                                onEdit={() => setEditingItem({ section: 'pdcTypes', index: i })}
+                                onDelete={() => removeType('pdcTypes', t.value)}
+                                onSave={(v, l) => saveEdit('pdcTypes', i, v, l)}
+                                onCancel={() => setEditingItem(null)} />
+                        ))}
+                    </div>
+                    <AddRow palette={PALETTE.pdcTypes} placeholder1="Value (e.g. Heavy)" placeholder2="Label (e.g. Heavy Vehicle)"
+                        btnLabel="+ Add" onAdd={(v, l) => addType('pdcTypes', v, l)} />
                 </TypeCard>
 
                 {/* 4. Bundle Types - full width */}
@@ -547,9 +597,9 @@ const CourseTypesSection = () => {
                     <p className="ct-desc">Combine one TDC type + one or more PDC types, or multiple PDC types alone, to create promo packages.</p>
 
                     {/* Bundle list */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
+                    <div className="ct-list">
                         {config.bundleTypes.map((t, i) => (
-                            <BundleRow key={t.key} item={t}
+                            <BundleRow key={t.key} item={t} index={i}
                                 onEdit={() => beginBundleEdit(i)}
                                 onDelete={() => removeBundle(i)} />
                         ))}
@@ -708,11 +758,38 @@ const CourseTypesSection = () => {
                         </div>
                     </div>
                 )}
+                
+                {/* 5. Promo Bundle PDC Options List */}
+                <TypeCard title="Bundle PDC Options" iconClass="emerald" badge={`${getPromoPdcOptions(config).length} choices`} fullWidth
+                    icon={<><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></>}
+                >
+                    <p className="ct-desc">These are the specific PDC course options available to choose from when creating a Promo Bundle.</p>
+                    <div className="ct-list">
+                        {getPromoPdcOptions(config).map((opt, i) => (
+                            <div key={opt} className="ct-row">
+                                <div className="ct-row-left">
+                                    <div className="ct-avatar" style={{ background: PALETTE.pdcTypes.light, color: PALETTE.pdcTypes.text, fontSize: '0.7rem' }}>
+                                        {i + 1}
+                                    </div>
+                                    <span className="ct-row-name">{opt}</span>
+                                </div>
+                                <div className="ct-actions">
+                                    <button 
+                                        onClick={() => save({ ...config, promoPdcOptions: getPromoPdcOptions(config).filter((_, idx) => idx !== i) })} 
+                                        className="ct-btn delete" title="Remove"
+                                    >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <AddRow palette={PALETTE.pdcTypes} placeholder1="PDC Option Name" btnLabel="+ Add Option" 
+                        onAdd={(v) => save({ ...config, promoPdcOptions: [...getPromoPdcOptions(config), v] })} />
+                </TypeCard>
 
             </div>
         </div>
     );
 };
-
 export default CourseTypesSection;
-

@@ -38,6 +38,18 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       }]
     }
 
+    // Fallback for regular PDC course where schedule is in 'date'/'date2'
+    const hasPdcInCart = activeCart.some(item => (item?.category || '').toLowerCase() === 'pdc' || (item?.name || '').toLowerCase().includes('pdc'));
+    if (hasPdcInCart && scheduleSelection?.date && !scheduleSelection?.isOnlineTdcNoSchedule) {
+      return [{
+        label: 'PDC Schedule',
+        date1: scheduleSelection.date,
+        date2: scheduleSelection.date2 || null,
+        time1: scheduleSelection.slotDetails?.time || scheduleSelection.slotDetails?.time_range || 'N/A',
+        time2: scheduleSelection.slotDetails2?.time || scheduleSelection.slotDetails2?.time_range || null,
+      }]
+    }
+
     // Otherwise, if there are individual PDC items in the cart, we look for them.
     // (This part is mostly legacy but kept for safety).
     const pdcCartItems = activeCart.filter(item => (item?.category || '').toLowerCase() === 'pdc' || (item?.name || '').toLowerCase().includes('pdc'))
@@ -255,7 +267,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       vehicleTipsTotal, 
       customAddonsTotal, 
       convenienceTotal, 
-      saturdaySurcharge: 0, // No longer a separate line item
+      saturdaySurcharge: saturdaySurchargeAmount, 
       subtotal: embeddedSubtotal, 
       hasDiscount, 
       discountPercent: finalDiscountPercent, 
@@ -436,9 +448,30 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       const expandedCourseList = [];
       activeCart.forEach(item => {
         let itemSurcharge = 0;
+        
+        // Single PDC Item Surcharge
         if (String(item.category || '').toUpperCase() === 'PDC') {
-          const d1 = new Date(item.scheduleDate);
-          if (!isNaN(d1.getTime()) && d1.getDay() === 6) itemSurcharge += 150;
+          const key = getPdcSelectionKey(item);
+          const sel = scheduleSelection?.pdcSelections?.[key] || scheduleSelection?.pdcSelections?.[item.id];
+          if (sel) {
+            if (sel.pdcDate && new Date(sel.pdcDate).getDay() === 6) itemSurcharge += 150;
+            if (sel.pdcDate2 && new Date(sel.pdcDate2).getDay() === 6) itemSurcharge += 150;
+          }
+        }
+        
+        // Promo Bundle Surcharge (add to the main bundle price)
+        if (String(item.category || '').toLowerCase() === 'promo') {
+          const nested = item._pdcCourses || (item._pdcCourse ? [item._pdcCourse] : []);
+          if (Array.isArray(nested)) {
+            nested.forEach(c => {
+              const key = getPdcSelectionKey(c);
+              const sel = scheduleSelection?.pdcSelections?.[key] || scheduleSelection?.pdcSelections?.[c.id];
+              if (sel) {
+                if (sel.pdcDate && new Date(sel.pdcDate).getDay() === 6) itemSurcharge += 150;
+                if (sel.pdcDate2 && new Date(sel.pdcDate2).getDay() === 6) itemSurcharge += 150;
+              }
+            });
+          }
         }
 
         // Add the main item
@@ -593,7 +626,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         addonsDetailed: addonsDetailedPayload,
         convenienceFee: totalsData.convenienceTotal,
         subtotal: totalsData.subtotal,
-        saturdaySurcharge: 0,
+        saturdaySurcharge: totalsData.saturdaySurcharge,
         isManualBundle: !!totalsData.isMultiCourseApplied,
         promoDiscount: totalsData.discountValue,
         promoPct: totalsData.discountPercent,
@@ -742,7 +775,33 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                           </div>
                         </div>
                         <div className="font-bold text-slate-800 ml-4 whitespace-nowrap">
-                          ₱{(totals.calcBasePrice * (item.quantity || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {(() => {
+                            let displayItemSurcharge = 0;
+                            if (String(item.category || '').toUpperCase() === 'PDC') {
+                              const key = getPdcSelectionKey(item);
+                              const sel = scheduleSelection?.pdcSelections?.[key] || scheduleSelection?.pdcSelections?.[item.id];
+                              if (sel) {
+                                if (sel.pdcDate && new Date(sel.pdcDate).getDay() === 6) displayItemSurcharge += 150;
+                                if (sel.pdcDate2 && new Date(sel.pdcDate2).getDay() === 6) displayItemSurcharge += 150;
+                              } else if (scheduleSelection?.date && !scheduleSelection?.isOnlineTdcNoSchedule) {
+                                if (new Date(scheduleSelection.date).getDay() === 6) displayItemSurcharge += 150;
+                                if (scheduleSelection.date2 && new Date(scheduleSelection.date2).getDay() === 6) displayItemSurcharge += 150;
+                              }
+                            } else if (String(item.category || '').toLowerCase() === 'promo') {
+                              const nested = item._pdcCourses || (item._pdcCourse ? [item._pdcCourse] : []);
+                              if (Array.isArray(nested)) {
+                                nested.forEach(c => {
+                                  const key = getPdcSelectionKey(c);
+                                  const sel = scheduleSelection?.pdcSelections?.[key] || scheduleSelection?.pdcSelections?.[c.id];
+                                  if (sel) {
+                                    if (sel.pdcDate && new Date(sel.pdcDate).getDay() === 6) displayItemSurcharge += 150;
+                                    if (sel.pdcDate2 && new Date(sel.pdcDate2).getDay() === 6) displayItemSurcharge += 150;
+                                  }
+                                });
+                              }
+                            }
+                            return `₱${(totals.calcBasePrice * (item.quantity || 1) + displayItemSurcharge).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          })()}
                         </div>
                       </div>
 
@@ -1420,7 +1479,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                       <div className="space-y-1.5 text-xs text-white/60 font-medium mb-3">
                         <div className="flex justify-between items-center">
                           <span>Course Price</span>
-                          <span className="font-bold text-white/90">₱{totalsData.baseCoursePriceTotal.toLocaleString()}</span>
+                          <span className="font-bold text-white/90">₱{(totalsData.baseCoursePriceTotal + totalsData.saturdaySurcharge).toLocaleString()}</span>
                         </div>
 
                         {(totalsData.reviewerTotal > 0 || totalsData.vehicleTipsTotal > 0 || totalsData.customAddonsTotal > 0) && (

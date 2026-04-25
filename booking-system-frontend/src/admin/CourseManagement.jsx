@@ -32,8 +32,10 @@ const normalizePromoPdcName = (value) => {
     if (lower === 'motorcycle') return 'PDC Motor Manual';
     if (lower === 'manual' || lower === 'carmt' || lower === 'car mt' || lower === 'pdc car manual') return 'PDC Car Manual';
     if (lower === 'automatic' || lower === 'carat' || lower === 'car at' || lower === 'pdc car automatic') return 'PDC Car Automatic';
-    if (lower === 'v1-tricycle' || lower === 'a1-tricycle' || lower === 'pdc a1-tricycle') return 'PDC A1-Tricycle';
-    if (lower === 'b1-van/b2 - l300' || lower === 'b1-van/b2-l300' || lower === 'pdc b1-van/b2-l300') return 'PDC B1-Van/B2-L300';
+    if (lower === 'v1-tricycle' || lower === 'a1-tricycle' || lower === 'pdc a1-tricycle' || lower === 'tricycle' || lower === 'pdc tricycle') return 'PDC Tricycle';
+    if (lower === 'b1-van' || lower === 'pdc b1-van') return 'PDC B1-Van';
+    if (lower === 'b2-l300' || lower === 'pdc b2-l300') return 'PDC B2-L300';
+    if (lower === 'b1-van/b2 - l300' || lower === 'b1-van/b2-l300' || lower === 'pdc b1-van/b2-l300') return 'PDC B1-Van';
     return cleaned;
 };
 
@@ -548,9 +550,10 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
         if (category === 'tdc' || name.includes('theoretical')) return 1;
         if (name.includes('motorcycle')) return 2;
         if (name.includes('pdc') && name.includes('car')) return 3;
-        if (name.includes('tricycle') || name.includes('a1')) return 4;
-        if (name.includes('van') || name.includes('b1') || name.includes('b2') || name.includes('l300')) return 5;
-        return 6;
+        if (name.includes('tricycle')) return 4;
+        if (name.includes('van') || name.includes('b1')) return 5;
+        if (name.includes('l300') || name.includes('b2')) return 6;
+        return 7;
     };
 
     // Separate regular courses from promo bundle packages
@@ -1859,7 +1862,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                                     .map(t => <option key={t.value} value={t.value}>{t.label}</option>)
                                             )}
                                             {courseData.category === 'PDC' && (
-                                                (courseConfig?.pdcTypes || [{ value: 'Automatic', label: 'Automatic' }, { value: 'Manual', label: 'Manual' }, { value: 'V1-Tricycle', label: 'V1-Tricycle' }, { value: 'B1-Van/B2 - L300', label: 'B1 - Van/B2 - L300' }])
+                                                (courseConfig?.pdcTypes || [{ value: 'Automatic', label: 'Automatic' }, { value: 'Manual', label: 'Manual' }, { value: 'Tricycle', label: 'Tricycle' }, { value: 'B1-Van', label: 'B1 - Van' }, { value: 'B2-L300', label: 'B2 - L300' }])
                                                     .map(t => <option key={t.value} value={t.value}>{t.label}</option>)
                                             )}
                                         </select>

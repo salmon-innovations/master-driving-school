@@ -183,9 +183,13 @@ const getEffectiveBalanceDue = (booking = {}) => {
     const listedCoursePrice = Number(parseFloat(booking?.course_price || 0).toFixed(2));
     const paymentType = String(booking?.payment_type || '').toLowerCase();
     
-    let assessed = listedCoursePrice;
-    if (paymentType.includes('down')) {
+    let assessed = 0;
+    if (listedCoursePrice > 0) {
+        assessed = listedCoursePrice;
+    } else if (paymentType.includes('down')) {
         assessed = Math.max(listedCoursePrice, paid * 2);
+    } else {
+        assessed = paid;
     }
     
     return Math.max(0, Number((assessed - paid).toFixed(2)));

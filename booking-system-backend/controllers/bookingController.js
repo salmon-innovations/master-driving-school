@@ -23,7 +23,14 @@ const createBooking = async (req, res) => {
     
     let status = 'pending';
     if (isStaff) {
-      status = paymentType === 'Full Payment' ? 'paid' : 'partial_payment';
+      const toAmount = (v) => {
+        if (v == null) return 0;
+        const n = Number(String(v).replace(/[^0-9.-]/g, ''));
+        return Number.isFinite(n) ? n : 0;
+      };
+      const isExplicitFull = String(paymentType || '').toLowerCase().trim() === 'full payment';
+      const isPaidInFull = (toAmount(amountPaid) >= toAmount(assessedTotal) - 0.009) && toAmount(assessedTotal) > 0;
+      status = (isExplicitFull || isPaidInFull) ? 'paid' : 'partial_payment';
     } else {
       // Force pending for students. They should be using the StarPay flow anyway.
       status = 'pending';

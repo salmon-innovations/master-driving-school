@@ -47,10 +47,9 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
   const [promoStep, setPromoStep] = useState(1)               // 1 = pick TDC, 2 = pick PDC
 
   // Flags & Derived State (Must be defined before useEffects that use them)
-  const isTDCCourse = selectedCourse?.type === 'tdc' ||
-    selectedCourse?.category === 'TDC' ||
-    selectedCourse?.name?.toLowerCase().includes('tdc') ||
-    selectedCourse?.shortName?.toLowerCase().includes('tdc')
+  const isTDCCourse = String(selectedCourse?.category || '').toUpperCase() === 'TDC' ||
+    String(selectedCourse?.type || '').toLowerCase() === 'tdc' ||
+    (String(selectedCourse?.name || '').toLowerCase().includes('tdc') && !String(selectedCourse?.name || '').toLowerCase().includes('pdc'))
 
   const selectedCartItems = useMemo(() => cart.filter(i => i.selected), [cart]);
   const isMultiStepFlow = 
@@ -93,10 +92,13 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
     (promoHasPdcFromType || promoHasPdcFromName || promoHasPdcFromSelectedCourseMeta || promoHasPdcFromCart)
 
   const promoHasTdc = isTDCCourse || selectedCartItems.some(i => {
-    const cat = (i.category || '').toLowerCase();
-    const nm = (i.name || '').toLowerCase();
-    return cat === 'tdc' || nm.includes('tdc');
+    const cat = String(i.category || '').toUpperCase();
+    const nm = String(i.name || '').toLowerCase();
+    return cat === 'TDC' || (nm.includes('tdc') && !nm.includes('pdc'));
   });
+
+  const isActualPromo = selectedCourse?.category === 'Promo' || selectedCartItems.some(i => i.category === 'Promo');
+  const hasTdcInTransaction = isTDCCourse || selectedCartItems.some(i => (i.category || '').toLowerCase().includes('tdc'));
 
 
   useEffect(() => {
@@ -132,7 +134,11 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
   // Auto-skip TDC step if it's Online TDC OR if there is no TDC in the transaction
   useEffect(() => {
     if (isPromoCourse && promoStep === 1) {
-      if (isPromoTdcOnline || !promoHasTdc) {
+      // Logic: Skip TDC step if:
+      // 1. The transaction has no TDC items at all
+      // 2. The TDC in the transaction is ONLINE/OTDC (no scheduling required for online)
+      if (!promoHasTdc || isPromoTdcOnline) {
+        console.log('Auto-skipping TDC step: promoHasTdc=', promoHasTdc, 'isPromoTdcOnline=', isPromoTdcOnline);
         setPromoStep(2);
       }
     }
@@ -573,10 +579,10 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
     today.setHours(0, 0, 0, 0)
     const checkDate = new Date(monthRef.getFullYear(), monthRef.getMonth(), day)
     const minAllowedDate = new Date(today)
-
+    
     // Regular courses (online/TDC or regular PDC) use 1 day advance. 
-    // Promo bundles keep 2 days advance for PDC components.
-    const advanceDays = isPromoCourse ? (isTDCCourse ? 1 : 2) : 1;
+    // Actual Promo bundles (TDC+PDC) require 2 days advance for the PDC component.
+    const advanceDays = (isPromoCourse && !isTDCCourse && (isActualPromo || hasTdcInTransaction)) ? 2 : 1;
     minAllowedDate.setDate(today.getDate() + advanceDays)
 
     return checkDate >= minAllowedDate && checkDate.getDay() !== 0 // no Sundays
@@ -793,7 +799,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
         return
       }
       
-      if (!promoTdcSlot && String(promoTdcType || '').toUpperCase() !== 'ONLINE') {
+      if (promoHasTdc && !promoTdcSlot && String(promoTdcType || '').toUpperCase() !== 'ONLINE') {
         showNotification('Please select a TDC schedule (Step 1)', 'error')
         setPromoStep(1)
         return
@@ -848,9 +854,9 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
       const primaryPdc = activePromoPdcCourse ? pdcSelectionsPayload[activePromoPdcCourse._pdcKey] : null
 
       const scheduleData = {
-        date: new Date(promoTdcSlot.date + 'T00:00:00'),
-        slot: promoTdcSlot.id,
-        slotDetails: {
+        date: promoTdcSlot ? new Date(promoTdcSlot.date + 'T00:00:00') : (promoPdcDate || null),
+        slot: promoTdcSlot?.id || null,
+        slotDetails: promoTdcSlot ? {
           id: promoTdcSlot.id,
           session: promoTdcSlot.session,
           type: promoTdcSlot.type,
@@ -859,7 +865,7 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
           total: promoTdcSlot.total_capacity,
           date: promoTdcSlot.date,
           end_date: promoTdcSlot.end_date,
-        },
+        } : null,
         pdcDate: primaryPdc?.pdcDate || promoPdcDate,
         pdcSlot: primaryPdc?.pdcSlot || promoPdcSlot?.id,
         pdcSlotDetails: primaryPdc?.pdcSlotDetails || (promoPdcSlot ? {
@@ -1212,12 +1218,17 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
   const promoPdcMinDate = (() => {
     const today = new Date(); today.setHours(0, 0, 0, 0)
     const base = new Date(today)
+    
+    // Even without a TDC slot (e.g. online TDC), we still need the minimum advance days (1 for regular, 2 for promo PDC)
+    const advanceDays = (isPromoCourse && (isActualPromo || hasTdcInTransaction)) ? 2 : 1;
+    base.setDate(today.getDate() + advanceDays)
+    
     if (!promoTdcSlot) return base
     const tdcEnd = promoTdcSlot.end_date || promoTdcSlot.date
     if (!tdcEnd) return base
     const tdcEndDate = new Date(tdcEnd + 'T00:00:00')
     const afterTdc = new Date(tdcEndDate)
-    afterTdc.setDate(afterTdc.getDate() + 3) // Advance two days base on TDC last day
+    afterTdc.setDate(afterTdc.getDate() + 2) // Advance two days base on TDC last day
     return afterTdc > base ? afterTdc : base
   })()
 
@@ -2803,10 +2814,12 @@ function Schedule({ onNavigate, selectedCourse, preSelectedBranch, scheduleSelec
                   </button>
                 ) : (
                   <>
-                    <button onClick={() => { setPromoStep(1) }} className="hidden sm:flex py-4 px-6 bg-white text-[#2157da] border-2 border-[#2157da] rounded-2xl font-bold hover:bg-blue-50 transition-all items-center justify-center gap-2 flex-shrink-0">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
-                      Change TDC
-                    </button>
+                    {promoHasTdc && (
+                      <button onClick={() => { setPromoStep(1) }} className="hidden sm:flex py-4 px-6 bg-white text-[#2157da] border-2 border-[#2157da] rounded-2xl font-bold hover:bg-blue-50 transition-all items-center justify-center gap-2 flex-shrink-0">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
+                        Change TDC
+                      </button>
+                    )}
                     <button
                       onClick={handleProceedToPayment}
                       disabled={isPromoOnlineTdcLockedBundle ? false : (promoPdcCourses.length > 0 ? promoPdcCourses.some(c => !getIsPromoPdcComplete(c._pdcKey)) : (!promoPdcSlot || (isHalfDay(promoPdcSlot?.session) && !promoPdcSlot2)))}
