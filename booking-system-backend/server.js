@@ -154,6 +154,25 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', version: '2.0.0' });
 });
 
+// Serve static files from the 'dist' directory (if it exists)
+const distPath = path.join(__dirname, 'dist');
+app.use(express.static(distPath));
+
+// Handle SPA routing: serve index.html for all non-API routes
+app.get('*', (req, res, next) => {
+  // If it's an API route that wasn't found, let the 404 handler take it
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  // Otherwise, serve the frontend index.html
+  res.sendFile(path.join(distPath, 'index.html'), (err) => {
+    if (err) {
+      // If index.html is missing, fall through to the 404 handler
+      next();
+    }
+  });
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
