@@ -86,13 +86,7 @@ if (!allowedOrigins.includes('https://www.masterdriving.ph')) {
   allowedOrigins.push('https://www.masterdriving.ph');
 }
 
-// System Health & Maintenance Endpoint (No CORS or Rate Limit)
-app.get('/api/health', (req, res) => {
-  const fs = require('fs');
-  const path = require('path');
-  const isMaintenance = fs.existsSync(path.join(__dirname, '.maintenance'));
-  res.json({ status: 'ok', maintenance: isMaintenance });
-});
+
 
 
 
@@ -109,6 +103,14 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+// System Health & Maintenance Endpoint
+app.get('/api/health', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const isMaintenance = fs.existsSync(path.join(__dirname, '.maintenance'));
+  res.json({ status: 'ok', maintenance: isMaintenance });
+});
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
