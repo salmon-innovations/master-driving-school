@@ -608,14 +608,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         fetchTdcOnlineStudents({ branchId: selectedBranch || undefined })
             .then(res => {
                 const rawData = Array.isArray(res?.data) ? res.data : [];
-                // Include all students who need onboarding, regardless of payment method.
-                // We only filter for TDC Online or Promo Bundle course types.
-                const filtered = rawData.filter(row => {
-                    const isTdcOnlineOrBundle = /online|otdc|bundle|\+/i.test(row.course_name || '') || 
-                                              /online|otdc/i.test(row.course_type || '');
-                    return isTdcOnlineOrBundle;
-                });
-                setTdcOnlineStudents({ data: filtered, loading: false });
+                setTdcOnlineStudents({ data: rawData, loading: false });
             })
             .catch(() => {
                 setTdcOnlineStudents({ data: [], loading: false });
@@ -1955,12 +1948,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                 fetchTdcOnlineStudents({ branchId: selectedBranch || undefined })
                                     .then(res => {
                                         const rawData = Array.isArray(res?.data) ? res.data : [];
-                                        const filtered = rawData.filter(row => {
-                                            const isTdcOnlineOrBundle = /online|otdc|bundle|\+/i.test(row.course_name || '') || 
-                                                                      /online|otdc/i.test(row.course_type || '');
-                                            return isTdcOnlineOrBundle;
-                                        });
-                                        setTdcOnlineStudents({ data: filtered, loading: false });
+                                        setTdcOnlineStudents({ data: rawData, loading: false });
                                     })
                                     .catch(() => {
                                         setTdcOnlineStudents({ data: [], loading: false });

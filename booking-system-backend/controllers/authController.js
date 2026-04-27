@@ -27,21 +27,24 @@ const verifyTurnstileToken = async (token, remoteIp) => {
   }
 
   try {
-    // Log token length and prefix for debugging (tokens are usually very long)
+    // Log token prefix for debugging
     const tokenPrefix = cleanToken.substring(0, 10);
-    console.log(`🔍 Verifying Turnstile token (length: ${cleanToken.length}, prefix: ${tokenPrefix}...)`);
+    console.log(`🔍 Verifying Turnstile token (prefix: ${tokenPrefix}...)`);
 
-    // Use URLSearchParams to ensure proper encoding of the body parameters.
     const params = new URLSearchParams();
     params.append('secret', secret);
     params.append('response', cleanToken);
 
+    // Explicitly stringify the params for the POST body
     const verifyResponse = await axios.post(
       'https://challenges.cloudflare.com/turnstile/v0/siteverify',
-      params,
+      params.toString(),
       {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        timeout: 5000,
+        headers: { 
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json'
+        },
+        timeout: 6000,
       }
     );
 
@@ -50,8 +53,12 @@ const verifyTurnstileToken = async (token, remoteIp) => {
       console.log('✅ Turnstile verification successful');
       return true;
     } else {
-      console.warn('❌ Turnstile verification failed:', result['error-codes'] || 'Unknown error');
-      console.warn('🔍 Response from Cloudflare:', JSON.stringify(result));
+      const errorCodes = result['error-codes'] || [];
+      console.warn(`❌ Turnstile verification failed: ${errorCodes.join(', ') || 'No error codes'}`);
+      console.warn('🔍 Cloudflare full response:', JSON.stringify(result));
+      
+      // If the error is 'invalid-input-response', it means the token was already used or is malformed.
+      // This helps diagnose re-login issues where tokens might be reused or expire too fast.
       return false;
     }
   } catch (error) {
