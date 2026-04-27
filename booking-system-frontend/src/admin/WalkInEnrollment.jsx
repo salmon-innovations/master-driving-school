@@ -4310,9 +4310,16 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 </p>
                                 <div style={{ display: 'grid', gap: '10px' }}>
                                     {regularBundleCourses.map((course, idx) => {
-                                        const itemPrice = Number(course?.price || 0);
+                                        let itemPrice = Number(course?.price || 0);
+                                        let typeLabel = String(course?.course_type || '').toUpperCase();
+                                        
+                                        // Override TDC display with selected modality from Step 3
+                                        if (course?.category === 'TDC' && selectedTypeOpt) {
+                                            itemPrice = selectedTypeOpt.price;
+                                            typeLabel = selectedTypeOpt.label.toUpperCase();
+                                        }
+
                                         const itemOriginal = Number(course?.original_price ?? course?.originalPrice ?? itemPrice);
-                                        const typeLabel = String(course?.course_type || '').toUpperCase();
                                         return (
                                             <div key={`${course?.id || course?.name || 'course'}-${idx}`} className="payment-summary-card" style={{ margin: 0 }}>
                                                 <div className="payment-summary-card__left">
