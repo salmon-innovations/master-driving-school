@@ -16,7 +16,6 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
 
   useImperativeHandle(ref, () => ({
     reset: () => {
-      // Incrementing resetKey will trigger the useEffect to unmount and remount the widget
       setResetKey(prev => prev + 1)
       onVerifyRef.current?.('')
     }
@@ -31,28 +30,38 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
   useEffect(() => {
     if (!siteKey || !containerRef.current) return undefined
 
+    let renderTimer;
     const renderWidget = () => {
       if (!window.turnstile || !containerRef.current || widgetIdRef.current !== null) return
       
-      try {
-        widgetIdRef.current = window.turnstile.render(containerRef.current, {
-          sitekey: siteKey,
-          theme: 'light',
-          callback: (token) => {
-            onVerifyRef.current?.(token)
-          },
-          'expired-callback': () => {
-            onVerifyRef.current?.('')
-            onExpireRef.current?.()
-          },
-          'error-callback': () => {
-            onVerifyRef.current?.('')
-            onErrorRef.current?.()
-          },
-        })
-      } catch (err) {
-        console.error('Failed to render Turnstile:', err)
-      }
+      // Small delay to ensure clean state
+      renderTimer = setTimeout(() => {
+        if (!containerRef.current || widgetIdRef.current !== null) return
+
+        try {
+          console.log('🛡️ Rendering Turnstile widget...')
+          widgetIdRef.current = window.turnstile.render(containerRef.current, {
+            sitekey: siteKey,
+            theme: 'light',
+            callback: (token) => {
+              console.log(`🛡️ Turnstile verified (token prefix: ${token.substring(0, 10)}...)`)
+              onVerifyRef.current?.(token)
+            },
+            'expired-callback': () => {
+              console.log('🛡️ Turnstile token expired')
+              onVerifyRef.current?.('')
+              onExpireRef.current?.()
+            },
+            'error-callback': () => {
+              console.error('🛡️ Turnstile error')
+              onVerifyRef.current?.('')
+              onErrorRef.current?.()
+            },
+          })
+        } catch (err) {
+          console.error('Failed to render Turnstile:', err)
+        }
+      }, 100)
     }
 
     const existingScript = document.getElementById(TURNSTILE_SCRIPT_ID)
@@ -64,6 +73,7 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
       }
 
       return () => {
+        clearTimeout(renderTimer)
         existingScript.removeEventListener('load', renderWidget)
         if (window.turnstile && widgetIdRef.current !== null) {
           try {
@@ -83,6 +93,7 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
     document.head.appendChild(script)
 
     return () => {
+      clearTimeout(renderTimer)
       script.removeEventListener('load', renderWidget)
       if (window.turnstile && widgetIdRef.current !== null) {
         try {
