@@ -8,7 +8,7 @@ const { generateVerificationCode, sendVerificationEmail } = require('../utils/em
 
 const MAX_FAILED_LOGIN_ATTEMPTS = parseInt(process.env.MAX_FAILED_LOGIN_ATTEMPTS || '5', 10);
 const LOGIN_LOCK_MINUTES = parseInt(process.env.LOGIN_LOCK_MINUTES || '15', 10);
-const TURNSTILE_ENABLED = process.env.TURNSTILE_ENABLED === 'true' || process.env.NODE_ENV === 'production';
+const TURNSTILE_ENABLED = process.env.TURNSTILE_ENABLED === 'true';
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '';
 
 const verifyTurnstileToken = async (token, remoteIp) => {
