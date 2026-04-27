@@ -778,8 +778,10 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
             source.forEach((item, index) => {
                 const meta = getPromoPdcCourseMeta(item);
-                // Use a combination of groupKey AND index for the unique track key to allow multiple courses of same vehicle type
-                const trackKey = `${isManualBundle ? getPromoPdcCourseKey(item) : getPromoPdcGroupKey(item)}-${index}`;
+                // Preserve _pdcKey if already set (e.g. 'pdc-track-1' from handleProceedToStep3),
+                // otherwise compute one. This prevents a key mismatch between where
+                // promoPdcSelections is saved vs looked-up.
+                const trackKey = item._pdcKey || `${isManualBundle ? getPromoPdcCourseKey(item) : getPromoPdcGroupKey(item)}-${index}`;
                 const groupKey = isManualBundle ? getPromoPdcCourseKey(item) : getPromoPdcGroupKey(item);
 
                 const txSet = transmissionsByGroup.get(groupKey);
