@@ -1,7 +1,7 @@
 const pool = require('./config/db');
-async function checkSchema() {
+async function checkLastBookings() {
     try {
-        const res = await pool.query("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'bookings'");
+        const res = await pool.query("SELECT id, status, payment_type, transaction_id, created_at FROM bookings ORDER BY created_at DESC LIMIT 5");
         console.log(JSON.stringify(res.rows, null, 2));
         process.exit(0);
     } catch (err) {
@@ -9,4 +9,4 @@ async function checkSchema() {
         process.exit(1);
     }
 }
-checkSchema();
+checkLastBookings();

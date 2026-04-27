@@ -270,8 +270,19 @@ function Courses({ onNavigate, cart, setCart, isLoggedIn, preSelectedBranch, set
 
   const isSelectedOnlineTdc = useCallback(() => {
     if (!selectedCourse) return false
+    
+    const isPromo = String(selectedCourse?.category || '').toLowerCase() === 'promo'
+    const typeStr = String(courseType || '').toLowerCase()
+
+    if (isPromo) {
+      // For promos, only look at the TDC part of the bundle key (before the +)
+      const tdcPart = typeStr.includes('+') ? typeStr.split('+')[0].trim() : typeStr
+      return tdcPart.includes('online') || tdcPart.includes('otdc')
+    }
+
+    // For regular courses
     const isTdcCourse = selectedCourse?.type === 'tdc' || selectedCourse?.category === 'TDC' || (selectedCourse?.name || '').toLowerCase().includes('tdc') || (selectedCourse?.shortName || '').toLowerCase().includes('tdc')
-    return isTdcCourse && String(courseType || '').toLowerCase().includes('online')
+    return isTdcCourse && (typeStr === 'online' || typeStr.includes('otdc'))
   }, [selectedCourse, courseType])
 
   const isSelectedPdcCourse = useCallback(() => {

@@ -265,9 +265,9 @@ const normalizeBookingStatusKey = (rawStatus = '') => {
     const value = String(rawStatus || '').toLowerCase().trim();
     if (value === 'paid' || value === 'confirmed' || value === 'completed') return 'paid';
     if (value === 'pending') return 'pending';
-    if (value === 'cancelled') return 'cancelled';
-    if (value === 'partial_payment' || value === 'partial payment') return 'partial-payment';
-    return 'partial-payment';
+    if (value === 'cancelled' || value === 'cancelled') return 'cancelled';
+    if (value === 'partial_payment' || value === 'partial payment' || value.includes('partial')) return 'partial-payment';
+    return value || 'pending';
 };
 
 const getBookingStatusLabel = (statusKey = '') => {
@@ -363,6 +363,26 @@ const computeEstimatedBalanceDue = (booking = {}) => {
     return resolveAssessmentFigures(booking).remaining;
 };
 
+/**
+ * Derives the intended course price by backing out fees and addons from the assessed total.
+ * Useful for fixing bookings where the itemized price in notes was set to 1 Peso (e.g. testing).
+ */
+const getDerivedCoursePrice = (booking) => {
+    const { assessed } = resolveAssessmentFigures(booking);
+    const notesJson = parseNotesJson(booking?.rawNotes || booking?.notes || '');
+    
+    const convenienceFee = Math.max(0, Number(booking?.convenienceFee ?? notesJson?.convenienceFee ?? 0));
+    const notesAddonList = Array.isArray(notesJson?.addonsDetailed) ? notesJson.addonsDetailed : [];
+    const addonsTotal = notesAddonList.reduce((sum, item) => sum + Math.max(0, Number(item?.price || 0)), 0);
+    const surcharge = Math.max(0, Number(notesJson?.saturdaySurcharge || 0));
+    
+    // Derived = GrandTotal - Fees - Addons - Surcharge + Promo
+    // (Note: promoDiscount is already subtracted from assessed, so we add it back to get the 'gross' course price)
+    const promoDiscount = Math.max(0, Number(booking?.promoDiscount ?? notesJson?.promoDiscount ?? 0));
+    
+    return Math.max(0, assessed - convenienceFee - addonsTotal - surcharge + promoDiscount);
+};
+
 const buildCoursePaymentLines = (booking) => {
     const notesJson = parseNotesJson(booking?.rawNotes || '');
     
@@ -410,7 +430,26 @@ const buildCoursePaymentLines = (booking) => {
         }))
         .filter((line) => line.amount > 0);
 
-    if (noteLines.length > 0) return noteLines;
+    if (noteLines.length > 0) {
+        // Sanitize: If the sum of note lines is significantly different from coursePrice,
+        // it usually means the notes were saved with wrong (e.g. 1 Peso test) prices.
+        // We scale the prices proportionally to match the coursePrice.
+        const noteSum = noteLines.reduce((sum, line) => sum + line.amount, 0);
+        
+        // Prefer derived price from assessment figures to handle 1-peso test anomalies
+        const derivedPrice = getDerivedCoursePrice(booking);
+        const rawCoursePrice = Number(booking?.coursePrice || booking?.course_price || 0);
+        const coursePrice = derivedPrice > 0 ? derivedPrice : rawCoursePrice;
+        
+        if (coursePrice > 0 && noteSum > 0 && Math.abs(noteSum - coursePrice) > 5) {
+            const scale = coursePrice / noteSum;
+            return noteLines.map(line => ({
+                ...line,
+                amount: Number((line.amount * scale).toFixed(2))
+            }));
+        }
+        return noteLines;
+    }
 
     const explicitCourseLines = sourceCourseItems
         .map((item) => ({
@@ -450,7 +489,12 @@ const buildCoursePaymentLines = (booking) => {
 
 const buildPaymentBreakdown = (booking) => {
     const courseLines = buildCoursePaymentLines(booking);
-    const addonLines = (Array.isArray(booking?.addonsDetailed) ? booking.addonsDetailed : [])
+    const notesJson = parseNotesJson(booking?.rawNotes || booking?.notes || '');
+    const sourceAddons = (Array.isArray(booking?.addonsDetailed) && booking.addonsDetailed.length > 0)
+        ? booking.addonsDetailed
+        : (Array.isArray(notesJson?.addonsDetailed) ? notesJson.addonsDetailed : []);
+
+    const addonLines = sourceAddons
         .map((addon) => ({
             name: addon?.name || 'Add-on',
             price: Math.max(0, Number(addon?.price || 0)),
@@ -623,7 +667,7 @@ const Booking = () => {
             if (response.success) {
                 // Transform database fields to match UI expectations
                 const transformedBookings = response.bookings.map(booking => {
-                    const statusKeyBase = normalizeBookingStatusKey(booking.status || 'partial_payment');
+                    const statusKeyBase = normalizeBookingStatusKey(booking.status);
                     const statusKey = statusKeyBase;
                     const status = getBookingStatusLabel(statusKey);
 
@@ -841,7 +885,12 @@ const Booking = () => {
                             };
 
                             const recalculated = resolveAssessmentFigures(merged);
-                            if (recalculated.remaining > 0.009) {
+                            // Only override status to 'Partial Payment' if the DB status is not already
+                            // a terminal state (cancelled / paid). A cancelled downpayment booking will
+                            // always have remaining > 0 (nothing was paid), but it must NOT be shown
+                            // as Partial Payment — it is Cancelled.
+                            const isTerminalStatus = merged.statusKey === 'cancelled' || merged.statusKey === 'paid';
+                            if (!isTerminalStatus && recalculated.remaining > 0.009) {
                                 return {
                                     ...merged,
                                     statusKey: 'partial-payment',
@@ -857,7 +906,8 @@ const Booking = () => {
                         } catch(e) { return b; }
                     }
                     const fallbackRecalc = resolveAssessmentFigures(b);
-                    if (fallbackRecalc.remaining > 0.009) {
+                    const isFallbackTerminal = b.statusKey === 'cancelled' || b.statusKey === 'paid';
+                    if (!isFallbackTerminal && fallbackRecalc.remaining > 0.009) {
                         return {
                             ...b,
                             statusKey: 'partial-payment',

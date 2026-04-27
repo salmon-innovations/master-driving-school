@@ -235,7 +235,7 @@ const updateBookingStatus = async (req, res) => {
 
     const result = await pool.query(
       `UPDATE bookings SET status = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2 ${!isStaff ? "AND user_id = $3 AND status = 'pending'" : ''}
+       WHERE id = $2 ${!isStaff ? "AND user_id = $3 AND status IN ('pending', 'partial_payment')" : ''}
        RETURNING *`,
       !isStaff ? [normalizedStatus, id, userId] : [normalizedStatus, id]
     );

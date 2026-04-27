@@ -5,7 +5,8 @@ const {
   initiatePayment, 
   handleWebhook, 
   checkStatus, 
-  initiateRescheduleFeePayment
+  initiateRescheduleFeePayment,
+  simulateSuccess
 } = require('../controllers/starpayController');
 
 // Create StarPay QR payment order (student must be logged in)
@@ -18,6 +19,9 @@ router.post('/webhook', handleWebhook);
 router.get('/status/:msgId', checkStatus);
 
 router.post('/reschedule-fee/:enrollmentId', authenticateToken, initiateRescheduleFeePayment);
+
+// Test Mode: Simulate Success (Development/Testing only)
+router.post('/simulate-success/:msgId', simulateSuccess);
 
 // Diagnostic ping route
 router.get('/ping', (req, res) => res.json({ success: true, message: 'StarPay router is active' }));

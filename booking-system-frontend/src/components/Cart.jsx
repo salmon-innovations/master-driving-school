@@ -122,7 +122,11 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
           
           if (isPromo) {
             // 1. Check TDC if not Online
-            const isOnlineTdc = type.includes('online') || type.includes('otdc') || name.includes('otdc')
+            // Use course_type (bundle key) to determine TDC type — NEVER item.name.
+            // The admin can rename a package freely; the bundle key is the authoritative source.
+            const bundleKey = String(item.course_type || item.type || '').toLowerCase();
+            const tdcPart = bundleKey.includes('+') ? bundleKey.split('+')[0].trim() : bundleKey;
+            const isOnlineTdc = tdcPart.includes('online') || tdcPart.includes('otdc');
             if (!isOnlineTdc) {
               const tdcSlots = await schedulesAPI.getSlotsByDate(null, branchId, 'TDC')
               if (!validateSlotsForCourse(tdcSlots, { ...item, type: 'F2F' }, true, 1)) {
@@ -157,7 +161,14 @@ function Cart({ cart, setCart, showCart, setShowCart, onNavigate, isLoggedIn, pr
           } else {
             // Regular Course
             const isTDC = item.category === 'TDC' || name.includes('tdc')
-            const isOnline = isTDC && (type.includes('online') || type.includes('otdc') || name.includes('otdc'))
+            // Use item.type (explicitly set when added to cart) — NEVER item.name for online detection.
+            // course_type is the bundle key for Promo; for regular TDC, type is set to 'online'/'f2f'.
+            const courseTypeKey = String(item.course_type || '').toLowerCase();
+            const isOnline = isTDC && (
+              type === 'online' ||
+              courseTypeKey.includes('otdc') ||
+              courseTypeKey.split('+')[0].trim().includes('online')
+            )
             
             if (!isOnline) {
               const slotType = isTDC ? 'TDC' : 'PDC'

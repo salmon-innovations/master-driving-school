@@ -1,2 +1,20 @@
 // Debug logs for status updates
 [2026-04-18T08:51:41.404Z] UPDATE REQ: id=1, userId=3, role=walkin_student, status=Cancelled
+[2026-04-27T04:22:27.814Z] UPDATE REQ: id=2, userId=3, role=walkin_student, status=Cancelled
+[2026-04-27T04:22:27.815Z] UPDATE EXEC: isStaff=true, id=2, userId=3, normStatus=cancelled
+[2026-04-27T05:09:09.176Z] UPDATE REQ: id=1, userId=3, role=walkin_student, status=Cancelled
+[2026-04-27T05:09:09.178Z] UPDATE EXEC: isStaff=true, id=1, userId=3, normStatus=cancelled
+[2026-04-27T05:09:11.389Z] UPDATE REQ: id=1, userId=3, role=walkin_student, status=Cancelled
+[2026-04-27T05:09:11.390Z] UPDATE EXEC: isStaff=true, id=1, userId=3, normStatus=cancelled
+[2026-04-27T05:25:43.213Z] UPDATE REQ: id=1, userId=3, role=walkin_student, status=Cancelled
+[2026-04-27T05:25:43.214Z] UPDATE EXEC: isStaff=true, id=1, userId=3, normStatus=cancelled
+[2026-04-27T05:25:44.270Z] UPDATE REQ: id=1, userId=3, role=walkin_student, status=Cancelled
+[2026-04-27T05:25:44.270Z] UPDATE EXEC: isStaff=true, id=1, userId=3, normStatus=cancelled
+[2026-04-27T05:38:00.878Z] UPDATE REQ: id=1, userId=3, role=walkin_student, status=Cancelled
+[2026-04-27T05:38:00.880Z] UPDATE EXEC: isStaff=true, id=1, userId=3, normStatus=cancelled
+[2026-04-27T05:38:05.285Z] UPDATE REQ: id=1, userId=3, role=walkin_student, status=Cancelled
+[2026-04-27T05:38:05.286Z] UPDATE EXEC: isStaff=true, id=1, userId=3, normStatus=cancelled
+[2026-04-27T05:44:02.537Z] UPDATE REQ: id=1, userId=3, role=walkin_student, status=Cancelled
+[2026-04-27T05:44:02.538Z] UPDATE EXEC: isStaff=true, id=1, userId=3, normStatus=cancelled
+[2026-04-27T05:44:04.404Z] UPDATE REQ: id=1, userId=3, role=walkin_student, status=Cancelled
+[2026-04-27T05:44:04.404Z] UPDATE EXEC: isStaff=true, id=1, userId=3, normStatus=cancelled

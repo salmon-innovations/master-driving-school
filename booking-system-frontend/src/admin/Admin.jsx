@@ -436,12 +436,7 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
             const res = await adminAPI.getTdcOnlineStudents({ branchId: adminProfile.branchId || undefined });
             if (res.success) {
                 const rawData = Array.isArray(res.data) ? res.data : [];
-                const filtered = rawData.filter(row => {
-                    const isTdcOnlineOrBundle = /online|otdc|bundle|\+/i.test(row.course_name || '') || 
-                                              /online|otdc/i.test(row.course_type || '');
-                    return isTdcOnlineOrBundle;
-                });
-                setTdcOnlineQueue({ data: filtered, loading: false });
+                setTdcOnlineQueue({ data: rawData, loading: false });
             }
         } catch (err) {
             console.error('Failed to load TDC Online queue:', err);
@@ -455,10 +450,16 @@ const Admin = ({ onNavigate, setIsLoggedIn }) => {
             // Decrease the alert count by marking the notification as read locally
             markAsRead(String(bookingId));
             showNotification('TDC Online account setup marked as done.', 'success');
-            // Refresh local queue
+            // Update local queue to reflect onboarded status without removing the row
             setTdcOnlineQueue(prev => ({
                 ...prev,
-                data: prev.data.filter(item => String(item.booking_id) !== String(bookingId))
+                data: prev.data.map(item => {
+                    if (String(item.booking_id) === String(bookingId)) {
+                        const notes = item.notes ? (typeof item.notes === 'string' ? JSON.parse(item.notes) : item.notes) : {};
+                        return { ...item, notes: JSON.stringify({ ...notes, tdcOnlineOnboarded: true }) };
+                    }
+                    return item;
+                })
             }));
             // Refresh dashboard and notifications
             fetchNotifications();

@@ -501,15 +501,32 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         return types.length > 0 ? types : ['F2F', 'ONLINE'];
     })() : [];
 
-    const isOnlineTdcNoSchedule = (isTDC || isPromo) && (
-        String(formData.courseType || '').toLowerCase().includes('online') ||
-        String(formData.courseType || '').toLowerCase().includes('otdc') ||
-        String(formData.promoTdcType || '').toLowerCase().includes('online') ||
-        String(formData.promoTdcType || '').toLowerCase().includes('otdc') ||
-        String(formData.course?.name || '').toLowerCase().includes('otdc') ||
-        String(formData.course?.shortName || '').toLowerCase().includes('otdc') ||
-        (isPromo && String(promoDerivedTdcType || '').toLowerCase().includes('online'))
-    );
+    const isOnlineTdcNoSchedule = (isTDC || isPromo) && (() => {
+        // Selected type / explicit promoTdcType signals (highest priority, always honoured)
+        if (String(formData.courseType || '').toLowerCase().includes('online')) return true;
+        if (String(formData.courseType || '').toLowerCase().includes('otdc')) return true;
+        if (String(formData.promoTdcType || '').toLowerCase().includes('online')) return true;
+        if (String(formData.promoTdcType || '').toLowerCase().includes('otdc')) return true;
+
+        // For PROMO courses: course_type (bundle key from Config) is the ONLY authoritative source.
+        // NEVER read course.name — the admin can freely rename "FREE TDC + PDC MOTOR MANUAL"
+        // to anything (e.g. "OTDC + 4 PDC") without changing the actual TDC type.
+        if (isPromo) {
+            const bundleKey = String(formData.course?.course_type || '').toLowerCase();
+            const tdcPart = bundleKey.split('+')[0].trim();
+            if (tdcPart.includes('online') || tdcPart.includes('otdc')) return true;
+            if (String(promoDerivedTdcType || '').toLowerCase().includes('online')) return true;
+            return false; // F2F or unknown → NOT online
+        }
+
+        // For regular TDC courses: course_type then fall back to name/shortName
+        if (String(formData.course?.course_type || '').toLowerCase().includes('otdc')) return true;
+        if (String(formData.course?.course_type || '').toLowerCase().includes('online')) return true;
+        if (String(formData.course?.name || '').toLowerCase().includes('otdc')) return true;
+        if (String(formData.course?.shortName || '').toLowerCase().includes('otdc')) return true;
+
+        return false;
+    })();
 
     useEffect(() => {
         const hasTdc = !!formData.course?._tdcCourse;
@@ -980,11 +997,15 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             return;
         }
         const courseTypeVal = (formData.courseType || '').toLowerCase();
+        // Use course_type (the bundle/config key) as primary vehicle classifier.
+        // Fall back to course.name only when course_type has no vehicle keywords.
+        const courseTypeKey = (formData.course.course_type || '').toLowerCase();
         const courseName = (formData.course.name || '').toLowerCase();
-        const isMoto = courseName.includes('motorcycle');
-        const isTricycle = courseName.includes('tricycle');
-        const isB1B2 = courseName.includes('b1') || courseName.includes('b2') ||
-            courseName.includes('van') || courseName.includes('l300');
+        const classifySource = courseTypeKey || courseName;
+        const isMoto = classifySource.includes('motorcycle') || classifySource.includes('motor') || classifySource.includes('moto');
+        const isTricycle = classifySource.includes('tricycle');
+        const isB1B2 = classifySource.includes('b1') || classifySource.includes('b2') ||
+            classifySource.includes('van') || classifySource.includes('l300');
         // Determine target transmission — applies to ALL vehicle types (motorcycle, car, etc.)
         const wantsAT = courseTypeVal.includes('automatic') || courseTypeVal === 'carat';
         const wantsMT = !wantsAT && (courseTypeVal.includes('manual') || courseTypeVal === 'carmt');

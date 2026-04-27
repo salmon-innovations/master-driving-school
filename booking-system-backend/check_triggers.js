@@ -1,7 +1,7 @@
 const pool = require('./config/db');
-async function checkSchema() {
+async function checkTriggers() {
     try {
-        const res = await pool.query("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'bookings'");
+        const res = await pool.query("SELECT trigger_name, event_manipulation, event_object_table, action_statement FROM information_schema.triggers");
         console.log(JSON.stringify(res.rows, null, 2));
         process.exit(0);
     } catch (err) {
@@ -9,4 +9,4 @@ async function checkSchema() {
         process.exit(1);
     }
 }
-checkSchema();
+checkTriggers();

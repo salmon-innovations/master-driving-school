@@ -86,9 +86,16 @@ const getDefaultConfig = () => ({
 });
 
 const resolveStarpayConfig = ({ branchId, branchName } = {}) => {
+    // Branch-specific overrides from JSON/Env are usually for Production.
+    // If we are in UAT mode, we typically use the single default UAT merchant account.
+    if (!IS_PROD) {
+        return getDefaultConfig();
+    }
+
     const byId = branchId != null ? BRANCH_CONFIG[String(branchId)] : null;
     const byName = branchName ? BRANCH_CONFIG[normalizeBranchKey(branchName)] : null;
     const cfg = byId || byName || {};
+
     return {
         ...getDefaultConfig(),
         ...cfg,

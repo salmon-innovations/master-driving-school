@@ -335,6 +335,8 @@ const CourseTypesSection = () => {
             if (res.success) {
                 setConfig(normalizeConfig(res.config));
                 showNotification('Course configuration saved!', 'success');
+                // Notify other components (e.g. CourseManagement) to refresh their local config
+                window.dispatchEvent(new CustomEvent('mds-course-config-updated', { detail: res.config }));
             }
         } catch (e) {
             showNotification(e.message || 'Failed to save configuration', 'error');

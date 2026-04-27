@@ -284,7 +284,8 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
 
   const subtotal = totalsData.finalTotal;
   const downpaymentAmount = subtotal * 0.5;
-  const finalAmount = paymentType === "downpayment" ? downpaymentAmount : subtotal;
+  const rawFinalAmount = paymentType === "downpayment" ? downpaymentAmount : subtotal;
+  const finalAmount = rawFinalAmount;
 
   useEffect(() => {
     // Do not enforce auth/cart guards while showing final result screens.
@@ -375,10 +376,18 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
       pollRef.current = null
     }
 
-    // Security/UX Hardening: We no longer immediately cancel the booking via API if the user 
-    // simply clicks "Cancel Payment". The backend cleanup task will handle auto-cancellation 
-    // after 20 minutes. This allows students a grace period to resume or for the gateway 
-    // to potentially reconcile a late success.
+    // Security/UX Hardening: If the user explicitly cancels, the session expires,
+    // or the gateway returns a definitive failure, we attempt to cancel the booking 
+    // in the database immediately. This prevents background pollers or webhooks 
+    // from fulfilling the booking if they see a "Success" state later.
+    if (bookingId && (reason === 'cancelled' || reason === 'expired' || reason === 'failed' || reason === 'gateway')) {
+      try {
+        await bookingsAPI.updateStatus(bookingId, 'Cancelled');
+        console.log(`[Payment] Booking ${bookingId} cancelled in DB due to ${reason}`);
+      } catch (err) {
+        console.warn(`[Payment] Failed to auto-cancel booking ${bookingId}:`, err.message);
+      }
+    }
 
     setQrStatus('failed')
     // Note: We don't wipe starpayQR here anymore so that the "Return Home" handler 
@@ -474,6 +483,9 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
           }
         }
 
+        // Calculate correct base price for this item (handling type-specific pricing)
+        const itemTotals = calculateItemTotals(item);
+        
         // Add the main item
         expandedCourseList.push({
           id: item?.id || null,
@@ -481,7 +493,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
           type: item?.type || 'standard',
           category: item?.category || null,
           shortName: item?.shortName || null,
-          price: Number(item?.price || 0) + itemSurcharge
+          price: Number(itemTotals.calcBasePrice || 0) + itemSurcharge
         });
 
         // If it's a promo bundle, also add the individual PDC courses it contains
@@ -630,7 +642,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
         isManualBundle: !!totalsData.isMultiCourseApplied,
         promoDiscount: totalsData.discountValue,
         promoPct: totalsData.discountPercent,
-        totalAmount: totalsData.finalTotal,
+        totalAmount: totalsData.finalTotal
       })
 
       const msgId = paymentResponse?.msgId
@@ -671,26 +683,40 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
           const localStatus = (statusRes?.localStatus || '').toLowerCase()
           const trxState = (statusRes?.starpayState || '').toUpperCase()
 
-          if (localStatus === 'paid' || localStatus === 'partial_payment' || trxState === 'SUCCESS') {
+          // localStatus from the backend is the authoritative source.
+          // Only trust trxState=SUCCESS if the local DB also confirms success.
+          if (localStatus === 'paid' || localStatus === 'partial_payment') {
             pollActiveRef.current = false
             setQrStatus('success')
             handlePaymentSuccess()
             return
           }
 
+          // If the local DB says cancelled, stop polling and show failure — even
+          // if StarPay's trxState claims SUCCESS (UAT environment bug).
           if (localStatus === 'cancelled') {
             pollActiveRef.current = false
             handlePaymentFailure('cancelled')
             return
           }
 
-          if (trxState === 'CLOSE') {
+          // Only treat StarPay SUCCESS as a win when DB hasn't been updated yet
+          // (i.e. localStatus is still 'pending') — this handles the case where
+          // the webhook fires but the DB write is slightly delayed.
+          if (trxState === 'SUCCESS' && localStatus === 'pending') {
             pollActiveRef.current = false
-            handlePaymentFailure('expired')
+            setQrStatus('success')
+            handlePaymentSuccess()
             return
           }
 
-          if (['FAIL', 'REVERSED', 'CANCEL'].includes(trxState)) {
+          if (trxState === 'CANCEL' || trxState === 'CLOSE') {
+            pollActiveRef.current = false
+            handlePaymentFailure(trxState === 'CANCEL' ? 'cancelled' : 'expired')
+            return
+          }
+
+          if (['FAIL', 'REVERSED'].includes(trxState)) {
             pollActiveRef.current = false
             handlePaymentFailure('gateway')
             return
@@ -970,7 +996,12 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                       try {
                           await bookingsAPI.updateStatus(bId, 'Cancelled');
                       } catch (err) {
-                          if (err.message && err.message.includes('Cannot cancel a booking that is currently')) {
+                          console.warn('Retry cleanup:', err);
+                          // If it fails with 400 because it's no longer pending (e.g. partial_payment/paid),
+                          // it means the webhook or background polling successfully processed it.
+                          const isAlreadyFulfilled = err.message && (err.message.includes('partial_payment') || err.message.includes('paid'));
+                          
+                          if (isAlreadyFulfilled) {
                               showNotification('Great news! Your payment was actually confirmed. Redirecting...', 'success');
                               setCart([]);
                               onNavigate('profile');
@@ -997,20 +1028,23 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                       onNavigate('home');
                   } else {
                     try {
+                        // Attempt one last cancellation just in case handlePaymentFailure didn't finish or failed
                         await bookingsAPI.updateStatus(bId, 'Cancelled');
-                        // No success notification here to avoid extra popups before navigation
                         setCart([]);
                         onNavigate('home');
                     } catch (err) {
-                        console.warn('Failed to cleanup booking on navigation:', err);
+                        console.warn('Cleanup on navigation:', err);
                         // If it fails with 400 because it's no longer pending (e.g. partial_payment/paid),
-                        // it means the webhook successfully processed it while we were waiting!
-                        if (err.message && err.message.includes('Cannot cancel a booking that is currently')) {
-                            showNotification('Great news! Your payment was confirmed in the background.', 'success');
+                        // it means the webhook or background polling successfully processed it.
+                        // ONLY show the success notification if we are reasonbly sure it was a success.
+                        const isAlreadyFulfilled = err.message && (err.message.includes('partial_payment') || err.message.includes('paid'));
+                        
+                        if (isAlreadyFulfilled) {
+                            showNotification('Great news! Your payment was actually confirmed in the background.', 'success');
                             setCart([]);
                             onNavigate('profile');
                         } else {
-                            showNotification('Note: Manual cancellation failed. It will be auto-released later.', 'info');
+                            // Generic error or already cancelled
                             setCart([]);
                             onNavigate('home');
                         }
@@ -1303,6 +1337,7 @@ function Payment({ cart, setCart, onNavigate, isLoggedIn, preSelectedBranch, sch
                         </div>
                       </div>
                     )}
+
 
                     {/* Schedule */}
                     {scheduleSelection && !isOnlineTdcNoSchedule && (

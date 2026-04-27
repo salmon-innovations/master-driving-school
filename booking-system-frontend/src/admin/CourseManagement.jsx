@@ -112,6 +112,8 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
     const [discountForm, setDiscountForm] = useState({});
     const [addonsConfig, setAddonsConfig] = useState({ reviewer: 30, vehicleTips: 20, convenienceFee: 25, promoBundleDiscountPercent: 0, customAddons: [] });
     const [addonsLoading, setAddonsLoading] = useState(false);
+    const [deleteConfirm, setDeleteConfirm] = useState({ open: false, courseId: null, courseName: '' });
+    const [deleteLoading, setDeleteLoading] = useState(false);
 
     const normalizedRole = String(currentUserRole || '').toLowerCase();
     const isSuperAdmin = normalizedRole === 'super_admin';
@@ -146,13 +148,32 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
 
     const resolvePromoBundleLabel = (bundleValue) => {
         if (!bundleValue) return '';
-        return promoBundleLabelMap.get(bundleValue) || bundleValue;
+        // 1. Exact match
+        if (promoBundleLabelMap.has(bundleValue)) return promoBundleLabelMap.get(bundleValue);
+        // 2. Case-insensitive match
+        const lower = bundleValue.toLowerCase();
+        for (const [key, label] of promoBundleLabelMap.entries()) {
+            if (key.toLowerCase() === lower) return label;
+        }
+        // 3. Partial / fuzzy: find a bundle whose normalized key is contained in bundleValue or vice-versa
+        for (const bundle of normalizedPromoBundles) {
+            if (lower.includes(bundle.value.toLowerCase()) || bundle.value.toLowerCase().includes(lower)) {
+                return bundle.label;
+            }
+        }
+        // 4. Return as-is (raw key) if nothing matched
+        return bundleValue;
+    };
+
+    // Refresh courseConfig from the server so bundle type labels are always up to date.
+    const refreshCourseConfig = () => {
+        coursesAPI.getConfig().then(r => { if (r.success) setCourseConfig(r.config); }).catch(() => {});
     };
 
     // Fetch courses from database
     useEffect(() => {
         fetchCourses();
-        coursesAPI.getConfig().then(r => { if (r.success) setCourseConfig(r.config); }).catch(() => {});
+        refreshCourseConfig();
         branchesAPI.getAll().then(r => {
             if (!r.success) return;
             let loadedBranches = r.branches || [];
@@ -168,6 +189,17 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
             }
         }).catch(() => {});
     }, [isBranchScopedUser, currentUserBranchId]);
+
+    // Live-sync: When the Configuration page saves bundle types, refresh our local config immediately.
+    useEffect(() => {
+        const handler = (e) => {
+            if (e.detail) setCourseConfig(e.detail);
+            else refreshCourseConfig();
+        };
+        window.addEventListener('mds-course-config-updated', handler);
+        return () => window.removeEventListener('mds-course-config-updated', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const fetchCourses = async () => {
         let usedCache = false;
@@ -495,17 +527,24 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
         setShowModal(true);
     };
 
-    const handleDelete = async (courseId) => {
-        if (window.confirm('Are you sure you want to delete this course?')) {
-            try {
-                await coursesAPI.delete(courseId);
-                // Remove instantly from local state — no re-fetch needed
-                applyCoursesUpdate(prev => prev.filter(c => c.id !== courseId));
-                showNotification('Course deleted successfully!', 'success');
-            } catch (error) {
-                console.error('Error deleting course:', error);
-                showNotification('Failed to delete course. Please try again.', 'error');
-            }
+    const handleDelete = (courseId) => {
+        const course = courses.find(c => c.id === courseId);
+        setDeleteConfirm({ open: true, courseId, courseName: course?.name || 'this course' });
+    };
+
+    const confirmDelete = async () => {
+        if (!deleteConfirm.courseId) return;
+        setDeleteLoading(true);
+        try {
+            await coursesAPI.delete(deleteConfirm.courseId);
+            applyCoursesUpdate(prev => prev.filter(c => c.id !== deleteConfirm.courseId));
+            showNotification('Course deleted successfully!', 'success');
+        } catch (error) {
+            console.error('Error deleting course:', error);
+            showNotification('Failed to delete course. Please try again.', 'error');
+        } finally {
+            setDeleteLoading(false);
+            setDeleteConfirm({ open: false, courseId: null, courseName: '' });
         }
     };
 
@@ -776,7 +815,7 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                 {canAccessCourseTab('config') && (
                     <button
                         className={`cfg-tab-btn${activeTab === 'config' ? ' active' : ''}`}
-                        onClick={() => setActiveTab('config')}
+                        onClick={() => { setActiveTab('config'); refreshCourseConfig(); }}
                         style={{ marginBottom: '-2px' }}
                     >
                         <span className="cfg-tab-icon">
@@ -1134,37 +1173,69 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                     )}
 
                                     {/* Action Buttons */}
-                                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: '4px' }}>
                                         <button
                                             onClick={() => handleEdit(course)}
                                             style={{
-                                                padding: '8px 12px',
-                                                background: 'var(--primary-light)',
+                                                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                padding: '7px 14px',
+                                                background: 'transparent',
                                                 color: 'var(--primary-color)',
-                                                border: 'none',
-                                                borderRadius: '8px',
-                                                fontSize: '0.85rem',
+                                                border: '1.5px solid var(--primary-color)',
+                                                borderRadius: '20px',
+                                                fontSize: '0.82rem',
                                                 fontWeight: '600',
                                                 cursor: 'pointer',
-                                                transition: 'all 0.2s'
+                                                transition: 'all 0.18s ease',
+                                                letterSpacing: '0.01em',
+                                            }}
+                                            onMouseEnter={e => {
+                                                e.currentTarget.style.background = 'var(--primary-color)';
+                                                e.currentTarget.style.color = 'white';
+                                            }}
+                                            onMouseLeave={e => {
+                                                e.currentTarget.style.background = 'transparent';
+                                                e.currentTarget.style.color = 'var(--primary-color)';
                                             }}
                                         >
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                            </svg>
                                             Edit
                                         </button>
                                         <button
                                             onClick={() => handleDelete(course.id)}
                                             style={{
-                                                padding: '8px 12px',
-                                                background: '#fee2e2',
-                                                color: '#991b1b',
-                                                border: 'none',
-                                                borderRadius: '8px',
-                                                fontSize: '0.85rem',
+                                                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                padding: '7px 14px',
+                                                background: 'transparent',
+                                                color: '#e11d48',
+                                                border: '1.5px solid #e11d48',
+                                                borderRadius: '20px',
+                                                fontSize: '0.82rem',
                                                 fontWeight: '600',
                                                 cursor: 'pointer',
-                                                transition: 'all 0.2s'
+                                                transition: 'all 0.18s ease',
+                                                letterSpacing: '0.01em',
+                                            }}
+                                            onMouseEnter={e => {
+                                                e.currentTarget.style.background = '#e11d48';
+                                                e.currentTarget.style.color = 'white';
+                                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(225,29,72,0.35)';
+                                            }}
+                                            onMouseLeave={e => {
+                                                e.currentTarget.style.background = 'transparent';
+                                                e.currentTarget.style.color = '#e11d48';
+                                                e.currentTarget.style.boxShadow = 'none';
                                             }}
                                         >
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                <polyline points="3 6 5 6 21 6"/>
+                                                <path d="M19 6l-1 14H6L5 6"/>
+                                                <path d="M10 11v6"/><path d="M14 11v6"/>
+                                                <path d="M9 6V4h6v2"/>
+                                            </svg>
                                             Delete
                                         </button>
                                     </div>
@@ -2165,6 +2236,104 @@ const CourseManagement = ({ currentUserPermissions = [], currentUserRole = '', c
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Delete Confirmation Modal ── */}
+            {deleteConfirm.open && (
+                <div
+                    onClick={e => { if (e.target === e.currentTarget && !deleteLoading) setDeleteConfirm({ open: false, courseId: null, courseName: '' }); }}
+                    style={{
+                        position: 'fixed', inset: 0, zIndex: 99999,
+                        background: 'rgba(15,23,42,0.55)',
+                        backdropFilter: 'blur(4px)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        padding: '24px',
+                    }}
+                >
+                    <div style={{
+                        background: 'var(--card-bg)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '20px',
+                        padding: '32px 28px 28px',
+                        width: '100%',
+                        maxWidth: '420px',
+                        boxShadow: '0 24px 48px rgba(0,0,0,0.25)',
+                        textAlign: 'center',
+                    }}>
+                        <div style={{
+                            width: '60px', height: '60px',
+                            borderRadius: '50%',
+                            background: 'rgba(225,29,72,0.12)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            margin: '0 auto 20px',
+                        }}>
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#e11d48" strokeWidth="2">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6l-1 14H6L5 6"/>
+                                <path d="M10 11v6"/><path d="M14 11v6"/>
+                                <path d="M9 6V4h6v2"/>
+                            </svg>
+                        </div>
+                        <h3 style={{ margin: '0 0 10px', fontSize: '1.2rem', fontWeight: '700', color: 'var(--text-color)' }}>
+                            Delete Course?
+                        </h3>
+                        <p style={{ margin: '0 0 28px', fontSize: '0.9rem', color: 'var(--secondary-text)', lineHeight: '1.6' }}>
+                            Are you sure you want to delete&nbsp;
+                            <strong style={{ color: 'var(--text-color)' }}>&#34;{deleteConfirm.courseName}&#34;</strong>?
+                            <br />This action <strong>cannot be undone</strong>.
+                        </p>
+                        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                            <button
+                                onClick={() => setDeleteConfirm({ open: false, courseId: null, courseName: '' })}
+                                disabled={deleteLoading}
+                                style={{
+                                    flex: 1, padding: '11px 20px',
+                                    background: 'transparent',
+                                    color: 'var(--text-color)',
+                                    border: '1.5px solid var(--border-color)',
+                                    borderRadius: '12px',
+                                    fontSize: '0.9rem', fontWeight: '600',
+                                    cursor: deleteLoading ? 'not-allowed' : 'pointer',
+                                    opacity: deleteLoading ? 0.6 : 1,
+                                    transition: 'all 0.15s',
+                                }}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmDelete}
+                                disabled={deleteLoading}
+                                style={{
+                                    flex: 1, padding: '11px 20px',
+                                    background: '#e11d48', color: 'white',
+                                    border: 'none', borderRadius: '12px',
+                                    fontSize: '0.9rem', fontWeight: '600',
+                                    cursor: deleteLoading ? 'not-allowed' : 'pointer',
+                                    opacity: deleteLoading ? 0.8 : 1,
+                                    transition: 'all 0.15s',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                                }}
+                            >
+                                {deleteLoading ? (
+                                    <>
+                                        <span style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: 'white', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
+                                        Deleting...
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                            <polyline points="3 6 5 6 21 6"/>
+                                            <path d="M19 6l-1 14H6L5 6"/>
+                                            <path d="M10 11v6"/><path d="M14 11v6"/>
+                                            <path d="M9 6V4h6v2"/>
+                                        </svg>
+                                        Yes, Delete
+                                    </>
+                                )}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

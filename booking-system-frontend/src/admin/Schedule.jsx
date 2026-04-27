@@ -638,12 +638,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
             fetchTdcOnlineStudents({ branchId: selectedBranch || undefined })
                 .then(res => {
                     const rawData = Array.isArray(res?.data) ? res.data : [];
-                    const filtered = rawData.filter(row => {
-                        const isTdcOnlineOrBundle = /online|otdc|bundle|\+/i.test(row.course_name || '') || 
-                                                  /online|otdc/i.test(row.course_type || '');
-                        return isTdcOnlineOrBundle;
-                    });
-                    setTdcOnlineStudents({ data: filtered, loading: false });
+                    setTdcOnlineStudents({ data: rawData, loading: false });
                 })
                 .catch(() => {
                     setTdcOnlineStudents({ data: [], loading: false });
@@ -1535,12 +1530,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                 fetchTdcOnlineStudents({ branchId: selectedBranch || undefined })
                     .then(res => {
                         const rawData = Array.isArray(res?.data) ? res.data : [];
-                        const filtered = rawData.filter(row => {
-                            const isTdcOnlineOrBundle = /online|otdc|bundle|\+/i.test(row.course_name || '') || 
-                                                      /online|otdc/i.test(row.course_type || '');
-                            return isTdcOnlineOrBundle;
-                        });
-                        setTdcOnlineStudents({ data: filtered, loading: false });
+                        setTdcOnlineStudents({ data: rawData, loading: false });
                     })
                     .catch(() => setTdcOnlineStudents({ data: [], loading: false })),
                 fetchPdcSchedulingQueue({ branchId: selectedBranch || undefined }),
@@ -1582,7 +1572,11 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                 }
             } : null);
             
-            fetchTdcOnlineStudents({ branchId: selectedBranch || undefined });
+            const res = await fetchTdcOnlineStudents({ branchId: selectedBranch || undefined });
+            if (res?.success) {
+                const rawData = Array.isArray(res.data) ? res.data : [];
+                setTdcOnlineStudents({ data: rawData, loading: false });
+            }
         } catch (err) {
             showNotification(err?.message || 'Failed to update course completion status.', 'error');
         }

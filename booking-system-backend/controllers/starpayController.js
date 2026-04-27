@@ -329,6 +329,7 @@ const initiatePayment = async (req, res) => {
             totalAmount: Number(req.body.totalAmount || req.body.finalTotal || req.body.grandTotal || 0),
             initialAmountPaid: Number(amount || 0),
             isManualBundle: !!req.body.isManualBundle,
+            isTestMode: !!req.body.isTestMode,
             paymentType,
             hasReviewer: !!req.body.hasReviewer,
             hasVehicleTips: !!req.body.hasVehicleTips,
@@ -361,6 +362,7 @@ const initiatePayment = async (req, res) => {
         });
 
         const spResponse = spResult?.response || spResult;
+            console.log('[StarPay] DEBUG: Status for ' + msgId + ' returned trxState: ' + (spResponse ? spResponse.trxState : 'N/A'));
 
         if (!spResponse || spResponse.code !== '200') {
             // Rollback the local reservation if StarPay fails to even generate a QR
@@ -403,9 +405,17 @@ const initiatePayment = async (req, res) => {
    Updates DB, enrolls student, sends emails. 
    Called by both webhook and checkStatus fallback.
   ───────────────────────────────────────────────────────────────────── */
-const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) => {
+const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo, caller='unknown') => {
+    console.log('[StarPay] fulfillBookingPayment CALLED by ' + caller + ' for ' + originalMsgId);
     console.log(`[StarPay] Fulfilling booking for transaction ${originalMsgId}. Test Mode: ${orderNo?.startsWith('TEST-')}`);
     const amountPhp = (trxAmountCentavos / 100).toFixed(2);
+
+    // Fetch booking to check metadata for isTestMode
+    const { rows: metaRows } = await pool.query(
+        `SELECT notes FROM bookings WHERE transaction_id = $1`,
+        [originalMsgId]
+    );
+    const meta = metaRows[0] ? JSON.parse(metaRows[0].notes || '{}') : {};
 
         // Mark booking based on payment type:
         // - Full Payment => paid
@@ -413,6 +423,7 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
     const { rows } = await pool.query(
         `UPDATE bookings
                         SET status       = CASE
+                                                                WHEN ($3 = TRUE) THEN 'paid'
                                                                 WHEN LOWER(COALESCE(payment_type, '')) ~ 'down[\\s-]*payment'
                                                                     THEN 'partial_payment'
                                                                 ELSE 'paid'
@@ -421,17 +432,18 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
                                         updated_at = CURRENT_TIMESTAMP
           WHERE transaction_id = $2 AND status = 'pending'
                     RETURNING id, user_id, notes, status`,
-                                [amountPhp, originalMsgId]
+                                [amountPhp, originalMsgId, !!meta.isTestMode]
     );
 
     if (!rows.length) return null;
 
-    const { id: bookingId, user_id: studentId, notes } = rows[0];
+    const { id: bookingId, user_id: studentId, notes: notesRaw } = rows[0];
     console.log(`[StarPay] Booking ${bookingId} status updated to fulfilled.`);
 
     // Enroll student in schedule slots stored in notes
     try {
-        const meta = JSON.parse(notes || '{}');
+        // meta is already parsed at line 416
+
         for (const slotId of extractSlotIdsFromMeta(meta)) {
             await pool.query(
                 `INSERT INTO schedule_enrollments (slot_id, student_id, enrollment_status)
@@ -539,7 +551,7 @@ const fulfillBookingPayment = async (originalMsgId, trxAmountCentavos, orderNo) 
                         sendEnrollmentEmail(d.email, d.first_name || 'Student', d.last_name || '', {
                             bookingId,
                             courseName: d.course_name || 'N/A',
-                            courseList: courseList,
+                            courseList: meta.courseList || [],
                             addonsDetailed: Array.isArray(meta.addonsDetailed) ? meta.addonsDetailed : [],
                             courseCategory: d.course_category || null,
                             courseType: d.course_type || null,
@@ -630,7 +642,7 @@ const handleWebhook = async (req, res) => {
 
     try {
         if (isPaid) {
-            await fulfillBookingPayment(originalMsgId, trxAmount, orderNo);
+            await fulfillBookingPayment(originalMsgId, trxAmount, orderNo, 'webhook');
         } else {
             // FAIL / REVERSED / CLOSE
             // Mark as cancelled and release slots
@@ -690,10 +702,11 @@ const checkStatus = async (req, res) => {
         const booking = rows[0];
         if (booking.status !== 'pending') {
             const successfulLocalStatus = ['paid', 'partial_payment'].includes(String(booking.status || '').toLowerCase());
+            const isCancelled = String(booking.status || '').toLowerCase() === 'cancelled';
             return res.json({
                 success: true,
                 localStatus: booking.status,
-                starpayState: successfulLocalStatus ? 'SUCCESS' : 'CLOSE',
+                starpayState: successfulLocalStatus ? 'SUCCESS' : (isCancelled ? 'CANCEL' : 'CLOSE'),
                 bookingId: booking.id,
                 amount: booking.total_amount,
             });
@@ -716,19 +729,20 @@ const checkStatus = async (req, res) => {
             const queryMsgId = `QRY${Date.now()}`;
             const spResult = await queryRepayment(queryMsgId, msgId, { branchId: booking.branch_id || null });
             const spResponse = spResult?.response || spResult;
+            console.log('[StarPay] DEBUG: Status for ' + msgId + ' returned trxState: ' + (spResponse ? spResponse.trxState : 'N/A'));
 
             // FALLBACK: If StarPay says SUCCESS but we are still PENDING, fulfill it now
             // in the background so the response goes back to the frontend immediately.
             if (spResponse?.trxState === 'SUCCESS' && booking.status === 'pending') {
                 console.log(`[StarPay] Fallback fulfillment triggered via checkStatus for ${msgId}`);
                 markFulfilled(msgId); // mark now so next poll short-circuits
-                fulfillBookingPayment(msgId, spResponse.trxAmount, spResponse.orderNo)
+                fulfillBookingPayment(msgId, spResponse.trxAmount, spResponse.orderNo, 'poll-fallback')
                     .catch(e => console.error('[StarPay] Async fulfillment error:', e.message));
             }
 
             return res.json({
                 success: true,
-                localStatus: spResponse?.trxState === 'SUCCESS' ? 'paid' : booking.status,
+                localStatus: spResponse?.trxState === 'SUCCESS' ? (booking.payment_type === 'Full Payment' ? 'paid' : 'partial_payment') : booking.status,
                 starpayState: spResponse?.trxState || 'UNKNOWN',
                 bookingId: booking.id,
                 amount: booking.total_amount,
@@ -770,6 +784,7 @@ const checkStatus = async (req, res) => {
             const branchIdToUse = enroll.booking_branch_id || enroll.user_branch_id || enroll.slot_branch_id || null;
             const spResult = await queryRepayment(queryMsgId, msgId, { branchId: branchIdToUse });
             const spResponse = spResult?.response || spResult;
+            console.log('[StarPay] DEBUG: Status for ' + msgId + ' returned trxState: ' + (spResponse ? spResponse.trxState : 'N/A'));
 
             if (spResponse?.trxState === 'SUCCESS') {
                 await pool.query(
@@ -800,6 +815,7 @@ const checkStatus = async (req, res) => {
         const queryMsgId = `QRY${Date.now()}`;
         const spResult = await queryRepayment(queryMsgId, msgId);
         const spResponse = spResult?.response || spResult;
+            console.log('[StarPay] DEBUG: Status for ' + msgId + ' returned trxState: ' + (spResponse ? spResponse.trxState : 'N/A'));
         const trxState = String(spResponse?.trxState || '').toUpperCase();
 
         if (trxState === 'SUCCESS') {
@@ -833,6 +849,54 @@ const checkStatus = async (req, res) => {
     }
 
     return res.status(404).json({ success: false, message: 'Order not found' });
+};
+
+/* ─────────────────────────────────────────────────────────────────────
+   POST /api/starpay/simulate-success/:msgId
+   Development/Testing helper to force a transaction to SUCCESS.
+ ───────────────────────────────────────────────────────────────────── */
+const simulateSuccess = async (req, res) => {
+    const { msgId } = req.params;
+    
+    // Only allow in dev or if explicitly enabled
+    const isDev = process.env.NODE_ENV !== 'production';
+    const forceEnable = String(process.env.STARPAY_ENABLE_TEST_MODE || 'false').toLowerCase() === 'true';
+    
+    if (!isDev && !forceEnable) {
+        return res.status(403).json({ success: false, message: 'Test mode is disabled in production.' });
+    }
+
+    try {
+        const { rows } = await pool.query(
+            `SELECT id, total_amount, payment_type FROM bookings WHERE transaction_id = $1 AND status = 'pending'`,
+            [msgId]
+        );
+
+        if (!rows.length) {
+            // Check if it's a reschedule fee
+            const { rows: enrollRows } = await pool.query(
+                `SELECT id FROM schedule_enrollments WHERE starpay_msgid = $1 AND reschedule_fee_paid = FALSE`,
+                [msgId]
+            );
+            
+            if (enrollRows.length) {
+                await fulfillBookingPayment(msgId, 100000, `TEST-SIM-${Date.now()}`); // Mock 1000 PHP
+                return res.json({ success: true, message: 'Reschedule fee simulated successfully.' });
+            }
+
+            return res.status(404).json({ success: false, message: 'Pending transaction not found.' });
+        }
+
+        const booking = rows[0];
+        const amountCentavos = Math.round(Number(booking.total_amount) * 100);
+
+        await fulfillBookingPayment(msgId, amountCentavos, `TEST-SIM-${Date.now()}`);
+
+        return res.json({ success: true, message: 'Payment simulated successfully.' });
+    } catch (err) {
+        console.error('[StarPay] simulateSuccess error:', err.message);
+        return res.status(500).json({ success: false, message: err.message });
+    }
 };
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -904,6 +968,7 @@ const initiateRescheduleFeePayment = async (req, res) => {
         });
 
         const spResponse = spResult?.response || spResult;
+            console.log('[StarPay] DEBUG: Status for ' + msgId + ' returned trxState: ' + (spResponse ? spResponse.trxState : 'N/A'));
 
         if (!spResponse || spResponse.code !== '200') {
             console.error('[StarPay] reschedule fee order failed:', spResponse?.code, spResponse?.message);
@@ -944,6 +1009,6 @@ module.exports = {
     initiatePayment, 
     handleWebhook, 
     checkStatus, 
-    initiateRescheduleFeePayment
+    initiateRescheduleFeePayment,
+    simulateSuccess
 };
-

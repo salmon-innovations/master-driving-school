@@ -1582,7 +1582,7 @@ const sendEnrollmentEmail = async (email, firstName, lastName, enrollmentDetails
 
     if (isTdcBundle && !listHasTdc) {
       fallbackCourseList.push({
-        name: courseNameClean.includes('f2f') || courseNameClean.includes('face to face') ? 'Theorectical Driving Course (TDC - F2F)' : 'Theorectical Driving Course (TDC)',
+        name: courseNameNorm.includes('f2f') || courseNameNorm.includes('face to face') ? 'Theoretical Driving Course (TDC - F2F)' : 'Theoretical Driving Course (TDC)',
         type: isOnlineTdc ? 'ONLINE' : 'F2F',
         category: 'TDC'
       });
