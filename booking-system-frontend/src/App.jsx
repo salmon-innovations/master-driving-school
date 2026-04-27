@@ -26,6 +26,7 @@ const Payment = lazy(() => import('./pages/Payment'))
 const Schedule = lazy(() => import('./pages/Schedule'))
 const Reviews = lazy(() => import('./pages/Reviews'))
 const Admin = lazy(() => import('./admin/Admin'))
+const MaintenancePage = lazy(() => import('./pages/MaintenancePage'))
 
 import { ThemeProvider } from './context/ThemeContext'
 import { NotificationProvider } from './context/NotificationContext'
@@ -143,6 +144,7 @@ const getStoredUserRole = () => {
 function App() {
   const activeCartKeyRef = useRef(getCartStorageKey())
   const skipNextCartPersistRef = useRef(false)
+  const [isMaintenance, setIsMaintenance] = useState(false)
 
   const [currentPage, setCurrentPage] = useState(() => {
     const pageFromUrl = getPageFromLocation()
@@ -220,6 +222,31 @@ function App() {
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
+
+  useEffect(() => {
+    // Initial health check
+    const checkHealth = async () => {
+      try {
+        const res = await fetch(`${window.location.origin}/api/health`.replace('3000', '5000').replace('5173', '5000'));
+        const data = await res.json();
+        if (data && data.maintenance) setIsMaintenance(true);
+      } catch (err) {
+        // fallback to standard API url if origin/api fails
+        try {
+          const fallbackUrl = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/$/, '') + '/health';
+          const res = await fetch(fallbackUrl);
+          const data = await res.json();
+          if (data && data.maintenance) setIsMaintenance(true);
+        } catch (e) {}
+      }
+    };
+    checkHealth();
+
+    // Listen for the global event from api.js interceptor
+    const handleMaintenanceEvent = () => setIsMaintenance(true);
+    window.addEventListener('maintenance-mode', handleMaintenanceEvent);
+    return () => window.removeEventListener('maintenance-mode', handleMaintenanceEvent);
+  }, []);
 
   useEffect(() => {
     if (skipNextCartPersistRef.current) {
@@ -345,6 +372,18 @@ function App() {
   }
 
   const isAuthPage = ['signin', 'signup', 'verify-email', 'forgot-password', 'lock-account', 'admin'].includes(currentPage)
+
+  if (isMaintenance) {
+    return (
+      <Suspense fallback={
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        </div>
+      }>
+        <MaintenancePage />
+      </Suspense>
+    );
+  }
 
   return (
     <SimpleErrorBoundary>

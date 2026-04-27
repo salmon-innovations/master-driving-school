@@ -86,6 +86,48 @@ if (!allowedOrigins.includes('https://www.masterdriving.ph')) {
   allowedOrigins.push('https://www.masterdriving.ph');
 }
 
+// System Health & Maintenance Endpoint (No CORS or Rate Limit)
+app.get('/api/health', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const isMaintenance = fs.existsSync(path.join(__dirname, '.maintenance'));
+  res.json({ status: 'ok', maintenance: isMaintenance });
+});
+
+// Maintenance Mode Middleware
+app.use((req, res, next) => {
+  const fs = require('fs');
+  const path = require('path');
+  
+  if (fs.existsSync(path.join(__dirname, '.maintenance'))) {
+    // Exempt auth/login so admins can still log in
+    if (req.path === '/api/auth/login') return next();
+    
+    // Check if user is admin/super_admin
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const jwt = require('jsonwebtoken');
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (decoded && (decoded.role === 'admin' || decoded.role === 'super_admin')) {
+          return next(); // Admins bypass maintenance mode
+        }
+      } catch (e) {
+        // invalid token, fall through to block
+      }
+    }
+    
+    // Block everyone else
+    return res.status(503).json({
+      success: false,
+      maintenance: true,
+      message: 'System is currently undergoing maintenance. Please check back shortly.'
+    });
+  }
+  next();
+});
+
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no Origin header (server-to-server/curl/health checks).

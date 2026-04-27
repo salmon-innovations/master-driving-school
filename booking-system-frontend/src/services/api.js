@@ -127,6 +127,9 @@ const apiRequest = async (endpoint, options = {}) => {
     }
 
     if (!response.ok) {
+      if (response.status === 503 && data.maintenance) {
+        window.dispatchEvent(new Event('maintenance-mode'));
+      }
       // Create error with additional data from response
       const error = new Error(data.message || data.error || 'Something went wrong');
       error.statusCode = response.status;
@@ -135,6 +138,7 @@ const apiRequest = async (endpoint, options = {}) => {
       error.accountLocked = data.accountLocked;
       error.email = data.email;
       error.userId = data.userId;
+      error.maintenance = data.maintenance;
       throw error;
     }
 
