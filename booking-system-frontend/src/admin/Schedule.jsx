@@ -813,6 +813,8 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                     ...slot,
                     date: startDate,
                     end_date: endDate,
+                    // Clamp available_slots to total_capacity to prevent inconsistent UI display
+                    available_slots: Math.min(Math.max(0, Number(slot.total_capacity || 0)), Math.max(0, Number(slot.available_slots || 0))),
                     // Keep raw session value intact — use sessionLabel for display only
                     sessionLabel: `${slot.session} ${slot.type?.toLowerCase() === 'tdc' ? 'TDC' : 'PDC'}${slot.course_type ? ' ' + slot.course_type.toUpperCase() : ''}`,
                     students: slot.enrollments || []
@@ -1091,7 +1093,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
 
             if (editingId) {
                 // Update existing slot
-                const currentSlot = slots.find(s => s.id === editingId);
+                const currentSlot = slots.find(s => String(s.id) === String(editingId));
                 const currentAvailableSlots = currentSlot?.available_slots || baseCapacity;
                 const oldTotalCapacity = currentSlot?.total_capacity || baseCapacity;
 
@@ -1101,7 +1103,8 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                 } else if (baseCapacity < oldTotalCapacity) {
                     newAvailableSlots = Math.max(0, currentAvailableSlots - (oldTotalCapacity - baseCapacity));
                 }
-                slotData.available_slots = newAvailableSlots;
+                // Safety clamp: available slots cannot exceed total capacity
+                slotData.available_slots = Math.min(baseCapacity, newAvailableSlots);
 
                 await schedulesAPI.updateSlot(editingId, slotData);
                 showNotification('Slot updated successfully!', 'success');
@@ -2427,6 +2430,8 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                 const isPast = dateStr < today; // Disable past dates
                                 const isDisabled = isPast || isSunday; // Disable past dates and Sundays
                                 let daySlots = slots.filter(s => {
+                                    // Filter by branch first (consistent with list view)
+                                    if (selectedBranch && String(s.branch_id) !== String(selectedBranch)) return false;
                                     // Skip Sundays entirely
                                     if (dayOfWeek === 0) return false;
                                     const sStart = s.date;
