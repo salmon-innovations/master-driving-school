@@ -2780,9 +2780,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     : 'Select schedules for each of your selected PDC tracks.')
                 : 'Step 1: Select TDC schedule · Step 2: Select promo PDC schedules';
             const pdcDoneCount = promoPdcCourses.filter(c => getIsPromoPdcComplete(c._pdcKey)).length;
-            const allPromoPdcDone = isPromoOnlineTdcLockedBundle ? true : (promoPdcCourses.length > 0
+            const allPromoPdcDone = (promoPdcCourses.length > 0)
                 ? pdcDoneCount === promoPdcCourses.length
-                : !!formData.scheduleSlotId2);
+                : (isManualPromoBundle ? true : !!formData.scheduleSlotId2);
 
             // TDC slot filtering + month pagination
             const promoTdcFiltered = promoTdcRawSlots.filter(s => {
@@ -3187,7 +3187,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             <svg className="schedule-banner__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 16V12M12 8H12.01" strokeLinecap="round" strokeLinejoin="round" /></svg>
                             <div className="schedule-banner__body">
                                 <div className="schedule-banner__title">Online TDC Selected</div>
-                                <div className="schedule-banner__desc">No branch slot selection is required for Online TDC. You can proceed directly to enrollment.</div>
+                                <div className="schedule-banner__desc">
+                                    {promoPdcCourses.length > 0 
+                                        ? 'No branch slot selection is required for Online TDC. Please select schedules for your PDC tracks below.' 
+                                        : 'No branch slot selection is required for Online TDC. You can proceed directly to enrollment.'}
+                                </div>
                             </div>
                         </div>
                     )}
@@ -3240,14 +3244,22 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                             type="button"
                                             className={`type-btn${promoTdcType === type ? ' active' : ''}`}
                                             onClick={() => {
-                                                setFormData(prev => ({
-                                                    ...prev,
-                                                    promoTdcType: type,
-                                                    scheduleSlotId: null,
-                                                    scheduleDate: '',
-                                                    scheduleSession: '',
-                                                    scheduleTime: ''
-                                                }));
+                                                setFormData(prev => {
+                                                    const targetType = type.toLowerCase();
+                                                    const matchingOpt = prev.course?.typeOptions?.find(opt => 
+                                                        (opt.value || '').toLowerCase() === targetType || 
+                                                        (opt.label || '').toLowerCase().includes(targetType)
+                                                    );
+                                                    return {
+                                                        ...prev,
+                                                        promoTdcType: type,
+                                                        courseType: matchingOpt?.value || prev.courseType,
+                                                        scheduleSlotId: null,
+                                                        scheduleDate: '',
+                                                        scheduleSession: '',
+                                                        scheduleTime: ''
+                                                    };
+                                                });
                                             }}
                                         >
                                             {type === 'ONLINE' ? 'Online' : 'F2F'}
