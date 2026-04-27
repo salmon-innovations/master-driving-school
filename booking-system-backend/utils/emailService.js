@@ -777,8 +777,8 @@ const buildDetailedScheduleLabel = (rawLabel = '', rawType = '', transmission = 
     .trim();
   const source = `${normalizedLabel} ${rawType}`.toUpperCase();
   const txCodeRaw = String(transmission || '').toUpperCase().trim();
-  const hasManual = txCodeRaw === 'MT' || source.includes(' MANUAL ') || source.endsWith(' MANUAL') || source.includes('(MANUAL)') || /(^|\W)MT($|\W)/.test(source);
-  const hasAutomatic = txCodeRaw === 'AT' || source.includes(' AUTOMATIC ') || source.includes(' AUTO ') || source.endsWith(' AUTOMATIC') || source.includes('(AUTOMATIC)') || /(^|\W)AT($|\W)/.test(source);
+  const hasManual = txCodeRaw === 'MT' || txCodeRaw === 'MANUAL' || source.includes(' MANUAL ') || source.endsWith(' MANUAL') || source.includes('(MANUAL)') || /(^|\W)MT($|\W)/.test(source);
+  const hasAutomatic = txCodeRaw === 'AT' || txCodeRaw === 'AUTOMATIC' || source.includes(' AUTOMATIC ') || source.includes(' AUTO ') || source.endsWith(' AUTOMATIC') || source.includes('(AUTOMATIC)') || /(^|\W)AT($|\W)/.test(source);
   const txWord = hasManual && !hasAutomatic ? 'Manual' : hasAutomatic && !hasManual ? 'Automatic' : '';
 
   if (source.includes('TDC') || source.includes('THEORETICAL')) {

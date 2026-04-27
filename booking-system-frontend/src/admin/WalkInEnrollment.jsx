@@ -4707,7 +4707,24 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         let courseTypeDisplay = '';
         if (isPromo) {
             const tdcDisplay = hasTdcInBundle ? (promoTdcType === 'F2F' ? 'TDC F2F' : `TDC ${promoTdcType || 'F2F'}`) : '';
-            const pdcDisplay = `${promoPdcSummaryCount || 1} PDC course${(promoPdcSummaryCount || 1) > 1 ? 's' : ''}`;
+            const pdcDisplays = promoPdcCourses.map((c, idx) => {
+                const key = c?._pdcKey || getPromoPdcCourseKey(c);
+                const sel = promoPdcSelections[key];
+                const tx = sel?.transmission || c?._fixedTransmission || c?._preferredTransmission || '';
+                
+                let baseName = c._pdcLabel || c.shortName || c.name || `PDC ${idx + 1}`;
+                if (baseName.toUpperCase() === 'PDC') {
+                    baseName = c.course_type || baseName;
+                }
+                
+                const txWord = tx.toUpperCase() === 'MT' ? 'Manual' : (tx.toUpperCase() === 'AT' ? 'Automatic' : tx);
+                
+                if (txWord && !baseName.toUpperCase().includes(txWord.toUpperCase())) {
+                    return `${baseName} ${txWord}`;
+                }
+                return baseName;
+            });
+            const pdcDisplay = pdcDisplays.length > 0 ? pdcDisplays.join(' + ') : `${promoPdcSummaryCount || 1} PDC course${(promoPdcSummaryCount || 1) > 1 ? 's' : ''}`;
             courseTypeDisplay = tdcDisplay ? `${tdcDisplay} + ${pdcDisplay}` : pdcDisplay;
         } else if (selectedTypeOpt) {
             courseTypeDisplay = selectedTypeOpt.label;
