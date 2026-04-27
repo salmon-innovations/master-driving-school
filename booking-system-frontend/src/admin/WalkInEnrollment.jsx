@@ -2917,7 +2917,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         return formatLocalDate(d);
                     }
                 }
-                return getMinSchedDate(2);
+                return getMinSchedDate(0);
             })();
             const pdcIsHalfDay = promoPdcDay1Session && (
                 promoPdcDay1Session.toLowerCase().includes('morning') ||
@@ -3852,7 +3852,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
                             <div className="policy-banner__text">
                                 <div className="policy-banner__title">Schedule Policy</div>
-                                <div className="policy-banner__desc">Schedules must be booked at least <strong>2 days in advance</strong>. Sundays are not available.</div>
+                                <div className="policy-banner__desc">Practical schedules can be booked for any available date, including today. Sundays are not available.</div>
                             </div>
                         </div>
                     )}
@@ -3896,7 +3896,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                     for (let i = 0; i < firstDay; i++) {
                                         days.push(<div key={`pad-${i}`} className="cal-day cal-day--pad" />);
                                     }
-                                    const minDateStr = (() => { const d = new Date(today); d.setDate(d.getDate() + 2); return d.toISOString().split('T')[0]; })();
+                                    const minDateStr = (() => { const d = new Date(today); d.setDate(d.getDate() + 0); return d.toISOString().split('T')[0]; })();
                                     for (let d = 1; d <= daysInMonth; d++) {
                                         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
                                         const isSelected = selectedScheduleDate === dateStr;
