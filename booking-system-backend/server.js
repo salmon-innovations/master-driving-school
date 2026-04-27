@@ -76,6 +76,9 @@ const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
   .filter(Boolean);
 
 // Safety fallback so production still works if FRONTEND_URL is not set correctly.
+if (!allowedOrigins.includes('https://uat.app.masterdriving.ph')) {
+  allowedOrigins.push('https://uat.app.masterdriving.ph');
+}
 if (!allowedOrigins.includes('https://masterdriving.ph')) {
   allowedOrigins.push('https://masterdriving.ph');
 }
