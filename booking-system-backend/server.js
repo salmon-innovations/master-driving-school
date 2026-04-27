@@ -94,39 +94,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', maintenance: isMaintenance });
 });
 
-// Maintenance Mode Middleware
-app.use((req, res, next) => {
-  const fs = require('fs');
-  const path = require('path');
-  
-  if (fs.existsSync(path.join(__dirname, '.maintenance'))) {
-    // Exempt auth/login so admins can still log in
-    if (req.path === '/api/auth/login') return next();
-    
-    // Check if user is admin/super_admin
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      try {
-        const jwt = require('jsonwebtoken');
-        const token = authHeader.split(' ')[1];
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        if (decoded && (decoded.role === 'admin' || decoded.role === 'super_admin')) {
-          return next(); // Admins bypass maintenance mode
-        }
-      } catch (e) {
-        // invalid token, fall through to block
-      }
-    }
-    
-    // Block everyone else
-    return res.status(503).json({
-      success: false,
-      maintenance: true,
-      message: 'System is currently undergoing maintenance. Please check back shortly.'
-    });
-  }
-  next();
-});
+
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -171,6 +139,42 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   immutable: false, // uploads can change (avatars), so no immutable flag
 }));
 
+// Maintenance Mode Middleware
+app.use((req, res, next) => {
+  const fs = require('fs');
+  const path = require('path');
+  
+  // Always allow OPTIONS requests to pass through for CORS preflight
+  if (req.method === 'OPTIONS') return next();
+
+  if (fs.existsSync(path.join(__dirname, '.maintenance'))) {
+    // Exempt auth/login so admins can still log in
+    if (req.path === '/api/auth/login') return next();
+    
+    // Check if user is admin/super_admin
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const jwt = require('jsonwebtoken');
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (decoded && (decoded.role === 'admin' || decoded.role === 'super_admin')) {
+          return next(); // Admins bypass maintenance mode
+        }
+      } catch (e) {
+        // invalid token, fall through to block
+      }
+    }
+    
+    // Block everyone else
+    return res.status(503).json({
+      success: false,
+      maintenance: true,
+      message: 'System is currently undergoing maintenance. Please check back shortly.'
+    });
+  }
+  next();
+});
 
 // Routes
 app.use('/api/news', require('./routes/news'));
@@ -195,10 +199,7 @@ app.get('/api/crm-check', (req, res) => {
   });
 });
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', version: '2.0.0' });
-});
+
 
 // Serve static files from the 'dist' directory (if it exists)
 const distPath = path.join(__dirname, 'dist');
