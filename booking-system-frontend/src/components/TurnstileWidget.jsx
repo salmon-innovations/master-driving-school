@@ -120,8 +120,6 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
       </div>
     </div>
   )
-}
-
 })
 
 export default TurnstileWidget
