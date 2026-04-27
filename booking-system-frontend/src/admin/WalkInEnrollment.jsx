@@ -1768,24 +1768,32 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 : [];
             const hasPromoPdcCourses = (isPromo || !!formData.course?._isManualBundle) && submitPdcCourses.length > 0;
 
-            const tdcCourse = formData.course?._tdcCourse;
-            const tdcKey = tdcCourse?._pdcKey || 'tdc-track';
-            const tdcSel = promoPdcSelections[tdcKey] || null;
-
             // Final check for required schedules
             if (!isOnlineTdcNoSchedule) {
+                const checkPdcCourses = (formData.course?.category === 'Bundle' || formData.course?.category === 'Promo')
+                    ? (formData.course?._pdcCourses || [])
+                    : [];
+                const checkTdcCourse = formData.course?._tdcCourse;
+                
                 if (formData.course?.category === 'Bundle' || formData.course?.category === 'Promo') {
                     const missingSchedules = [];
-                    if (tdcCourse && !tdcSel?.scheduleSlotId && !tdcSel?.scheduleDate) {
-                         missingSchedules.push('TDC Schedule');
+                    // Check TDC if it's supposed to be there
+                    if (checkTdcCourse) {
+                        const tdcKey = checkTdcCourse?._pdcKey || 'tdc-track';
+                        const tdcSel = promoPdcSelections[tdcKey];
+                        if (!tdcSel?.scheduleSlotId && !tdcSel?.scheduleDate) {
+                            missingSchedules.push('TDC Schedule');
+                        }
                     }
-                    submitPdcCourses.forEach((c, idx) => {
+                    // Check PDCs
+                    checkPdcCourses.forEach((c, idx) => {
                         const key = c?._pdcKey || getPromoPdcCourseKey(c);
                         const sel = promoPdcSelections[key];
                         if (!sel?.scheduleSlotId && !sel?.scheduleDate) {
                             missingSchedules.push(`${c.shortName || c.name || `PDC Track ${idx + 1}`} Schedule`);
                         }
                     });
+                    
                     if (missingSchedules.length > 0) {
                         showNotification(`Please select a schedule for: ${missingSchedules.join(', ')}`, 'warning');
                         setLoading(false);
