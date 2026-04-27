@@ -1076,8 +1076,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 const tHasMT = t.includes('manual') || t.includes('(mt)');
                 const tHasAnyTX = tHasAT || tHasMT;
 
-                const reqAT = tHasAT || (!tHasAnyTX && (n.includes('automatic') || n.includes('(at)')));
-                const reqMT = tHasMT || (!tHasAnyTX && (n.includes('manual') || n.includes('(mt)')));
+                // For Step 2 availability, we only require a specific transmission if it's explicitly in the COURSE NAME.
+                // If it's just in the 'course_type' (t), it might be a default that we shouldn't strictly enforce yet.
+                const nLower = n.toLowerCase();
+                const reqAT = nLower.includes('automatic') || nLower.includes('(at)');
+                const reqMT = nLower.includes('manual') || nLower.includes('(mt)');
 
                 // Filter PDC slots by category first
                 return pdcSlots.some(s => {
@@ -1106,7 +1109,12 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 const cat = pkg.category;
                 const ct = (pkg.course_type || '').trim();
                 const cn = pkg.name || '';
-                const isOnlineTdc = ct.toLowerCase().includes('online') || ct.toLowerCase().includes('otdc') || cn.toLowerCase().includes('otdc');
+                // Robust Online TDC check: name, course_type, or any type option
+                const isOnlineTdc = ct.toLowerCase().includes('online') || ct.toLowerCase().includes('otdc') || cn.toLowerCase().includes('otdc') ||
+                    pkg.typeOptions?.some(opt => {
+                        const str = ((opt.label || '') + ' ' + (opt.value || '')).toLowerCase();
+                        return str.includes('online') || str.includes('otdc');
+                    });
 
                 if (cat === 'TDC') {
                     const hasSharedTdc = isOnlineTdc || hasTdcSlot();
