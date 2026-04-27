@@ -14,11 +14,11 @@ const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '';
 const verifyTurnstileToken = async (token, remoteIp) => {
   if (!TURNSTILE_ENABLED) return true;
   if (!TURNSTILE_SECRET_KEY) {
-    console.error('Turnstile enabled but TURNSTILE_SECRET_KEY is missing');
+    console.error('❌ Turnstile enabled but TURNSTILE_SECRET_KEY is missing');
     return false;
   }
   if (!token) {
-    console.warn('Turnstile verification failed: No token provided');
+    console.warn('⚠️ Turnstile verification failed: No token provided');
     return false;
   }
 
@@ -26,15 +26,13 @@ const verifyTurnstileToken = async (token, remoteIp) => {
     const params = new URLSearchParams();
     params.append('secret', TURNSTILE_SECRET_KEY);
     params.append('response', token);
-    if (remoteIp) params.append('remoteip', remoteIp);
-
-    console.log('🔍 Verifying Turnstile token for IP:', remoteIp);
+    // Cloudflare recommends omitting remoteip if you are behind a proxy and not 100% sure of the visitor IP.
+    // Removing it often solves verification failures.
 
     const verifyResponse = await axios.post(
       'https://challenges.cloudflare.com/turnstile/v0/siteverify',
-      params.toString(),
+      params,
       {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         timeout: 5000,
       }
     );
@@ -45,10 +43,14 @@ const verifyTurnstileToken = async (token, remoteIp) => {
       return true;
     } else {
       console.warn('❌ Turnstile verification failed:', result['error-codes'] || 'Unknown error');
+      console.warn('🔍 Response from Cloudflare:', JSON.stringify(result));
       return false;
     }
   } catch (error) {
-    console.error('Turnstile verification error:', error.message);
+    console.error('❌ Turnstile verification error:', error.message);
+    if (error.response) {
+      console.error('🔍 Cloudflare error response:', error.response.data);
+    }
     return false;
   }
 };
