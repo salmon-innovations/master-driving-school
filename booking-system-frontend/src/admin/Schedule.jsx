@@ -888,7 +888,8 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
             setFormData({
                 ...formData,
                 [name]: value,
-                slots: isB1B2Global ? 2 : 15,
+                // Only default slots if they haven't been modified or if it's a new selection
+                slots: formData.slots || (isB1B2Global ? 2 : 15),
                 transmission: transmissions.length > 0 ? (transmissions.includes(formData.transmission) ? formData.transmission : transmissions[0]) : ''
             });
         } else {
@@ -929,7 +930,8 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
             setAutoData({
                 ...autoData,
                 [name]: value,
-                slots: isB1B2Global ? 2 : 15,
+                // Only default slots if they haven't been modified or if it's a new selection
+                slots: autoData.slots || (isB1B2Global ? 2 : 15),
                 transmission: transmissions.length > 0 ? (transmissions.includes(autoData.transmission) ? autoData.transmission : transmissions[0]) : ''
             });
         } else {
@@ -982,9 +984,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                         type: autoData.type,
                         session: autoData.session,
                         time_range: autoData.time,
-                        total_capacity: autoData.type === 'pdc' && isGlobalB1B2Course(autoData.course_type)
-                            ? 2
-                            : parseInt(autoData.slots),
+                        total_capacity: parseInt(autoData.slots) || (autoData.type === 'pdc' && isGlobalB1B2Course(autoData.course_type) ? 2 : 15),
                         branch_id: selectedBranch || null,
                         course_type: autoData.course_type,
                         transmission: autoData.transmission
@@ -1050,9 +1050,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         try {
 
 
-            const baseCapacity = formData.type === 'pdc' && isGlobalB1B2Course(formData.course_type)
-                ? 2
-                : parseInt(formData.slots);
+            const baseCapacity = parseInt(formData.slots) || (formData.type === 'pdc' && isGlobalB1B2Course(formData.course_type) ? 2 : 15);
 
             const slotData = {
                 date: selectedDate,
@@ -2474,7 +2472,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                                     <div className="mini-slot-header">{slot.type?.toLowerCase() === 'tdc' ? 'TDC' : 'PDC'}</div>
                                                     <div className="mini-slot-info">
                                                         <span className="mini-time">{(slot.time_range || slot.time).split(' - ')[0]}</span>
-                                                        <span className="mini-status">{slot.available_slots === 0 ? 'FULL' : `${slot.available_slots} S`}</span>
+                                                        <span className="mini-status">{slot.available_slots === 0 ? 'FULL' : `${slot.available_slots} Slots`}</span>
                                                     </div>
                                                 </div>
                                             ))}
