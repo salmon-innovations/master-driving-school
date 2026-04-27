@@ -156,18 +156,29 @@ app.get('/api/health', (req, res) => {
 
 // Serve static files from the 'dist' directory (if it exists)
 const distPath = path.join(__dirname, 'dist');
+console.log('Serving static files from:', distPath);
 app.use(express.static(distPath));
 
 // Handle SPA routing: serve index.html for all non-API routes
 app.get('{/*path}', (req, res, next) => {
-  // If it's an API route that wasn't found, let the 404 handler take it
+  console.log('Catch-all request:', req.path);
+  
+  // If it's an API route, let the 404 handler take it
   if (req.path.startsWith('/api')) {
     return next();
   }
+
+  // If the path looks like a file (has an extension), don't serve index.html
+  // This allows express.static to handle it or it to fall through to a 404
+  if (req.path.includes('.') && !req.path.endsWith('.html')) {
+    return next();
+  }
+
   // Otherwise, serve the frontend index.html
-  res.sendFile(path.join(distPath, 'index.html'), (err) => {
+  const indexPath = path.join(distPath, 'index.html');
+  res.sendFile(indexPath, (err) => {
     if (err) {
-      // If index.html is missing, fall through to the 404 handler
+      console.error('Error sending index.html:', err.message);
       next();
     }
   });
