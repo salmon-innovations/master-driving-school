@@ -12,21 +12,17 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
   const onErrorRef = useRef(onError)
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY
   const [scale, setScale] = useState(1)
-  const [resetKey, setResetKey] = useState(0)
 
   useImperativeHandle(ref, () => ({
     reset: () => {
       if (window.turnstile && widgetIdRef.current !== null) {
         try {
           window.turnstile.reset(widgetIdRef.current)
+          onVerifyRef.current?.('')
         } catch (e) {
           console.warn('Turnstile reset failed:', e)
+          onVerifyRef.current?.('')
         }
-        onVerifyRef.current?.('') // Clear parent state
-      } else {
-        // If not rendered yet or turnstile not ready, increment key to force re-render
-        setResetKey(prev => prev + 1)
-        onVerifyRef.current?.('')
       }
     }
   }))
@@ -100,7 +96,7 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
         widgetIdRef.current = null
       }
     }
-  }, [siteKey, resetKey])
+  }, [siteKey])
 
   useEffect(() => {
     const baseWidth = 300
@@ -134,13 +130,7 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
   return (
     <div ref={wrapperRef} className={`w-full flex justify-center overflow-hidden ${className}`.trim()}>
       <div style={{ width: '300px', transform: `scale(${scale})`, transformOrigin: 'top center' }}>
-        {/* 
-           We use a key here tied to resetKey to force a fresh div on explicit reset.
-           We avoid the 'cf-turnstile' class name to prevent the Cloudflare script 
-           from trying to perform implicit rendering, which can conflict with our 
-           explicit 'window.turnstile.render' call.
-        */}
-        <div key={resetKey} ref={containerRef} className="turnstile-widget-container" />
+        <div ref={containerRef} className="cf-turnstile" />
       </div>
     </div>
   )
