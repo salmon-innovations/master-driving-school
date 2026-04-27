@@ -2979,7 +2979,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         return formatLocalDate(d);
                     }
                 }
-                return getMinSchedDate(0);
+                return getMinSchedDate(1);
             })();
             const pdcIsHalfDay = promoPdcDay1Session && (
                 promoPdcDay1Session.toLowerCase().includes('morning') ||
