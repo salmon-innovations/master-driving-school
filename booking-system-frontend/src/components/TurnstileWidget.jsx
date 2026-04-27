@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react'
 
 const TURNSTILE_SCRIPT_ID = 'cf-turnstile-script'
 const TURNSTILE_SCRIPT_SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
 
-function TurnstileWidget({ onVerify, onExpire, onError, className = '' }) {
+const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '' }, ref) => {
   const containerRef = useRef(null)
   const wrapperRef = useRef(null)
   const widgetIdRef = useRef(null)
@@ -12,6 +12,19 @@ function TurnstileWidget({ onVerify, onExpire, onError, className = '' }) {
   const onErrorRef = useRef(onError)
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY
   const [scale, setScale] = useState(1)
+  const [resetKey, setResetKey] = useState(0)
+
+  useImperativeHandle(ref, () => ({
+    reset: () => {
+      if (window.turnstile && widgetIdRef.current !== null) {
+        window.turnstile.reset(widgetIdRef.current)
+        onVerifyRef.current?.('') // Clear parent state
+      } else {
+        // If not rendered yet or turnstile not ready, increment key to force re-render
+        setResetKey(prev => prev + 1)
+      }
+    }
+  }))
 
   useEffect(() => {
     onVerifyRef.current = onVerify
@@ -69,7 +82,7 @@ function TurnstileWidget({ onVerify, onExpire, onError, className = '' }) {
         widgetIdRef.current = null
       }
     }
-  }, [siteKey])
+  }, [siteKey, resetKey])
 
   useEffect(() => {
     const baseWidth = 300
@@ -108,5 +121,7 @@ function TurnstileWidget({ onVerify, onExpire, onError, className = '' }) {
     </div>
   )
 }
+
+})
 
 export default TurnstileWidget

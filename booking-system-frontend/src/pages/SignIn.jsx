@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { authAPI, setAuthToken } from '../services/api'
 import { useNotification } from '../context/NotificationContext'
 import TurnstileWidget from '../components/TurnstileWidget'
@@ -15,6 +15,7 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
   const [loading, setLoading] = useState(false)
   const [showTermsModal, setShowTermsModal] = useState(false)
   const [turnstileToken, setTurnstileToken] = useState('')
+  const turnstileRef = useRef(null)
 
   useEffect(() => {
     const userToken = localStorage.getItem('userToken')
@@ -162,6 +163,9 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
         setErrors({ general: error.message || 'Login failed. Please try again.' })
       } finally {
         setLoading(false)
+        // Always reset Turnstile after an attempt (success or failure)
+        // This ensures the user gets a fresh token if they need to try again.
+        turnstileRef.current?.reset()
       }
     } else {
       setErrors(newErrors)
@@ -287,6 +291,7 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
 
             <div className="space-y-2 flex flex-col items-center">
               <TurnstileWidget
+                ref={turnstileRef}
                 onVerify={(token) => {
                   setTurnstileToken(token)
                   if (errors.turnstile) {

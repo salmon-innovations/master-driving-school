@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { authAPI } from '../services/api'
 import { useNotification } from '../context/NotificationContext'
 import { getZipFromAddress } from '../utils/philippineZipCodes'
@@ -51,6 +51,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
   const [turnstileToken, setTurnstileToken] = useState('')
+  const turnstileRef = useRef(null)
   const enrollmentReminder = 'Please make sure all details are correct, as this will be used to process your enrollment.'
 
   const calculateAge = (birthday) => {
@@ -254,6 +255,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
         setErrors({ general: error.message || 'Registration failed. Please try again.' })
       } finally {
         setLoading(false)
+        turnstileRef.current?.reset()
       }
     } else {
       setErrors(newErrors)
@@ -628,6 +630,7 @@ function SignUp({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, preSel
 
                 <div className="space-y-2 flex flex-col items-center mt-4">
                   <TurnstileWidget
+                    ref={turnstileRef}
                     onVerify={(token) => {
                       setTurnstileToken(token)
                       if (errors.turnstile) {
