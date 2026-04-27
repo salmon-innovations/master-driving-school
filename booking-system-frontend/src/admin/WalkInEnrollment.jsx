@@ -811,9 +811,8 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             return grouped;
         })()
         : [];
-    // For Walk-In enrollments, we do NOT lock PDC scheduling even if TDC is Online.
-    // Staff should have full control to book everything immediately.
-    const isPromoOnlineTdcLockedBundle = false;
+    // If the bundle (Promo or Manual) contains an Online TDC, defer PDC scheduling to the branch manager
+    const isPromoOnlineTdcLockedBundle = (isPromo || !!formData.course?._isManualBundle) && isOnlineTdcNoSchedule;
 
     const activePromoPdcCourse = promoPdcCourses.find(c => c._pdcKey === activePromoPdcCourseId) || promoPdcCourses[0] || null;
     const activePromoPdcCourseKey = activePromoPdcCourse?._pdcKey || null;
@@ -2781,9 +2780,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     : 'Select schedules for each of your selected PDC tracks.')
                 : 'Step 1: Select TDC schedule · Step 2: Select promo PDC schedules';
             const pdcDoneCount = promoPdcCourses.filter(c => getIsPromoPdcComplete(c._pdcKey)).length;
-            const allPromoPdcDone = (promoPdcCourses.length > 0)
-                ? pdcDoneCount === promoPdcCourses.length
-                : (isManualPromoBundle ? true : !!formData.scheduleSlotId2);
+            const allPromoPdcDone = (isManualPromoBundle && isOnlineTdcNoSchedule)
+                ? true
+                : (promoPdcCourses.length > 0
+                    ? pdcDoneCount === promoPdcCourses.length
+                    : (isManualPromoBundle ? true : !!formData.scheduleSlotId2));
 
             // TDC slot filtering + month pagination
             const promoTdcFiltered = promoTdcRawSlots.filter(s => {
@@ -3190,7 +3191,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                                 <div className="schedule-banner__title">Online TDC Selected</div>
                                 <div className="schedule-banner__desc">
                                     {promoPdcCourses.length > 0 
-                                        ? 'No branch slot selection is required for Online TDC. Please select schedules for your PDC tracks below.' 
+                                        ? 'No branch slot selection is required for Online TDC. PDC scheduling will be handled by the Branch Manager after the student completes their TDC Online course.' 
                                         : 'No branch slot selection is required for Online TDC. You can proceed directly to enrollment.'}
                                 </div>
                             </div>
