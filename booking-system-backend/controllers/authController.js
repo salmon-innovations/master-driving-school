@@ -32,11 +32,9 @@ const verifyTurnstileToken = async (token, remoteIp) => {
     console.log(`🔍 Verifying Turnstile token (length: ${cleanToken.length}, prefix: ${tokenPrefix}...)`);
 
     // Use explicit string formatting to ensure no library-specific encoding issues
-    // Including remoteip helps Cloudflare prevent abuse and can improve verification accuracy.
-    let body = `secret=${encodeURIComponent(secret)}&response=${encodeURIComponent(cleanToken)}`;
-    if (remoteIp) {
-      body += `&remoteip=${encodeURIComponent(remoteIp)}`;
-    }
+    // Note: We avoid sending remoteip because the backend is behind a proxy (Render),
+    // and an IP mismatch between challenge generation and verification can cause failures.
+    const body = `secret=${encodeURIComponent(secret)}&response=${encodeURIComponent(cleanToken)}`;
 
     const verifyResponse = await axios.post(
       'https://challenges.cloudflare.com/turnstile/v0/siteverify',

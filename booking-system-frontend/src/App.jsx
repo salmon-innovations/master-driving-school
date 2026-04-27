@@ -326,8 +326,8 @@ function App() {
       case 'terms': return <TermsOfUse />
       case 'privacy': return <PrivacyPolicy />
       case 'conditions': return <TermsAndConditions />
-      case 'signin': return <SignIn onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} setPendingVerificationEmail={setPendingVerificationEmail} setLockedAccountEmail={setLockedAccountEmail} />
-      case 'signup': return <SignUp onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} setPendingVerificationEmail={setPendingVerificationEmail} />
+      case 'signin': return <SignIn key={`signin-${isLoggedIn}`} onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} setPendingVerificationEmail={setPendingVerificationEmail} setLockedAccountEmail={setLockedAccountEmail} />
+      case 'signup': return <SignUp key={`signup-${isLoggedIn}`} onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} setPendingVerificationEmail={setPendingVerificationEmail} />
       case 'verify-email': return <VerifyEmail onNavigate={handleNavigation} setIsLoggedIn={setIsLoggedIn} userEmail={pendingVerificationEmail} />
       case 'forgot-password': return <ForgotPassword onNavigate={handleNavigation} />
       case 'lock-account': return <LockAccount onNavigate={handleNavigation} lockedEmail={lockedAccountEmail} />
