@@ -17,13 +17,18 @@ const verifyTurnstileToken = async (token, remoteIp) => {
     console.error('Turnstile enabled but TURNSTILE_SECRET_KEY is missing');
     return false;
   }
-  if (!token) return false;
+  if (!token) {
+    console.warn('Turnstile verification failed: No token provided');
+    return false;
+  }
 
   try {
     const params = new URLSearchParams();
     params.append('secret', TURNSTILE_SECRET_KEY);
     params.append('response', token);
     if (remoteIp) params.append('remoteip', remoteIp);
+
+    console.log('🔍 Verifying Turnstile token for IP:', remoteIp);
 
     const verifyResponse = await axios.post(
       'https://challenges.cloudflare.com/turnstile/v0/siteverify',
@@ -34,7 +39,14 @@ const verifyTurnstileToken = async (token, remoteIp) => {
       }
     );
 
-    return Boolean(verifyResponse.data && verifyResponse.data.success === true);
+    const result = verifyResponse.data;
+    if (result && result.success === true) {
+      console.log('✅ Turnstile verification successful');
+      return true;
+    } else {
+      console.warn('❌ Turnstile verification failed:', result['error-codes'] || 'Unknown error');
+      return false;
+    }
   } catch (error) {
     console.error('Turnstile verification error:', error.message);
     return false;
