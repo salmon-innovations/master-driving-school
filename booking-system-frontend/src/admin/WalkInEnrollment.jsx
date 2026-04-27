@@ -1643,7 +1643,11 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         } else if (sel.length > 1) {
             // Manual bundle selection
             const tdc = sel.find(c => c.category === 'TDC');
-            const pdcs = sel.filter(c => c.category === 'PDC');
+            if (tdc) tdc._pdcKey = 'tdc-track';
+            const pdcs = sel.filter(c => c.category === 'PDC').map((p, idx) => ({
+                ...p,
+                _pdcKey: `pdc-track-${idx + 1}`
+            }));
             
             // Create a virtual "Bundle" course to trigger the multi-track scheduling UI without mixing with Promo logic
             course = {
@@ -1691,6 +1695,18 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             addons: [...DEFAULT_ADDONS],
         }));
         resetScheduleState();
+        
+        // Auto-advance to PDC scheduling (promoStep 2) if no TDC is present in the bundle
+        // OR if Online TDC is selected (which doesn't need branch slot selection)
+        const hasTdc = !!course._tdcCourse || course.category === 'TDC';
+        const isOnline = (course.category === 'TDC' || course.category === 'Promo' || course.category === 'Bundle') && 
+                         (String(course.course_type || '').toLowerCase().includes('online') || 
+                          String(course.name || '').toLowerCase().includes('online'));
+        
+        if (!hasTdc || isOnline) {
+            setPromoStep(2);
+        }
+
         setStep(3);
     };
 
@@ -1738,7 +1754,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 : (selectedTypeOpt?.price || dynamicCourse?.price || 0);
             
             const isOnlineTdcNoSchedule =
-                ['TDC', 'PROMO', 'BUNDLE'].includes(String(formData.course?.category || '').toUpperCase()) &&
+                (['TDC', 'PROMO', 'BUNDLE'].includes(String(formData.course?.category || '').toUpperCase())) &&
                 (String(formData.courseType || '').toLowerCase().includes('online') ||
                     String(formData.courseType || '').toLowerCase().includes('otdc') ||
                     String(formData.promoTdcType || '').toLowerCase().includes('online') ||
@@ -1746,6 +1762,39 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     String(formData.course?.name || '').toLowerCase().includes('otdc') ||
                     String(formData.course?.shortName || '').toLowerCase().includes('otdc'));
             
+            const isPromoPdcLocked = isPromoOnlineTdcLockedBundle;
+            const submitPdcCourses = (isPromo || !!formData.course?._isManualBundle)
+                ? (formData.course?._pdcCourses || [])
+                : [];
+            const hasPromoPdcCourses = (isPromo || !!formData.course?._isManualBundle) && submitPdcCourses.length > 0;
+
+            const tdcCourse = formData.course?._tdcCourse;
+            const tdcKey = tdcCourse?._pdcKey || 'tdc-track';
+            const tdcSel = promoPdcSelections[tdcKey] || null;
+
+            // Final check for required schedules
+            if (!isOnlineTdcNoSchedule) {
+                if (formData.course?.category === 'Bundle') {
+                    const missingSchedules = [];
+                    if (tdcCourse && !tdcSel?.scheduleSlotId) missingSchedules.push('TDC Schedule');
+                    submitPdcCourses.forEach((c, idx) => {
+                        const key = c?._pdcKey || getPromoPdcCourseKey(c);
+                        if (!promoPdcSelections[key]?.scheduleSlotId) {
+                            missingSchedules.push(`${c.shortName || c.name || `PDC Track ${idx + 1}`} Schedule`);
+                        }
+                    });
+                    if (missingSchedules.length > 0) {
+                        showNotification(`Please select a schedule for: ${missingSchedules.join(', ')}`, 'warning');
+                        setLoading(false);
+                        return;
+                    }
+                } else if (!isPromoPdcLocked && !formData.scheduleSlotId) {
+                    showNotification('Please select a schedule for the course.', 'warning');
+                    setLoading(false);
+                    return;
+                }
+            }
+
             const addonsTotal = (formData.addons || []).reduce((sum, a) => sum + (a.price || 0), 0);
             const subtotal = selectedPrice + addonsTotal;
             
@@ -1793,11 +1842,14 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             const enteredAmount = Number(formData.amountPaid || 0);
             const changeAmount = Math.max(0, enteredAmount - totalAmountDue);
             const actualAmountToRecord = Math.max(0, enteredAmount - changeAmount);
-            const isPromoPdcLocked = isPromoOnlineTdcLockedBundle;
-            const submitPdcCourses = formData.course?._isManualBundle
+            const submitPdcCoursesForPromo = (isPromo || !!formData.course?._isManualBundle)
                 ? (formData.course?._pdcCourses || [])
-                : (isPromo ? promoPdcCourses : []);
-            const hasPromoPdcCourses = isPromo && submitPdcCourses.length > 0;
+                : (isPromo ? (promoPdcCourses || []) : []);
+            const hasPromoPdcCoursesForPromo = (isPromo || !!formData.course?._isManualBundle) && submitPdcCoursesForPromo.length > 0;
+
+            const tdcCourseForPromo = formData.course?._tdcCourse;
+            const tdcKeyForPromo = tdcCourseForPromo?._pdcKey || 'tdc-track';
+            const tdcSelForPromo = promoPdcSelections[tdcKeyForPromo] || null;
 
             const enrollmentData = {
                 // Student Info
@@ -1819,7 +1871,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
                 // Course & Branch
                 courseId: formData.course?._isManualBundle
-                    ? formData.course._tdcCourse?.id
+                    ? (formData.course._tdcCourse?.id || formData.course._pdcCourses?.[0]?.id)
                     : formData.course?.id,
                 courseIds: formData.course?._isManualBundle
                     ? [
@@ -1892,43 +1944,30 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                 ...((formData.course?._isManualBundle || hasPromoPdcCourses) ? {
                     pdcCourseId: formData.course._pdcCourse?.id || submitPdcCourses?.[0]?.id,
                     pdcCourseIds: submitPdcCourses.map(c => c.id).filter(Boolean),
-                    promoPdcSchedules: isPromoPdcLocked ? [] : submitPdcCourses.map((course, idx) => {
-                        const key = course?._pdcKey || getPromoPdcCourseKey(course);
-                        const sel = promoPdcSelections[key] || null;
-                        if (!sel?.scheduleSlotId) return null;
-                        const resolvedCourseName = String(sel.courseName || course?.name || course?.shortName || `PDC ${idx + 1}`).trim();
-                        const resolvedCourseType = String(sel.courseTypeDetailed || course?.course_type || sel.courseType || course?._pdcKind || 'PDC').trim();
-                        const resolvedTransmission = sel.transmission || sel.motorType || null;
-                        const transmissionLabel = resolvedTransmission === 'AT'
-                            ? 'Automatic (AT)'
-                            : resolvedTransmission === 'MT'
-                                ? 'Manual (MT)'
-                                : '';
-                        const mergedLower = `${resolvedCourseName} ${resolvedCourseType}`.toLowerCase();
-                        const withType = resolvedCourseType && !mergedLower.includes(resolvedCourseType.toLowerCase())
-                            ? `${resolvedCourseName} (${resolvedCourseType})`
-                            : resolvedCourseName;
-                        const scheduleLabel = sel.courseLabel
-                            || (transmissionLabel && !mergedLower.includes(String(resolvedTransmission || '').toLowerCase())
-                                ? `${withType} - ${transmissionLabel}`
-                                : withType);
-                        return {
-                            courseId: course.id,
-                            label: scheduleLabel,
-                            courseName: resolvedCourseName,
-                            courseType: resolvedCourseType,
-                            courseTypeDetailed: resolvedCourseType,
-                            transmission: resolvedTransmission,
-                            scheduleSlotId: sel.scheduleSlotId,
-                            scheduleDate: sel.scheduleDate,
-                            scheduleSession: sel.scheduleSession2,
-                            scheduleTime: sel.scheduleTime2,
-                            promoPdcSlotId2: sel.promoPdcSlotId2 || null,
-                            promoPdcDate2: sel.promoPdcDate2 || '',
-                            promoPdcSession2: sel.promoPdcSession2 || '',
-                            promoPdcTime2: sel.promoPdcTime2 || '',
-                        };
-                    }).filter(Boolean),
+                    promoPdcSchedules: isPromoPdcLocked ? [] : (() => {
+                        const allTracks = [];
+                        // Add TDC schedule if present in selections
+                        if (tdcSelForPromo?.scheduleSlotId) {
+                            allTracks.push({
+                                ...tdcSelForPromo,
+                                courseId: tdcCourseForPromo?.id,
+                                label: tdcSelForPromo.courseLabel || 'TDC Track'
+                            });
+                        }
+                        // Add PDC schedules
+                        submitPdcCoursesForPromo.forEach((course, idx) => {
+                            const key = course?._pdcKey || getPromoPdcCourseKey(course);
+                            const sel = promoPdcSelections[key] || null;
+                            if (sel?.scheduleSlotId) {
+                                allTracks.push({
+                                    ...sel,
+                                    courseId: course.id,
+                                    label: sel.courseLabel || String(sel.courseName || course?.name || `PDC ${idx + 1}`).trim()
+                                });
+                            }
+                        });
+                        return allTracks;
+                    })(),
                     isManualBundle: !!formData.course?._isManualBundle,
                 } : {}),
 
