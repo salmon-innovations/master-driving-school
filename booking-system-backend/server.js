@@ -159,7 +159,7 @@ const distPath = path.join(__dirname, 'dist');
 app.use(express.static(distPath));
 
 // Handle SPA routing: serve index.html for all non-API routes
-app.get('(.*)', (req, res, next) => {
+app.get('/:path*', (req, res, next) => {
   // If it's an API route that wasn't found, let the 404 handler take it
   if (req.path.startsWith('/api')) {
     return next();
