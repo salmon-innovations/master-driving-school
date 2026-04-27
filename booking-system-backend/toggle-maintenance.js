@@ -7,7 +7,7 @@ const rl = readline.createInterface({
   output: process.stdout
 });
 
-const backendDir = path.join(__dirname, 'booking-system-backend');
+const backendDir = __dirname;
 const maintenanceFile = path.join(backendDir, '.maintenance');
 
 console.log('==============================================');
