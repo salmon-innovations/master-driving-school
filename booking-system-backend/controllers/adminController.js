@@ -1477,15 +1477,18 @@ const walkInEnrollment = async (req, res) => {
     const scope = await getUserBranchScope(req.user);
 
     // Validate required fields
-    if (!firstName || !lastName || !email || !courseId || !parsedBranchId || (!isOnlineTdcNoSchedule && (!scheduleSlotId || !scheduleDate))) {
+    const isBundle = categoryNorm === 'BUNDLE' || categoryNorm === 'MIXED' || (Array.isArray(courseIds) && courseIds.length > 1) || (Array.isArray(promoPdcSchedules) && promoPdcSchedules.length > 0);
+    const hasAnyScheduleInPromo = Array.isArray(promoPdcSchedules) && promoPdcSchedules.some(s => s?.scheduleSlotId);
+
+    if (!firstName || !lastName || !email || (!courseId && !courseIds) || !parsedBranchId || (!isOnlineTdcNoSchedule && !hasAnyScheduleInPromo && (!scheduleSlotId || !scheduleDate))) {
       const missing = [];
       if (!firstName) missing.push('firstName');
       if (!lastName) missing.push('lastName');
       if (!email) missing.push('email');
-      if (!courseId) missing.push('courseId');
+      if (!courseId && !courseIds) missing.push('courseId');
       if (!parsedBranchId) missing.push('branchId');
-      if (!isOnlineTdcNoSchedule && !scheduleSlotId) missing.push('scheduleSlotId');
-      if (!isOnlineTdcNoSchedule && !scheduleDate) missing.push('scheduleDate');
+      if (!isOnlineTdcNoSchedule && !hasAnyScheduleInPromo && !scheduleSlotId) missing.push('scheduleSlotId');
+      if (!isOnlineTdcNoSchedule && !hasAnyScheduleInPromo && !scheduleDate) missing.push('scheduleDate');
       return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
     }
 
