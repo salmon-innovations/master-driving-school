@@ -102,6 +102,7 @@ app.use(cors({
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false, // Disable CSP to prevent blocking Turnstile and assets
 }));
 // Compress all responses ≥ 1 KB — important on Render's shared network
 app.use(compression({ threshold: 1024 }));
