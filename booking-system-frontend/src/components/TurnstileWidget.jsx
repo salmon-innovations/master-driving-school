@@ -12,18 +12,13 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
   const onErrorRef = useRef(onError)
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY
   const [scale, setScale] = useState(1)
+  const [resetKey, setResetKey] = useState(0)
 
   useImperativeHandle(ref, () => ({
     reset: () => {
-      if (window.turnstile && widgetIdRef.current !== null) {
-        try {
-          window.turnstile.reset(widgetIdRef.current)
-          onVerifyRef.current?.('')
-        } catch (e) {
-          console.warn('Turnstile reset failed:', e)
-          onVerifyRef.current?.('')
-        }
-      }
+      // Incrementing resetKey will trigger the useEffect to unmount and remount the widget
+      setResetKey(prev => prev + 1)
+      onVerifyRef.current?.('')
     }
   }))
 
@@ -96,7 +91,7 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
         widgetIdRef.current = null
       }
     }
-  }, [siteKey])
+  }, [siteKey, resetKey])
 
   useEffect(() => {
     const baseWidth = 300
@@ -130,7 +125,7 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
   return (
     <div ref={wrapperRef} className={`w-full flex justify-center overflow-hidden ${className}`.trim()}>
       <div style={{ width: '300px', transform: `scale(${scale})`, transformOrigin: 'top center' }}>
-        <div ref={containerRef} className="cf-turnstile" />
+        <div key={resetKey} ref={containerRef} className="cf-turnstile" />
       </div>
     </div>
   )

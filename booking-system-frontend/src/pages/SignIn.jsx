@@ -76,12 +76,16 @@ function SignIn({ onNavigate, setIsLoggedIn, setPendingVerificationEmail, setLoc
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (loading) return
+
     const newErrors = validateForm()
 
     if (Object.keys(newErrors).length === 0) {
       setLoading(true)
       try {
         // Call the real API
+        console.log(`🔐 Submitting login for ${formData.email} with token: ${turnstileToken.substring(0, 10)}...`)
+
         const response = await authAPI.login({
           email: formData.email,
           password: btoa(unescape(encodeURIComponent(formData.password))),
