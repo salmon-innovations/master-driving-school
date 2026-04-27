@@ -811,8 +811,9 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
             return grouped;
         })()
         : [];
-    // If the bundle (Promo or Manual) contains an Online TDC, defer PDC scheduling to the branch manager
-    const isPromoOnlineTdcLockedBundle = (isPromo || !!formData.course?._isManualBundle) && isOnlineTdcNoSchedule;
+    // For Walk-In enrollments, we do NOT lock PDC scheduling even if TDC is Online.
+    // Staff should have full control to book everything immediately.
+    const isPromoOnlineTdcLockedBundle = false;
 
     const activePromoPdcCourse = promoPdcCourses.find(c => c._pdcKey === activePromoPdcCourseId) || promoPdcCourses[0] || null;
     const activePromoPdcCourseKey = activePromoPdcCourse?._pdcKey || null;
