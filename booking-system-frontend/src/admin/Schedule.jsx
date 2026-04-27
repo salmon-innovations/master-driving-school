@@ -670,7 +670,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         time: '08:00 AM - 05:00 PM', // Default for Whole Day
         session: 'Whole Day',
         slots: 15,
-        course_type: '',
+        course_type: 'F2F',
         transmission: ''
     });
 
@@ -679,7 +679,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         endDate: '',
         daysOfWeek: [1, 2, 3, 4, 5, 6], // Default Mon-Sat
         type: 'tdc',
-        course_type: '',
+        course_type: 'F2F',
         transmission: '',
         session: 'Whole Day',
         time: '08:00 AM - 05:00 PM',
@@ -877,7 +877,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
         } else if (name === 'type') {
             if (value === 'tdc') {
                 // TDC is always Whole Day — force it
-                setFormData({ ...formData, [name]: value, session: 'Whole Day', time: '08:00 AM - 05:00 PM', course_type: '', transmission: '', slots: 15 });
+                setFormData({ ...formData, [name]: value, session: 'Whole Day', time: '08:00 AM - 05:00 PM', course_type: 'F2F', transmission: '', slots: 15 });
             } else {
                 // PDC: clear session so user MUST explicitly pick Morning/Afternoon/Whole Day
                 setFormData({ ...formData, [name]: value, session: '', time: '', course_type: '', transmission: '' });
@@ -919,7 +919,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
             setAutoData({ ...autoData, [name]: value, time: autoTime });
         } else if (name === 'type') {
             if (value === 'tdc') {
-                setAutoData({ ...autoData, [name]: value, session: 'Whole Day', time: '08:00 AM - 05:00 PM', course_type: '', transmission: '', slots: 15 });
+                setAutoData({ ...autoData, [name]: value, session: 'Whole Day', time: '08:00 AM - 05:00 PM', course_type: 'F2F', transmission: '', slots: 15 });
             } else {
                 setAutoData({ ...autoData, [name]: value, session: '', time: '', course_type: '', transmission: '' });
             }
@@ -2824,7 +2824,6 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                             {formData.type === 'tdc' ? (
                                                 <>
                                                     <option value="F2F">Face-to-Face (F2F)</option>
-                                                    <option value="Online">Online (OTDC)</option>
                                                 </>
                                             ) : (
                                                 courses.filter(c => c.category?.toLowerCase() === formData.type).map(c => (
@@ -3425,7 +3424,6 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                             {autoData.type === 'tdc' ? (
                                                 <>
                                                     <option value="F2F">Face-to-Face (F2F)</option>
-                                                    <option value="Online">Online (OTDC)</option>
                                                 </>
                                             ) : (
                                                 courses.filter(c => c.category?.toLowerCase() === autoData.type).map(c => (
