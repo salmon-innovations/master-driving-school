@@ -1774,12 +1774,15 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
 
             // Final check for required schedules
             if (!isOnlineTdcNoSchedule) {
-                if (formData.course?.category === 'Bundle') {
+                if (formData.course?.category === 'Bundle' || formData.course?.category === 'Promo') {
                     const missingSchedules = [];
-                    if (tdcCourse && !tdcSel?.scheduleSlotId) missingSchedules.push('TDC Schedule');
+                    if (tdcCourse && !tdcSel?.scheduleSlotId && !tdcSel?.scheduleDate) {
+                         missingSchedules.push('TDC Schedule');
+                    }
                     submitPdcCourses.forEach((c, idx) => {
                         const key = c?._pdcKey || getPromoPdcCourseKey(c);
-                        if (!promoPdcSelections[key]?.scheduleSlotId) {
+                        const sel = promoPdcSelections[key];
+                        if (!sel?.scheduleSlotId && !sel?.scheduleDate) {
                             missingSchedules.push(`${c.shortName || c.name || `PDC Track ${idx + 1}`} Schedule`);
                         }
                     });
@@ -1788,7 +1791,7 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                         setLoading(false);
                         return;
                     }
-                } else if (!isPromoPdcLocked && !formData.scheduleSlotId) {
+                } else if (!isPromoPdcLocked && !formData.scheduleSlotId && !formData.scheduleDate) {
                     showNotification('Please select a schedule for the course.', 'warning');
                     setLoading(false);
                     return;
@@ -4687,14 +4690,15 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
         const totalAmount = Math.max(0, Number((embeddedSubtotal - promoDiscount).toFixed(2)));
         const balanceDue = Math.max(0, Number((totalAmount - (Number(formData.amountPaid) || 0)).toFixed(2)));
 
+        const hasTdcInBundle = !!formData.course?._tdcCourse || formData.course?.category === 'TDC';
         const promoPdcSummaryCount = (formData.course?._pdcCourses && formData.course._pdcCourses.length > 0)
             ? formData.course._pdcCourses.length
             : (formData.course?._pdcCourse ? 1 : 0);
         let courseTypeDisplay = '';
         if (isPromo) {
-            const tdcDisplay = promoTdcType === 'F2F' ? 'TDC F2F' : `TDC ${promoTdcType || 'F2F'}`;
+            const tdcDisplay = hasTdcInBundle ? (promoTdcType === 'F2F' ? 'TDC F2F' : `TDC ${promoTdcType || 'F2F'}`) : '';
             const pdcDisplay = `${promoPdcSummaryCount || 1} PDC course${(promoPdcSummaryCount || 1) > 1 ? 's' : ''}`;
-            courseTypeDisplay = `${tdcDisplay} + ${pdcDisplay}`;
+            courseTypeDisplay = tdcDisplay ? `${tdcDisplay} + ${pdcDisplay}` : pdcDisplay;
         } else if (selectedTypeOpt) {
             courseTypeDisplay = selectedTypeOpt.label;
         }
@@ -4766,18 +4770,22 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                             <>
                                 <>
                                     {/* TDC schedule */}
-                                    <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 1:</p>
-                                    <p><strong>Date:</strong> {fmtDate(promoTdcDay1Date)}</p>
-                                    <p><strong>Session:</strong> {promoTdcSession}</p>
-                                    <p><strong>Time:</strong> {promoTdcTime}</p>
-
-                                    {promoTdcDay2Date && (
+                                    {hasTdcInBundle && (
                                         <>
-                                            <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
-                                            <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 2:</p>
-                                            <p><strong>Date:</strong> {fmtDate(promoTdcDay2Date)}</p>
+                                            <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 1:</p>
+                                            <p><strong>Date:</strong> {fmtDate(promoTdcDay1Date)}</p>
                                             <p><strong>Session:</strong> {promoTdcSession}</p>
                                             <p><strong>Time:</strong> {promoTdcTime}</p>
+
+                                            {promoTdcDay2Date && (
+                                                <>
+                                                    <div style={{ borderTop: '1px solid var(--border-color)', margin: '10px 0' }} />
+                                                    <p style={{ fontWeight: '700', color: 'var(--primary-color)', marginBottom: '4px', fontSize: '0.85rem' }}>TDC — Day 2:</p>
+                                                    <p><strong>Date:</strong> {fmtDate(promoTdcDay2Date)}</p>
+                                                    <p><strong>Session:</strong> {promoTdcSession}</p>
+                                                    <p><strong>Time:</strong> {promoTdcTime}</p>
+                                                </>
+                                            )}
                                         </>
                                     )}
                                 </>
