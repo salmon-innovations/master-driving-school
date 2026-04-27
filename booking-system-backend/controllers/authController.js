@@ -13,26 +13,36 @@ const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '';
 
 const verifyTurnstileToken = async (token, remoteIp) => {
   if (!TURNSTILE_ENABLED) return true;
-  if (!TURNSTILE_SECRET_KEY) {
-    console.error('❌ Turnstile enabled but TURNSTILE_SECRET_KEY is missing');
+  
+  const secret = String(TURNSTILE_SECRET_KEY || '').trim();
+  if (!secret) {
+    console.error('❌ Turnstile enabled but TURNSTILE_SECRET_KEY is missing or empty');
     return false;
   }
-  if (!token) {
+
+  const cleanToken = String(token || '').trim();
+  if (!cleanToken) {
     console.warn('⚠️ Turnstile verification failed: No token provided');
     return false;
   }
 
   try {
-    const params = new URLSearchParams();
-    params.append('secret', TURNSTILE_SECRET_KEY);
-    params.append('response', token);
-    // Cloudflare recommends omitting remoteip if you are behind a proxy and not 100% sure of the visitor IP.
-    // Removing it often solves verification failures.
+    // Log token length and prefix for debugging (tokens are usually very long)
+    const tokenPrefix = cleanToken.substring(0, 10);
+    console.log(`🔍 Verifying Turnstile token (length: ${cleanToken.length}, prefix: ${tokenPrefix}...)`);
+
+    // Use explicit string formatting to ensure no library-specific encoding issues
+    // Including remoteip helps Cloudflare prevent abuse and can improve verification accuracy.
+    let body = `secret=${encodeURIComponent(secret)}&response=${encodeURIComponent(cleanToken)}`;
+    if (remoteIp) {
+      body += `&remoteip=${encodeURIComponent(remoteIp)}`;
+    }
 
     const verifyResponse = await axios.post(
       'https://challenges.cloudflare.com/turnstile/v0/siteverify',
-      params,
+      body,
       {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         timeout: 5000,
       }
     );
@@ -49,7 +59,7 @@ const verifyTurnstileToken = async (token, remoteIp) => {
   } catch (error) {
     console.error('❌ Turnstile verification error:', error.message);
     if (error.response) {
-      console.error('🔍 Cloudflare error response:', error.response.data);
+      console.error('🔍 Cloudflare error response:', JSON.stringify(error.response.data));
     }
     return false;
   }

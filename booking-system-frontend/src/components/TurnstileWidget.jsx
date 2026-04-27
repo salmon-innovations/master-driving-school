@@ -17,11 +17,16 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
   useImperativeHandle(ref, () => ({
     reset: () => {
       if (window.turnstile && widgetIdRef.current !== null) {
-        window.turnstile.reset(widgetIdRef.current)
+        try {
+          window.turnstile.reset(widgetIdRef.current)
+        } catch (e) {
+          console.warn('Turnstile reset failed:', e)
+        }
         onVerifyRef.current?.('') // Clear parent state
       } else {
         // If not rendered yet or turnstile not ready, increment key to force re-render
         setResetKey(prev => prev + 1)
+        onVerifyRef.current?.('')
       }
     }
   }))
@@ -37,17 +42,26 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
 
     const renderWidget = () => {
       if (!window.turnstile || !containerRef.current || widgetIdRef.current !== null) return
-      widgetIdRef.current = window.turnstile.render(containerRef.current, {
-        sitekey: siteKey,
-        theme: 'light',
-        callback: (token) => onVerifyRef.current?.(token),
-        'expired-callback': () => {
-          onExpireRef.current?.()
-        },
-        'error-callback': () => {
-          onErrorRef.current?.()
-        },
-      })
+      
+      try {
+        widgetIdRef.current = window.turnstile.render(containerRef.current, {
+          sitekey: siteKey,
+          theme: 'light',
+          callback: (token) => {
+            onVerifyRef.current?.(token)
+          },
+          'expired-callback': () => {
+            onVerifyRef.current?.('')
+            onExpireRef.current?.()
+          },
+          'error-callback': () => {
+            onVerifyRef.current?.('')
+            onErrorRef.current?.()
+          },
+        })
+      } catch (err) {
+        console.error('Failed to render Turnstile:', err)
+      }
     }
 
     const existingScript = document.getElementById(TURNSTILE_SCRIPT_ID)
@@ -61,7 +75,9 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
       return () => {
         existingScript.removeEventListener('load', renderWidget)
         if (window.turnstile && widgetIdRef.current !== null) {
-          window.turnstile.remove(widgetIdRef.current)
+          try {
+            window.turnstile.remove(widgetIdRef.current)
+          } catch (e) {}
           widgetIdRef.current = null
         }
       }
@@ -78,7 +94,9 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
     return () => {
       script.removeEventListener('load', renderWidget)
       if (window.turnstile && widgetIdRef.current !== null) {
-        window.turnstile.remove(widgetIdRef.current)
+        try {
+          window.turnstile.remove(widgetIdRef.current)
+        } catch (e) {}
         widgetIdRef.current = null
       }
     }
@@ -116,7 +134,13 @@ const TurnstileWidget = forwardRef(({ onVerify, onExpire, onError, className = '
   return (
     <div ref={wrapperRef} className={`w-full flex justify-center overflow-hidden ${className}`.trim()}>
       <div style={{ width: '300px', transform: `scale(${scale})`, transformOrigin: 'top center' }}>
-        <div ref={containerRef} className="cf-turnstile" />
+        {/* 
+           We use a key here tied to resetKey to force a fresh div on explicit reset.
+           We avoid the 'cf-turnstile' class name to prevent the Cloudflare script 
+           from trying to perform implicit rendering, which can conflict with our 
+           explicit 'window.turnstile.render' call.
+        */}
+        <div key={resetKey} ref={containerRef} className="turnstile-widget-container" />
       </div>
     </div>
   )
