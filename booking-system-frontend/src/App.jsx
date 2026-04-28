@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react'
 import AOS from 'aos'
 import 'aos/dist/aos.css'
-import { authAPI, branchesAPI } from './services/api'
+import { authAPI, branchesAPI, MEDIA_BASE_URL } from './services/api'
 import Header from './components/Header'
 import Footer from './components/Footer'
 import Cart from './components/Cart'
@@ -224,26 +224,23 @@ function App() {
   }, [])
 
   useEffect(() => {
-    // Check health endpoint and update maintenance flag in both directions
+    // Use the same base URL that api.js already resolved correctly (handles localhost vs production)
+    const healthUrl = `${MEDIA_BASE_URL}/api/health`;
+
     const checkHealth = async () => {
       try {
-        const primaryUrl = `${window.location.origin}/api/health`.replace('3000', '5000').replace('5173', '5000');
-        const res = await fetch(primaryUrl, { cache: 'no-store' });
+        const res = await fetch(healthUrl, { cache: 'no-store' });
         const data = await res.json();
         setIsMaintenance(!!(data && data.maintenance));
-      } catch {
-        try {
-          const fallbackUrl = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/$/, '') + '/health';
-          const res = await fetch(fallbackUrl, { cache: 'no-store' });
-          const data = await res.json();
-          setIsMaintenance(!!(data && data.maintenance));
-        } catch { /* network error — keep current state */ }
+      } catch (err) {
+        // Network error — keep current state, don't flip maintenance off
+        console.warn('[Maintenance] Health check failed:', err.message);
       }
     };
 
     checkHealth();
-    // Poll every 30 seconds to auto-detect on/off transitions
-    const pollInterval = setInterval(checkHealth, 30_000);
+    // Poll every 5 seconds so maintenance turns on/off almost instantly
+    const pollInterval = setInterval(checkHealth, 5_000);
 
     // Also react immediately to the event fired by the API interceptor in api.js
     const handleMaintenanceEvent = () => setIsMaintenance(true);
