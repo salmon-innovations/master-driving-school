@@ -224,28 +224,35 @@ function App() {
   }, [])
 
   useEffect(() => {
-    // Initial health check
+    // Check health endpoint and update maintenance flag in both directions
     const checkHealth = async () => {
       try {
-        const res = await fetch(`${window.location.origin}/api/health`.replace('3000', '5000').replace('5173', '5000'));
+        const primaryUrl = `${window.location.origin}/api/health`.replace('3000', '5000').replace('5173', '5000');
+        const res = await fetch(primaryUrl, { cache: 'no-store' });
         const data = await res.json();
-        if (data && data.maintenance) setIsMaintenance(true);
-      } catch (err) {
-        // fallback to standard API url if origin/api fails
+        setIsMaintenance(!!(data && data.maintenance));
+      } catch {
         try {
           const fallbackUrl = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/$/, '') + '/health';
-          const res = await fetch(fallbackUrl);
+          const res = await fetch(fallbackUrl, { cache: 'no-store' });
           const data = await res.json();
-          if (data && data.maintenance) setIsMaintenance(true);
-        } catch (e) {}
+          setIsMaintenance(!!(data && data.maintenance));
+        } catch { /* network error — keep current state */ }
       }
     };
-    checkHealth();
 
-    // Listen for the global event from api.js interceptor
+    checkHealth();
+    // Poll every 30 seconds to auto-detect on/off transitions
+    const pollInterval = setInterval(checkHealth, 30_000);
+
+    // Also react immediately to the event fired by the API interceptor in api.js
     const handleMaintenanceEvent = () => setIsMaintenance(true);
     window.addEventListener('maintenance-mode', handleMaintenanceEvent);
-    return () => window.removeEventListener('maintenance-mode', handleMaintenanceEvent);
+
+    return () => {
+      clearInterval(pollInterval);
+      window.removeEventListener('maintenance-mode', handleMaintenanceEvent);
+    };
   }, []);
 
   useEffect(() => {
@@ -373,17 +380,6 @@ function App() {
 
   const isAuthPage = ['signin', 'signup', 'verify-email', 'forgot-password', 'lock-account', 'admin'].includes(currentPage)
 
-  if (isMaintenance) {
-    return (
-      <Suspense fallback={
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-        </div>
-      }>
-        <MaintenancePage />
-      </Suspense>
-    );
-  }
 
   return (
     <SimpleErrorBoundary>
@@ -424,6 +420,12 @@ function App() {
         </div>
       </NotificationProvider>
     </ThemeProvider>
+    {/* Maintenance overlay — sits on top of everything; app state is preserved underneath */}
+    {isMaintenance && (
+      <Suspense fallback={null}>
+        <MaintenancePage />
+      </Suspense>
+    )}
     </SimpleErrorBoundary>
   )
 }
