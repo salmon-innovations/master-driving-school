@@ -290,14 +290,15 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
     }, []);
 
     useEffect(() => {
-        if (adminProfile?.branchId && !formData.branchId) {
+        // For branch managers: always enforce their assigned branch, ignoring stale session cache
+        if (adminProfile?.rawRole === 'admin' && adminProfile?.branchId) {
             setFormData(prev => ({
                 ...prev,
                 branchId: String(adminProfile.branchId),
                 branchName: adminProfile.branch || ''
             }));
         }
-    }, [adminProfile, formData.branchId]);
+    }, [adminProfile]);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -315,15 +316,13 @@ const WalkInEnrollment = ({ onEnroll, adminProfile }) => {
                     if (adminProfile?.rawRole === 'admin' && adminProfile?.branchId) {
                         const userBranch = branchResponse.branches.find(b => b.id === adminProfile.branchId);
                         if (userBranch) {
-                            setFormData(prev => {
-                                if (prev.branchId) return prev; // Keep existing saved branch
-                                return {
-                                    ...prev,
-                                    branchId: String(userBranch.id),
-                                    branchName: userBranch.name,
-                                    zipCode: prev.zipCode || getZipForBranch(userBranch.name)
-                                };
-                            });
+                            // Always force the manager's own branch — never trust sessionStorage for this
+                            setFormData(prev => ({
+                                ...prev,
+                                branchId: String(userBranch.id),
+                                branchName: userBranch.name,
+                                zipCode: prev.zipCode || getZipForBranch(userBranch.name)
+                            }));
                         }
                     } else if (branchResponse.branches.length > 0) {
                         setFormData(prev => {
