@@ -1704,20 +1704,15 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                         </span>
                         <span className="tab-label">TDC Online</span>
-                        {(() => {
-                            const badgeCount = tdcOnlineStudents.data.filter(s => {
-                                try { return !(s.notes ? JSON.parse(s.notes) : {}).tdcOnlineOnboarded; } catch(e) { return true }
-                            }).length;
-                            return !tdcOnlineStudents.loading && badgeCount > 0 ? (
-                                <span style={{
-                                    marginLeft: '6px',
-                                    background: scheduleView === 'tdc_online' ? 'var(--primary-color, #1a56db)' : '#e0e7ff',
-                                    color: scheduleView === 'tdc_online' ? '#fff' : 'var(--primary-color, #1a56db)',
-                                    borderRadius: '20px', padding: '1px 8px',
-                                    fontSize: '0.72rem', fontWeight: 700, lineHeight: '1.5',
-                                }}>{badgeCount}</span>
-                            ) : null;
-                        })()}
+                        {!tdcOnlineStudents.loading && tdcOnlineStudents.data.length > 0 && (
+                            <span style={{
+                                marginLeft: '6px',
+                                background: scheduleView === 'tdc_online' ? 'var(--primary-color, #1a56db)' : '#e0e7ff',
+                                color: scheduleView === 'tdc_online' ? '#fff' : 'var(--primary-color, #1a56db)',
+                                borderRadius: '20px', padding: '1px 8px',
+                                fontSize: '0.72rem', fontWeight: 700, lineHeight: '1.5',
+                            }}>{tdcOnlineStudents.data.length}</span>
+                        )}
                     </button>
                 )}
                 {canAccessScheduleTab('pdc_scheduling') && (
@@ -2024,7 +2019,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                                 {row.created_at ? new Date(row.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
                                             </td>
                                             <td style={{ fontSize: '0.82rem' }}>{row.branch_name || '—'}</td>
-                                            <td>
+                                             <td>
                                                 <span className={`status-badge ${String(row.booking_status || '').toLowerCase() === 'completed' ? 'full' : 'down'}`}>
                                                     {String(row.booking_status || '').toLowerCase() === 'completed' ? 'Completed' : 'In Progress'}
                                                 </span>
@@ -2049,6 +2044,7 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                                             name: row.student_name,
                                                             email: row.email,
                                                             contact: row.contact_numbers,
+                                                            notes: row.notes,
                                                         })}
                                                         style={{
                                                             background: 'var(--primary-color, #1a56db)', color: '#fff',
@@ -4099,6 +4095,18 @@ const Schedule = ({ onNavigate, currentUserPermissions = [], currentUserRole = '
                                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                                                  Mark Done
                                              </button>
+                                         )}
+
+                                         {isTdcOnline && isOnboarded && (
+                                             <div style={{
+                                                 display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                 padding: '7px 16px', borderRadius: '8px',
+                                                 background: '#f0fdf4', color: '#166534',
+                                                 fontSize: '0.82rem', fontWeight: 700, border: '1px solid #bbf7d0'
+                                             }}>
+                                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                 Provider Register Done
+                                             </div>
                                          )}
 
                                          {!isNoShow && (

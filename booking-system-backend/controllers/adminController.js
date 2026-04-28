@@ -3110,22 +3110,26 @@ const getNotifications = async (req, res) => {
         b.created_at AS time,
         -- Determine notification category
         CASE
-          WHEN b.notes IS NOT NULL AND b.notes ~ '^\\{'
-            AND (b.notes::jsonb->>'rescheduled') = 'true'
-          THEN 'reschedule'
-          WHEN LOWER(COALESCE(b.status, '')) <> 'completed'
-            AND b.notes IS NOT NULL AND b.notes ~ '^\\{'
-            AND (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true'
+          WHEN LOWER(COALESCE(b.status, '')) NOT IN ('completed', 'cancelled')
             AND (
-              (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
-              OR (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
-            )
-            OR (
-              LOWER(COALESCE(b.status, '')) <> 'completed'
-              AND (b.notes IS NULL OR b.notes !~ '^\\{' OR (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true')
-              AND (
-              LOWER(COALESCE(c.category, '')) = 'tdc'
-              AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
+              (
+                b.notes IS NOT NULL AND b.notes ~ '^\\{'
+                AND (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true'
+                AND (
+                  (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
+                  OR (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
+                  OR EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(COALESCE(b.notes::jsonb->'courseList', '[]'::jsonb)) AS cl(item)
+                    WHERE LOWER(COALESCE(cl.item->>'category', '')) = 'tdc'
+                      AND LOWER(COALESCE(cl.item->>'type', '')) LIKE '%online%'
+                  )
+                )
+              )
+              OR (
+                (b.notes IS NULL OR b.notes !~ '^\\{' OR (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true')
+                AND LOWER(COALESCE(c.category, '')) = 'tdc'
+                AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
               )
             )
           THEN 'online_tdc_account_setup'
@@ -3141,22 +3145,30 @@ const getNotifications = async (req, res) => {
 
         -- Dynamic title
         CASE
-          WHEN b.notes IS NOT NULL AND b.notes ~ '^\\{'
+          WHEN LOWER(COALESCE(b.status, '')) NOT IN ('completed', 'cancelled')
+            AND b.notes IS NOT NULL AND b.notes ~ '^\\{'
             AND (b.notes::jsonb->>'rescheduled') = 'true'
           THEN 'Reschedule Request'
-          WHEN LOWER(COALESCE(b.status, '')) <> 'completed'
-            AND b.notes IS NOT NULL AND b.notes ~ '^\\{'
-            AND (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true'
+          WHEN LOWER(COALESCE(b.status, '')) NOT IN ('completed', 'cancelled')
             AND (
-              (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
-              OR (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
-            )
-            OR (
-              LOWER(COALESCE(b.status, '')) <> 'completed'
-              AND (b.notes IS NULL OR b.notes !~ '^\\{' OR (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true')
-              AND (
-              LOWER(COALESCE(c.category, '')) = 'tdc'
-              AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
+              (
+                b.notes IS NOT NULL AND b.notes ~ '^\\{'
+                AND (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true'
+                AND (
+                  (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
+                  OR (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
+                  OR EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(COALESCE(b.notes::jsonb->'courseList', '[]'::jsonb)) AS cl(item)
+                    WHERE LOWER(COALESCE(cl.item->>'category', '')) = 'tdc'
+                      AND LOWER(COALESCE(cl.item->>'type', '')) LIKE '%online%'
+                  )
+                )
+              )
+              OR (
+                (b.notes IS NULL OR b.notes !~ '^\\{' OR (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true')
+                AND LOWER(COALESCE(c.category, '')) = 'tdc'
+                AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
               )
             )
           THEN 'Online TDC Account Setup Needed'
@@ -3172,25 +3184,33 @@ const getNotifications = async (req, res) => {
 
         -- Dynamic message
         CASE
-          WHEN b.notes IS NOT NULL AND b.notes ~ '^\\{'
+          WHEN LOWER(COALESCE(b.status, '')) NOT IN ('completed', 'cancelled')
+            AND b.notes IS NOT NULL AND b.notes ~ '^\\{'
             AND (b.notes::jsonb->>'rescheduled') = 'true'
           THEN u.first_name || ' ' || u.last_name
             || ' requested a reschedule for '
             || COALESCE(c.name, 'a course')
             || ' at ' || COALESCE(br.name, 'branch')
-          WHEN LOWER(COALESCE(b.status, '')) <> 'completed'
-            AND b.notes IS NOT NULL AND b.notes ~ '^\\{'
-            AND (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true'
+          WHEN LOWER(COALESCE(b.status, '')) NOT IN ('completed', 'cancelled')
             AND (
-              (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
-              OR (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
-            )
-            OR (
-              LOWER(COALESCE(b.status, '')) <> 'completed'
-              AND (b.notes IS NULL OR b.notes !~ '^\\{' OR (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true')
-              AND (
-              LOWER(COALESCE(c.category, '')) = 'tdc'
-              AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
+              (
+                b.notes IS NOT NULL AND b.notes ~ '^\\{'
+                AND (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true'
+                AND (
+                  (b.notes::jsonb->>'isOnlineTdcNoSchedule') = 'true'
+                  OR (b.notes::jsonb->>'pdcScheduleLockedUntilCompletion') = 'true'
+                  OR EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(COALESCE(b.notes::jsonb->'courseList', '[]'::jsonb)) AS cl(item)
+                    WHERE LOWER(COALESCE(cl.item->>'category', '')) = 'tdc'
+                      AND LOWER(COALESCE(cl.item->>'type', '')) LIKE '%online%'
+                  )
+                )
+              )
+              OR (
+                (b.notes IS NULL OR b.notes !~ '^\\{' OR (b.notes::jsonb->>'tdcOnlineOnboarded') IS DISTINCT FROM 'true')
+                AND LOWER(COALESCE(c.category, '')) = 'tdc'
+                AND LOWER(COALESCE(b.course_type, '')) LIKE '%online%'
               )
             )
           THEN 'Student ' || u.first_name || ' ' || u.last_name
@@ -3220,7 +3240,7 @@ const getNotifications = async (req, res) => {
       JOIN users u ON b.user_id = u.id
       LEFT JOIN courses c ON b.course_id = c.id
       LEFT JOIN branches br ON b.branch_id = br.id
-      WHERE b.status IN ('paid', 'partial_payment', 'confirmed', 'completed')
+      WHERE b.status IN ('paid', 'partial_payment', 'confirmed', 'completed', 'enrolled', 'in-progress', 'pending')
         ${branchCondition}
       ORDER BY b.created_at DESC
       LIMIT 50
